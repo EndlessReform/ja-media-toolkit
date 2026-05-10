@@ -1,0 +1,6 @@
+[project]
+name = "ja-media-core"
+version = "0.1.0"
+description = "Shared types, config, manifests, job/result contracts"
+requires-python = ">=3.13"
+dependencies = []

@@ -1,0 +1,11 @@
+[project]
+name = "ja-media-toolkit"
+version = "0.1.0"
+description = "Japanese media organization and transcription tools"
+readme = "README.md"
+requires-python = ">=3.13"
+
+[tool.uv.workspace]
+members = [
+  "packages/*",
+]

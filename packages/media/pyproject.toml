@@ -1,0 +1,6 @@
+[project]
+name = "ja-media-media"
+version = "0.1.0"
+description = "Filesystem/media utilities: renaming, probing, chunks"
+requires-python = ">=3.13"
+dependencies = []

@@ -1,0 +1,37 @@
+version = 1
+revision = 3
+requires-python = ">=3.13"
+
+[manifest]
+members = [
+    "ja-media-core",
+    "ja-media-media",
+    "ja-media-toolkit",
+    "ja-media-transcripts",
+]
+
+[[package]]
+name = "ja-media-core"
+version = "0.1.0"
+source = { editable = "packages/core" }
+
+[[package]]
+name = "ja-media-media"
+version = "0.1.0"
+source = { virtual = "packages/media" }
+
+[[package]]
+name = "ja-media-toolkit"
+version = "0.1.0"
+source = { virtual = "." }
+
+[[package]]
+name = "ja-media-transcripts"
+version = "0.1.0"
+source = { virtual = "packages/transcripts" }
+dependencies = [
+    { name = "ja-media-core" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "ja-media-core", editable = "packages/core" }]
