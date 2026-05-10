@@ -1,6 +1,6 @@
 # ja-media-toolkit
 
-This repo is a collection of tools to assist me (a native English speaker, JLPT ~low N3) with organizing native content.
+This repo is a collection of tools to assist me (a native English speaker, JLPT ~low N3) with managing native content.
 
 ## Project goals
 
@@ -15,9 +15,23 @@ Here are some common tasks I as a language learner might need done on raw media 
     - Easier search 
     - Using the transcript corpus for mining sentence examples
 
+## Philosophy
+
+1. **Avoid enterprise brainrot.** Remember that these tools are primarily for my use case and my system: anything useful to the community will be broken out into its own project. So avoid premature abstraction: e.g., don't bother making anything work for Windows, since I don't use it, or for AMD, since I don't care. Focus only on the abstractions that cover the volatility I might actually see; e.g. below:
+2. **Data and contracts are permanent, models are ephemeral.** Models will change, runtimes will change, the location of compute will change (laptop vs workstation vs serverless GPU vs GPU server). Decouple _what_ should be done from _who_ is doing it.
+3. **Use liberal documentation.** I am using this repo (in part) to learn best practices for system design and audio management: so use a literate style.
+    - Ensure all core abstractions have descriptive docstrings. (no need to comment every line though).
+    - Explain _why_ key decisions were made
+    - Ensure config has nontrivial examples
+
+## Environment
+
+TODO fill this in more.
+
+
 ## Repo structure
 
-See [docs/monorepo-philosophy.md](docs/monorepo-philosophy.md) for the full rationale.
+See [docs/monorepo-philosophy.md](docs/monorepo-philosophy.md) for the full rationale if needed.
 
 ```text
 packages/          contracts and shared libraries (workspace members)
@@ -54,5 +68,22 @@ uv run ja-media transcribe episode.mp3
     - Directly running `pip install`
 - NEVER run a script using `python` or `python3`. Always use `uv run` from the correct environment.
 
+Prefer tomllib + Pydantic Settings for configuration where possible.
 
-## Useful scratch files for smoke testing
+## Smoke-testing
+
+### About the system
+
+- Assume both macOS + Linux workstations have `ffmpeg` + `ffprobe` installed.
+
+### Current VAD implementation notes
+
+- VAD core contracts live in `packages/core`; model/runtime dependencies belong
+  in `envs/*`.
+- Keep `AudioChunk` lightweight. It describes source coordinates and metadata;
+  decoded arrays belong in `InMemoryAudioChunk`.
+- Use `materialize_audio_chunk` / an ingestor layer for decoding instead of
+  adding sample arrays to `AudioChunk`.
+- The Apple VAD path currently uses `mlx-community/silero-vad` through
+  `envs/apple`, with `mlx-audio` pinned to upstream git until PyPI includes the
+  Silero VAD implementation.

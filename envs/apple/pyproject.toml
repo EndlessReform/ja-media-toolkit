@@ -12,7 +12,12 @@ dependencies = [
 [project.scripts]
 ja-media = "ja_media_apple.cli:main"
 
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [tool.uv.sources]
 ja-media-core = { path = "../../packages/core", editable = true }
 ja-media-media = { path = "../../packages/media", editable = true }
 ja-media-transcripts = { path = "../../packages/transcripts", editable = true }
+mlx-audio = { git = "https://github.com/Blaizzy/mlx-audio.git", rev = "f7c11556eda88731be5cc75ddbdf4a4cb9eeaafc" }
