@@ -44,7 +44,16 @@ def main() -> None:
     vad_parser.add_argument("--model-id", default=DEFAULT_MLX_AUDIO_VAD_MODEL)
     vad_parser.add_argument(
         "--dump-speech-dir",
-        help="Write detected speech spans as individual FLAC files",
+        help=(
+            "Write output chunks as audio files: detected speech spans in plain "
+            "VAD mode, planned split chunks with --split-every-minutes"
+        ),
+    )
+    vad_parser.add_argument(
+        "--dump-audio-format",
+        choices=("wav", "flac"),
+        default="wav",
+        help="Audio format for dumped chunks. WAV is the default for macOS playback.",
     )
     vad_parser.add_argument(
         "--split-every-minutes",
@@ -101,22 +110,6 @@ def run_vad_local(args: argparse.Namespace) -> None:
 
     timeline = None
     speech_chunks = []
-    if args.split_every_minutes is None or args.dump_speech_dir is not None:
-        timeline = backend.detect([chunk], options=vad_options)[0]
-        speech_chunks = speech_chunks_from_timeline(
-            timeline,
-            min_duration_s=args.min_speech_s,
-            kind="speech",
-        )
-
-    dumped_speech_paths = []
-    if args.dump_speech_dir is not None:
-        dumped_speech_paths = _dump_speech_chunks(
-            speech_chunks,
-            output_dir=Path(args.dump_speech_dir),
-            source_id=source.id,
-        )
-
     split_chunks = []
     if args.split_every_minutes is not None:
         split_chunks = plan_vad_splits(
@@ -129,6 +122,26 @@ def run_vad_local(args: argparse.Namespace) -> None:
             kind="asr_chunk",
             metadata={"purpose": "periodic_vad_split"},
         )
+    else:
+        timeline = backend.detect([chunk], options=vad_options)[0]
+        speech_chunks = speech_chunks_from_timeline(
+            timeline,
+            min_duration_s=args.min_speech_s,
+            kind="speech",
+        )
+
+    dumped_chunk_kind = None
+    dumped_chunk_paths = []
+    if args.dump_speech_dir is not None:
+        dumped_chunks = split_chunks if args.split_every_minutes is not None else speech_chunks
+        dumped_chunk_kind = "split" if args.split_every_minutes is not None else "speech"
+        dumped_chunk_paths = _dump_audio_chunks(
+            dumped_chunks,
+            output_dir=Path(args.dump_speech_dir),
+            source_id=source.id,
+            label=dumped_chunk_kind,
+            audio_format=args.dump_audio_format,
+        )
 
     payload = {
         "source": asdict(source),
@@ -139,7 +152,8 @@ def run_vad_local(args: argparse.Namespace) -> None:
         "speech_detected": timeline is not None,
         "speech": [] if timeline is None else [asdict(span) for span in timeline.speech],
         "speech_chunks": [asdict(speech_chunk) for speech_chunk in speech_chunks],
-        "dumped_speech_paths": [str(path) for path in dumped_speech_paths],
+        "dumped_chunk_kind": dumped_chunk_kind,
+        "dumped_chunk_paths": [str(path) for path in dumped_chunk_paths],
         "split_chunks": [asdict(split_chunk) for split_chunk in split_chunks],
     }
 
@@ -150,20 +164,30 @@ def run_vad_local(args: argparse.Namespace) -> None:
     print(_timeline_text(payload))
 
 
-def _dump_speech_chunks(
+def _dump_audio_chunks(
     chunks: list[AudioChunk],
     *,
     output_dir: Path,
     source_id: str,
+    label: str,
+    audio_format: str,
 ) -> list[Path]:
+    if audio_format not in {"wav", "flac"}:
+        raise ValueError(f"Unsupported dump audio format: {audio_format!r}")
+
     output_paths: list[Path] = []
     for index, chunk in enumerate(chunks, start=1):
+        start_ms = round(chunk.start_s * 1000)
+        end_ms = round(chunk.end_s * 1000)
+        duration_ms = round(chunk.duration_s * 1000)
         output_path = output_dir / (
-            f"{source_id}_speech_{index:03d}_"
-            f"{round(chunk.start_s * 1000):09d}ms-"
-            f"{round(chunk.end_s * 1000):09d}ms.flac"
+            f"{source_id}_{label}_{index:03d}_"
+            f"src_{start_ms:09d}ms-{end_ms:09d}ms_"
+            f"dur_{duration_ms:09d}ms.{audio_format}"
         )
-        output_paths.append(write_audio_chunk(chunk, output_path, format="FLAC"))
+        output_paths.append(
+            write_audio_chunk(chunk, output_path, format=audio_format.upper())
+        )
     return output_paths
 
 
@@ -206,9 +230,10 @@ def _timeline_text(payload: dict[str, Any]) -> str:
         lines.append(f"speech spans: {len(payload['speech'])}")
         for index, span in enumerate(payload["speech"], start=1):
             lines.append(f"{index:>3}. {span['start_s']:.3f}s-{span['end_s']:.3f}s")
-    if payload["dumped_speech_paths"]:
-        lines.append("dumped speech:")
-        for path in payload["dumped_speech_paths"]:
+    if payload["dumped_chunk_paths"]:
+        kind = payload["dumped_chunk_kind"] or "audio"
+        lines.append(f"dumped {kind} chunks:")
+        for path in payload["dumped_chunk_paths"]:
             lines.append(f"  {path}")
     if payload["split_chunks"]:
         lines.append("split chunks:")

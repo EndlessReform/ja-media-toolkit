@@ -1,14 +1,19 @@
 from __future__ import annotations
 
 import unittest
+from argparse import Namespace
+from contextlib import redirect_stdout
 from dataclasses import dataclass
+from io import StringIO
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
+from unittest.mock import patch
 
 import numpy as np
 
-from ja_media_apple.cli import _dump_speech_chunks
+from ja_media_apple.cli import _dump_audio_chunks, run_vad_local
 from ja_media_apple.vad import MlxAudioVadBackend
 from ja_media_core.audio import AudioChunk, probe_audio_source, resolve_audio_source
 from ja_media_core.vad import VadOptions
@@ -49,6 +54,16 @@ class FakeSileroModel:
     def get_speech_timestamps(self, audio: np.ndarray, **kwargs: Any) -> list[dict[str, float]]:
         self.calls.append({"audio": audio, **kwargs})
         return self.timestamps
+
+
+class FakeBackendForCli:
+    name = "fake-vad"
+
+    def __init__(self, model_id: str) -> None:
+        self.model_id = model_id
+
+    def detect(self, chunks: list[AudioChunk], *, options: VadOptions) -> Any:
+        raise AssertionError("split mode should not run full-file speech detection")
 
 
 class MlxAudioVadBackendTest(unittest.TestCase):
@@ -142,19 +157,68 @@ class MlxAudioVadBackendTest(unittest.TestCase):
         self.assertEqual(chunks[0].metadata["vad_backend"], "mlx-audio")
         self.assertEqual(chunks[0].metadata["purpose"], "smoke")
 
-    def test_dump_speech_chunks_writes_flacs_for_listening(self) -> None:
+    def test_dump_audio_chunks_writes_labeled_files_for_listening(self) -> None:
         chunks = [_jfk_chunk(0.0, 0.50), _jfk_chunk(0.50, 1.0)]
 
         with TemporaryDirectory() as tmpdir:
-            paths = _dump_speech_chunks(
+            paths = _dump_audio_chunks(
                 chunks,
                 output_dir=Path(tmpdir),
                 source_id="jfk",
+                label="split",
+                audio_format="wav",
+            )
+            exported_format = probe_audio_source(
+                resolve_audio_source(paths[0], must_exist=True)
             )
 
             self.assertEqual(len(paths), 2)
             self.assertTrue(paths[0].exists())
-            self.assertEqual(paths[0].suffix, ".flac")
+            self.assertEqual(paths[0].suffix, ".wav")
+            self.assertIn("_split_001_", paths[0].name)
+            self.assertIn("_src_000000000ms-000000500ms_", paths[0].name)
+            self.assertIn("_dur_000000500ms.", paths[0].name)
+            self.assertAlmostEqual(exported_format.duration_s or 0.0, 0.5)
+
+    def test_vad_local_dumps_split_chunks_in_split_mode(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            args = Namespace(
+                input=str(JFK_WAV),
+                start_s=0.0,
+                end_s=1.0,
+                threshold=None,
+                min_speech_s=0.25,
+                min_silence_s=0.20,
+                speech_pad_s=0.05,
+                merge_gap_s=0.10,
+                channel=None,
+                model_id="fake-model",
+                dump_speech_dir=tmpdir,
+                dump_audio_format="wav",
+                split_every_minutes=10.0,
+                split_radius_s=60.0,
+                prefer_before_target=False,
+                format="json",
+            )
+
+            with (
+                patch("ja_media_apple.cli.MlxAudioVadBackend", FakeBackendForCli),
+                patch(
+                    "ja_media_apple.cli.plan_vad_splits",
+                    return_value=[_jfk_chunk(0.0, 0.50), _jfk_chunk(0.50, 1.0)],
+                ),
+                redirect_stdout(StringIO()) as stdout,
+            ):
+                run_vad_local(args)
+
+            payload = json.loads(stdout.getvalue())
+
+            self.assertFalse(payload["speech_detected"])
+            self.assertEqual(payload["speech"], [])
+            self.assertEqual(payload["dumped_chunk_kind"], "split")
+            self.assertEqual(len(payload["dumped_chunk_paths"]), 2)
+            self.assertIn("_split_001_", Path(payload["dumped_chunk_paths"][0]).name)
+            self.assertIn("_dur_000000500ms.", Path(payload["dumped_chunk_paths"][0]).name)
 
 
 def _jfk_chunk(start_s: float, end_s: float) -> AudioChunk:
