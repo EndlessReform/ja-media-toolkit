@@ -14,3 +14,6 @@ output
 
 # OS
 *.DS_Store
+
+# Upstream
+docs/repo-symlinks/*
