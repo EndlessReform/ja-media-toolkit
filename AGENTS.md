@@ -32,6 +32,7 @@ TODO fill this in more.
 ## Repo structure
 
 See [docs/monorepo-philosophy.md](docs/monorepo-philosophy.md) for the full rationale if needed.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the durable ASR/config/backend boundaries.
 
 ```text
 packages/          contracts and shared libraries (workspace members)

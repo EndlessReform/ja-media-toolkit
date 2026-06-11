@@ -1,7 +1,17 @@
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Protocol
-
+from ja_media_core.asr import (
+    AsrBackend,
+    AsyncAsrBackend,
+    AsrJob,
+    AsrJobRecord,
+    AsrJobStatus,
+    AsrJobSubmitter,
+    AsrRequest,
+    AsrRuntimeOptions,
+    AsrSegment,
+    AsrTask,
+    AsrTranscript,
+    asr_request_from_chunks,
+)
 from ja_media_core.audio import (
     AudioChunk,
     AudioFormat,
@@ -12,6 +22,22 @@ from ja_media_core.audio import (
     probe_audio_source,
     resolve_audio_source,
     write_audio_chunk,
+)
+from ja_media_core.config import (
+    APP_CONFIG_DIR_NAME,
+    CONFIG_ENV_VAR,
+    CONFIG_FILE_NAME,
+    AsrBackendConfig,
+    AsrConfig,
+    BackendConfig,
+    BackendFactoryRegistry,
+    BackendGroupConfig,
+    JaMediaConfig,
+    JaMediaSettings,
+    default_config_path,
+    load_config,
+    resolve_config_path,
+    xdg_config_home,
 )
 from ja_media_core.vad import (
     SpeechSpan,
@@ -26,50 +52,49 @@ from ja_media_core.vad import (
 )
 
 
-@dataclass(frozen=True)
-class TranscriptionJob:
-    input_path: Path
-    language: str = "ja"
-    model: str | None = None
-
-
-@dataclass(frozen=True)
-class TranscriptSegment:
-    start_s: float
-    end_s: float
-    text: str
-
-
-@dataclass(frozen=True)
-class Transcript:
-    segments: list[TranscriptSegment]
-
-
-class Transcriber(Protocol):
-    def transcribe(self, job: TranscriptionJob) -> Transcript: ...
-
-
 __all__ = [
     "AudioChunk",
     "AudioFormat",
     "AudioSource",
+    "AsrBackend",
+    "AsrBackendConfig",
+    "AsrConfig",
+    "AsyncAsrBackend",
+    "AsrJob",
+    "AsrJobRecord",
+    "AsrJobStatus",
+    "AsrJobSubmitter",
+    "AsrRequest",
+    "AsrRuntimeOptions",
+    "AsrSegment",
+    "AsrTask",
+    "AsrTranscript",
+    "BackendConfig",
+    "BackendFactoryRegistry",
+    "BackendGroupConfig",
+    "APP_CONFIG_DIR_NAME",
+    "CONFIG_ENV_VAR",
+    "CONFIG_FILE_NAME",
     "InMemoryAudioChunk",
+    "JaMediaConfig",
+    "JaMediaSettings",
     "SpeechSpan",
-    "Transcriber",
-    "TranscriptionJob",
-    "Transcript",
-    "TranscriptSegment",
     "VadBackend",
     "VadOptions",
     "VadTimeline",
+    "asr_request_from_chunks",
+    "default_config_path",
     "full_audio_chunk",
+    "load_config",
     "materialize_audio_chunk",
     "normalize_speech_spans",
     "plan_vad_splits",
     "probe_audio_source",
     "resolve_audio_source",
+    "resolve_config_path",
     "speech_chunks_from_timeline",
     "speech_chunks_from_timelines",
     "validate_speech_spans",
     "write_audio_chunk",
+    "xdg_config_home",
 ]

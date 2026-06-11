@@ -3,10 +3,19 @@ name = "ja-media-apple"
 version = "0.1.0"
 requires-python = ">=3.13"
 dependencies = [
+    "httpx>=0.28.1",
+    "huggingface-hub>=1.14.0",
     "ja-media-core",
     "ja-media-media",
     "ja-media-transcripts",
+    "librosa>=0.11.0",
     "mlx-audio",
+    "rich>=15.0.0",
+    "safetensors>=0.7.0",
+    "scipy>=1.17.1",
+    "torch>=2.12.0",
+    "tqdm>=4.67.3",
+    "transformers",
 ]
 
 [project.scripts]
@@ -21,3 +30,4 @@ ja-media-core = { path = "../../packages/core", editable = true }
 ja-media-media = { path = "../../packages/media", editable = true }
 ja-media-transcripts = { path = "../../packages/transcripts", editable = true }
 mlx-audio = { git = "https://github.com/Blaizzy/mlx-audio.git", rev = "f7c11556eda88731be5cc75ddbdf4a4cb9eeaafc" }
+transformers = { git = "https://github.com/huggingface/transformers.git", rev = "cbb65a4815d44f1d8b8ff7f51cca24ce491fc09e" }

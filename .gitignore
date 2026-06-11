@@ -11,6 +11,8 @@ wheels/
 
 # Data
 output
+envs/apple/config.local.toml
+*.srt
 
 # OS
 *.DS_Store
