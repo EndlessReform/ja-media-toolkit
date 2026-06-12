@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import shutil
+import subprocess
 import unittest
 from tempfile import TemporaryDirectory
 from pathlib import Path
+from unittest.mock import patch
 
+import soundfile as sf
 from ja_media_core.audio import (
     AudioChunk,
     full_audio_chunk,
@@ -116,6 +120,107 @@ class LocalAudioIngestTest(unittest.TestCase):
         self.assertEqual(exported_format.sample_rate_hz, 16_000)
         self.assertEqual(exported_format.channels, 1)
         self.assertAlmostEqual(exported_format.duration_s or 0.0, 1.0)
+
+    @unittest.skipUnless(
+        shutil.which("ffmpeg") and shutil.which("ffprobe"),
+        "ffmpeg and ffprobe are required for compressed media fixtures",
+    )
+    def test_probe_and_materialize_m4a_with_ffmpeg_fallback(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            fixture = _write_tone_fixture(Path(tmpdir) / "tone.m4a")
+            source = resolve_audio_source(fixture, must_exist=True)
+
+            with patch(
+                "ja_media_core.audio.sf.info",
+                side_effect=sf.LibsndfileError(1),
+            ):
+                audio_format = probe_audio_source(source)
+
+            self.assertEqual(audio_format.sample_rate_hz, 16_000)
+            self.assertEqual(audio_format.channels, 1)
+            self.assertEqual(audio_format.codec, "aac")
+            self.assertEqual(audio_format.container, "m4a")
+            self.assertGreater(audio_format.duration_s or 0.0, 0.0)
+
+            chunk = AudioChunk(
+                source=source,
+                start_s=0.0,
+                end_s=0.25,
+                format=audio_format,
+                kind="compressed_fixture",
+            )
+            with patch(
+                "ja_media_core.audio.sf.read",
+                side_effect=sf.LibsndfileError(1),
+            ):
+                materialized = materialize_audio_chunk(chunk)
+
+        self.assertEqual(materialized.sample_rate_hz, 16_000)
+        self.assertEqual(materialized.channels, 1)
+        self.assertEqual(str(materialized.samples.dtype), "float32")
+        self.assertGreater(materialized.samples.shape[0], 0)
+
+    @unittest.skipUnless(
+        shutil.which("ffmpeg") and shutil.which("ffprobe"),
+        "ffmpeg and ffprobe are required for compressed media fixtures",
+    )
+    def test_probe_and_materialize_opus_with_ffmpeg_fallback(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            fixture = _write_tone_fixture(Path(tmpdir) / "tone.opus")
+            source = resolve_audio_source(fixture, must_exist=True)
+
+            with patch(
+                "ja_media_core.audio.sf.info",
+                side_effect=sf.LibsndfileError(1),
+            ):
+                audio_format = probe_audio_source(source)
+
+            self.assertEqual(audio_format.sample_rate_hz, 48_000)
+            self.assertEqual(audio_format.channels, 1)
+            self.assertEqual(audio_format.codec, "opus")
+            self.assertEqual(audio_format.container, "opus")
+            self.assertGreater(audio_format.duration_s or 0.0, 0.0)
+
+            chunk = AudioChunk(
+                source=source,
+                start_s=0.0,
+                end_s=0.25,
+                format=audio_format,
+                kind="compressed_fixture",
+            )
+            with patch(
+                "ja_media_core.audio.sf.read",
+                side_effect=sf.LibsndfileError(1),
+            ):
+                materialized = materialize_audio_chunk(chunk)
+
+        self.assertEqual(materialized.sample_rate_hz, 48_000)
+        self.assertEqual(materialized.channels, 1)
+        self.assertEqual(str(materialized.samples.dtype), "float32")
+        self.assertGreater(materialized.samples.shape[0], 0)
+
+
+def _write_tone_fixture(path: Path) -> Path:
+    codec_args = ["-c:a", "aac"] if path.suffix == ".m4a" else ["-c:a", "libopus"]
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:duration=0.5:sample_rate=16000",
+            "-ac",
+            "1",
+            *codec_args,
+            str(path),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    return path
 
 
 if __name__ == "__main__":

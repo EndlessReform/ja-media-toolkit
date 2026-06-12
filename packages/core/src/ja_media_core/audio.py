@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import shutil
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -111,7 +114,10 @@ def resolve_audio_source(
 
 def probe_audio_source(source: AudioSource) -> AudioFormat:
     path = _require_client_local_path(source)
-    info = sf.info(str(path))
+    try:
+        info = sf.info(str(path))
+    except sf.LibsndfileError:
+        return _probe_audio_source_with_ffprobe(path)
 
     return AudioFormat(
         sample_rate_hz=info.samplerate,
@@ -166,13 +172,21 @@ def materialize_audio_chunk(chunk: AudioChunk) -> InMemoryAudioChunk:
     if source_format.frame_count is not None and end_frame > source_format.frame_count:
         raise ValueError("Audio chunk end is beyond the source frame count")
 
-    samples, sample_rate_hz = sf.read(
-        str(path),
-        start=start_frame,
-        stop=end_frame,
-        dtype="float32",
-        always_2d=True,
-    )
+    try:
+        samples, sample_rate_hz = sf.read(
+            str(path),
+            start=start_frame,
+            stop=end_frame,
+            dtype="float32",
+            always_2d=True,
+        )
+    except sf.LibsndfileError:
+        samples, sample_rate_hz = _decode_audio_chunk_with_ffmpeg(
+            path,
+            source_format=source_format,
+            start_s=chunk.start_s,
+            end_s=chunk.end_s,
+        )
     if sample_rate_hz != source_format.sample_rate_hz:
         raise ValueError("Audio sample rate changed between probe and decode")
     if samples.shape[1] != source_format.channels:
@@ -226,6 +240,126 @@ def _require_client_local_path(source: AudioSource) -> Path:
     return Path(source.locator)
 
 
+def _probe_audio_source_with_ffprobe(path: Path) -> AudioFormat:
+    """Probe containers such as M4A and Opus through ffprobe.
+
+    ``soundfile`` is still the first choice for PCM-oriented formats because it
+    gives exact frame counts. ffprobe is the ingestion fallback for common
+    compressed media that ffmpeg can decode but libsndfile may not recognize.
+    """
+
+    ffprobe = shutil.which("ffprobe")
+    if ffprobe is None:
+        raise RuntimeError(
+            f"Could not probe {path}: libsndfile does not support it and ffprobe "
+            "is not installed"
+        )
+
+    completed = subprocess.run(
+        [
+            ffprobe,
+            "-v",
+            "error",
+            "-select_streams",
+            "a:0",
+            "-show_entries",
+            (
+                "stream=codec_name,sample_rate,channels,duration"
+                ":format=format_name,duration"
+            ),
+            "-of",
+            "json",
+            str(path),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    payload = json.loads(completed.stdout)
+    streams = payload.get("streams") or []
+    if not streams:
+        raise ValueError(f"No audio stream found in {path}")
+
+    stream = streams[0]
+    sample_rate_hz = int(stream["sample_rate"])
+    channels = int(stream["channels"])
+    duration_s = _optional_float(stream.get("duration"))
+    if duration_s is None:
+        duration_s = _optional_float((payload.get("format") or {}).get("duration"))
+
+    frame_count = None if duration_s is None else round(duration_s * sample_rate_hz)
+
+    format_name = (payload.get("format") or {}).get("format_name")
+    return AudioFormat(
+        sample_rate_hz=sample_rate_hz,
+        channels=channels,
+        duration_s=duration_s,
+        codec=stream.get("codec_name"),
+        container=_container_name(path, format_name),
+        frame_count=frame_count,
+        metadata={
+            "decoder": "ffprobe",
+            "format_name": format_name,
+        },
+    )
+
+
+def _decode_audio_chunk_with_ffmpeg(
+    path: Path,
+    *,
+    source_format: AudioFormat,
+    start_s: float,
+    end_s: float,
+) -> tuple[NDArray[np.float32], int]:
+    """Decode an audio span to float32 frames using ffmpeg."""
+
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        raise RuntimeError(
+            f"Could not decode {path}: libsndfile does not support it and ffmpeg "
+            "is not installed"
+        )
+
+    duration_s = end_s - start_s
+    if duration_s < 0:
+        raise ValueError("Audio chunk end must not be before start")
+
+    completed = subprocess.run(
+        [
+            ffmpeg,
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-ss",
+            f"{start_s:.9f}",
+            "-t",
+            f"{duration_s:.9f}",
+            "-i",
+            str(path),
+            "-map",
+            "0:a:0",
+            "-vn",
+            "-f",
+            "f32le",
+            "-acodec",
+            "pcm_f32le",
+            "-ac",
+            str(source_format.channels),
+            "-ar",
+            str(source_format.sample_rate_hz),
+            "pipe:1",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    samples = np.frombuffer(completed.stdout, dtype="<f4")
+    if samples.size % source_format.channels != 0:
+        raise ValueError("Decoded audio sample count is not divisible by channels")
+    return samples.reshape((-1, source_format.channels)).astype(np.float32), (
+        source_format.sample_rate_hz
+    )
+
+
 def _source_id_from_s3(bucket: str, path: str) -> str:
     key = path.strip("/")
     stem = Path(key).stem
@@ -241,3 +375,16 @@ def _frame_index(
     if explicit_frame is not None:
         return explicit_frame
     return round(timestamp_s * sample_rate_hz)
+
+
+def _optional_float(value: Any) -> float | None:
+    if value in (None, "N/A"):
+        return None
+    return float(value)
+
+
+def _container_name(path: Path, format_name: str | None) -> str | None:
+    suffix = path.suffix.lower().removeprefix(".")
+    if suffix and format_name and suffix in format_name.split(","):
+        return suffix
+    return suffix or format_name
