@@ -4,6 +4,7 @@ import base64
 import asyncio
 import io
 import json
+import logging
 import sys
 import time
 from dataclasses import dataclass
@@ -31,6 +32,7 @@ if TYPE_CHECKING:
 
 TRANSFORMERS_GIT_REV = "cbb65a4815d44f1d8b8ff7f51cca24ce491fc09e"
 AUDIO_ENCODER_FILE = "audio_encoder.safetensors"
+_LOG = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -274,7 +276,11 @@ class VibeVoiceVllmAsrBackend:
             max_output_tokens=int(options.get("max_output_tokens", 2048)),
             temperature=float(options.get("temperature", 0.0)),
             top_p=float(options.get("top_p", 1.0)),
-            repetition_penalty=float(options.get("repetition_penalty", 0.1)),
+            repetition_penalty=float(options.get("repetition_penalty", 1.1)),
+            vllm_request_max_attempts=int(options.get("vllm_request_max_attempts", 3)),
+            vllm_request_retry_backoff_s=float(
+                options.get("vllm_request_retry_backoff_s", 1.0)
+            ),
         )
 
     async def _infer_chunks_async(
@@ -288,6 +294,8 @@ class VibeVoiceVllmAsrBackend:
         temperature: float,
         top_p: float,
         repetition_penalty: float,
+        vllm_request_max_attempts: int,
+        vllm_request_retry_backoff_s: float,
     ) -> list[AsrTranscript]:
         submit_semaphore = asyncio.Semaphore(max_concurrent_requests)
         encode_lock = asyncio.Lock()
@@ -327,6 +335,8 @@ class VibeVoiceVllmAsrBackend:
                         client,
                         self.vllm_base_url,
                         payload,
+                        max_attempts=vllm_request_max_attempts,
+                        retry_backoff_s=vllm_request_retry_backoff_s,
                     )
                 return index, _transcript_from_response(
                     chunk,
@@ -346,13 +356,20 @@ class VibeVoiceVllmAsrBackend:
                 for index, chunk in enumerate(request.chunks)
             ]
             completed = []
-            for task in tqdm_asyncio(
-                asyncio.as_completed(tasks),
-                total=len(tasks),
-                desc="vLLM ASR",
-                unit="chunk",
-            ):
-                completed.append(await task)
+            try:
+                for task in tqdm_asyncio(
+                    asyncio.as_completed(tasks),
+                    total=len(tasks),
+                    desc="vLLM ASR",
+                    unit="chunk",
+                ):
+                    completed.append(await task)
+            except Exception:
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+                raise
 
         completed.sort(key=lambda item: item[0])
         return [transcript for _, transcript in completed]
@@ -606,20 +623,51 @@ async def _post_to_vllm_async(
     client: httpx.AsyncClient,
     url: str,
     payload: dict[str, Any],
+    *,
+    max_attempts: int = 1,
+    retry_backoff_s: float = 0.0,
 ) -> tuple[dict[str, Any], float]:
+    max_attempts = max(1, max_attempts)
     started = time.time()
-    response = await client.post(
-        url.rstrip("/") + "/v1/chat/completions",
-        json=payload,
-    )
-    elapsed = time.time() - started
-    try:
-        response.raise_for_status()
-    except httpx.HTTPStatusError as error:
-        raise RuntimeError(
-            f"vLLM request failed: HTTP {response.status_code}: {response.text}"
-        ) from error
-    return response.json(), elapsed
+    endpoint = url.rstrip("/") + "/v1/chat/completions"
+    for attempt in range(1, max_attempts + 1):
+        try:
+            response = await client.post(endpoint, json=payload)
+        except httpx.TransportError as error:
+            if attempt >= max_attempts:
+                raise RuntimeError(
+                    "vLLM request failed after "
+                    f"{max_attempts} attempt(s): {type(error).__name__}: {error}"
+                ) from error
+            _LOG.warning(
+                "Retrying vLLM request after %s on attempt %s/%s",
+                type(error).__name__,
+                attempt,
+                max_attempts,
+            )
+            await asyncio.sleep(retry_backoff_s)
+            continue
+
+        elapsed = time.time() - started
+        if response.status_code >= 500 and attempt < max_attempts:
+            _LOG.warning(
+                "Retrying vLLM request after HTTP %s on attempt %s/%s",
+                response.status_code,
+                attempt,
+                max_attempts,
+            )
+            await asyncio.sleep(retry_backoff_s)
+            continue
+
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as error:
+            raise RuntimeError(
+                f"vLLM request failed: HTTP {response.status_code}: {response.text}"
+            ) from error
+        return response.json(), elapsed
+
+    raise AssertionError("unreachable vLLM request retry state")
 
 
 def _transcript_from_response(

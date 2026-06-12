@@ -99,7 +99,9 @@ max_concurrent_requests = 4
 max_output_tokens = 2048
 temperature = 0.0
 top_p = 1.0
-repetition_penalty = 0.1
+repetition_penalty = 1.1
+vllm_request_max_attempts = 3
+vllm_request_retry_backoff_s = 1.0
 ```
 
 Core provides the registry shape: a base backend config model, concrete
@@ -134,7 +136,9 @@ many hours of audio can be submitted concurrently.
 
 The backend uses async HTTP submission with a configurable
 `max_concurrent_requests`. Local audio encoding remains bounded, while remote
-decode requests can overlap. Progress is shown over completed chunks, and the
+decode requests can overlap. Transient vLLM transport failures are retried with
+`vllm_request_max_attempts` and `vllm_request_retry_backoff_s`; client-side
+payload errors are not retried. Progress is shown over completed chunks, and the
 ordered result list is restored before returning transcripts.
 
 Response parsing is intentionally tolerant. When the model returns parseable

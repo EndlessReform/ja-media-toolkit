@@ -50,7 +50,9 @@ class VibeVoiceVllmAsrConfig(AsrBackendConfig):
     max_output_tokens: int | None = 2048
     temperature: float = 0.0
     top_p: float = 1.0
-    repetition_penalty: float = 0.1
+    repetition_penalty: float = 1.1
+    vllm_request_max_attempts: int = 3
+    vllm_request_retry_backoff_s: float = 1.0
     backend_options: dict[str, Any] = Field(default_factory=dict)
 
     def runtime_backend_options(self) -> dict[str, Any]:
@@ -61,6 +63,11 @@ class VibeVoiceVllmAsrConfig(AsrBackendConfig):
         options.setdefault("temperature", self.temperature)
         options.setdefault("top_p", self.top_p)
         options.setdefault("repetition_penalty", self.repetition_penalty)
+        options.setdefault("vllm_request_max_attempts", self.vllm_request_max_attempts)
+        options.setdefault(
+            "vllm_request_retry_backoff_s",
+            self.vllm_request_retry_backoff_s,
+        )
         if self.max_output_tokens is not None:
             options.setdefault("max_output_tokens", self.max_output_tokens)
         return options
