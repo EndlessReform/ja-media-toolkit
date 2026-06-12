@@ -44,6 +44,31 @@ def main() -> None:
     )
     subparsers = parser.add_subparsers(dest="command")
 
+    subsync_parser = subparsers.add_parser(
+        "subsync",
+        help="Subtitle synchronization review and repair tools",
+    )
+    subsync_subparsers = subsync_parser.add_subparsers(dest="subsync_command")
+    subsync_tui_parser = subsync_subparsers.add_parser(
+        "tui",
+        help="Open the first-pass subtitle timing review TUI",
+    )
+    subsync_tui_parser.add_argument("source", help="Source media file path")
+    subsync_tui_parser.add_argument(
+        "srt",
+        nargs="+",
+        help=(
+            "SRT file path(s) or quoted glob pattern(s), for example "
+            "'../../subs/*.srt'"
+        ),
+    )
+    subsync_tui_parser.add_argument(
+        "--window-s",
+        type=float,
+        default=120.0,
+        help="Initial number of subtitle timeline seconds shown on screen.",
+    )
+
     vad_parser = subparsers.add_parser(
         "vad-local",
         help="Run local MLX VAD on a client-local audio file",
@@ -142,6 +167,18 @@ def main() -> None:
         return
     if args.command == "transcribe":
         run_transcribe(args)
+        return
+    if args.command == "subsync":
+        if args.subsync_command == "tui":
+            from ja_media_apple.subsync_tui import run_subsync_tui
+
+            run_subsync_tui(
+                source_path=args.source,
+                srt_inputs=args.srt,
+                window_s=args.window_s,
+            )
+            return
+        subsync_parser.print_help()
         return
 
     parser.print_help()
