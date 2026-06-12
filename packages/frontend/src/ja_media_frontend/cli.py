@@ -28,6 +28,17 @@ def main() -> None:
         _load_apple_command("run_transcribe")(args)
         return
     if args.command == "subsync":
+        if args.subsync_command == "reader":
+            from ja_media_frontend.subsync_reader import run_subsync_reader
+
+            run_subsync_reader(
+                media_file=args.media,
+                sub_file=args.sub_file,
+                host=args.host,
+                port=args.port,
+                open_browser=not args.no_open,
+            )
+            return
         if args.subsync_command == "tui":
             _load_apple_subsync_tui()(
                 source_path=args.source,
@@ -53,6 +64,33 @@ def build_parser() -> argparse.ArgumentParser:
         help="Subtitle synchronization review and repair tools",
     )
     subsync_subparsers = subsync_parser.add_subparsers(dest="subsync_command")
+    subsync_reader_parser = subsync_subparsers.add_parser(
+        "reader",
+        help="Open a browser reader for one media file and SRT sidecar",
+    )
+    subsync_reader_parser.add_argument("media", help="Source media file path")
+    subsync_reader_parser.add_argument(
+        "--sub-file",
+        help="Subtitle file path. Defaults to media stem autodiscovery.",
+    )
+    subsync_reader_parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Local interface to bind. Defaults to 127.0.0.1.",
+    )
+    subsync_reader_parser.add_argument(
+        "--port",
+        type=int,
+        default=0,
+        help="Local port to bind. Defaults to a random free port.",
+    )
+    subsync_reader_parser.add_argument(
+        "--no-open",
+        action="store_true",
+        help="Serve without opening a browser.",
+    )
+    subsync_reader_parser.set_defaults(subsync_parser=subsync_parser)
+
     subsync_tui_parser = subsync_subparsers.add_parser(
         "tui",
         help="Open the first-pass subtitle timing review TUI",

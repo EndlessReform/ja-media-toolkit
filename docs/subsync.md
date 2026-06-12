@@ -1,8 +1,52 @@
-# Subsync TUI
+# Subsync
 
-`subsync tui` is the first-pass subtitle timing review shell. It is meant for
-quickly answering: "does this `.srt` line up with this media file well enough
-to use or repair?"
+`subsync` owns lightweight subtitle review surfaces. These tools are for
+checking and reading existing subtitles against local media, not for model
+runtime work.
+
+## Browser Reader
+
+`subsync reader` opens a local browser reader for one media file and one SRT.
+It serves a temporary FastAPI app on `127.0.0.1`, renders subtitle text as real
+DOM text for dictionary extensions, and uses browser audio seeking to play cue
+boundaries from the original media file.
+
+Run it from a runnable environment:
+
+```sh
+cd envs/apple
+uv run ja-media subsync reader ../../examples/input/example_走る高級レストランに乗ってきた.mp3
+```
+
+By default the reader looks for an SRT sidecar using the media stem. It first
+checks `episode.srt`, then accepts exactly one sibling `episode*.srt` match. If
+multiple fuzzy matches exist, choose explicitly:
+
+```sh
+uv run ja-media subsync reader episode.m4a --sub-file episode.ja.srt
+```
+
+The reader opens a browser by default. Use `--no-open` for smoke tests or remote
+shells.
+
+### Reader Key Bindings
+
+| Key | Action |
+| --- | --- |
+| `space` | Play or stop the current cue from the media file |
+| `j` / `l` | Next cue |
+| `k` / `h` | Previous cue |
+| `gg` / `G` | Jump to start / end |
+| `f` / `b` | Page the visible timeline forward / backward |
+| `d` / `u` | Half-page the visible timeline forward / backward |
+| `+` or `=` | Zoom in, showing fewer seconds |
+| `-` or `_` | Zoom out, showing more seconds |
+
+The page has two timeline lanes: a media duration baseline and subtitle cue
+activity. Japanese text is left-aligned, selectable, and can be switched between
+gothic, mincho, and system font stacks.
+
+## TUI
 
 The current version does not run VAD scoring or automatic retiming yet. It
 loads one media file plus one or more `.srt` candidates, shows subtitle activity

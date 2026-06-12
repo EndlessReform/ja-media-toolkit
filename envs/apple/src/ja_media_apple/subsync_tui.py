@@ -12,7 +12,7 @@ from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.widgets import Footer, Header, Static
 
-from ja_media_transcripts.srt import SubtitleCue, read_srt
+from ja_media_core.srt import SubtitleCue, read_srt
 
 
 SPAN_STYLES = [
