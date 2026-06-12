@@ -99,6 +99,7 @@ max_concurrent_requests = 4
 max_output_tokens = 2048
 temperature = 0.0
 top_p = 1.0
+repetition_penalty = 0.1
 ```
 
 Core provides the registry shape: a base backend config model, concrete

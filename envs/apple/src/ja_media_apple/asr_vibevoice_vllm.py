@@ -274,6 +274,7 @@ class VibeVoiceVllmAsrBackend:
             max_output_tokens=int(options.get("max_output_tokens", 2048)),
             temperature=float(options.get("temperature", 0.0)),
             top_p=float(options.get("top_p", 1.0)),
+            repetition_penalty=float(options.get("repetition_penalty", 0.1)),
         )
 
     async def _infer_chunks_async(
@@ -286,6 +287,7 @@ class VibeVoiceVllmAsrBackend:
         max_output_tokens: int,
         temperature: float,
         top_p: float,
+        repetition_penalty: float,
     ) -> list[AsrTranscript]:
         submit_semaphore = asyncio.Semaphore(max_concurrent_requests)
         encode_lock = asyncio.Lock()
@@ -317,6 +319,7 @@ class VibeVoiceVllmAsrBackend:
                     max_tokens=max_output_tokens,
                     temperature=temperature,
                     top_p=top_p,
+                    repetition_penalty=repetition_penalty,
                     stop=list(self.config.stop),
                 )
                 async with submit_semaphore:
@@ -576,6 +579,7 @@ def _build_chat_payload(
     max_tokens: int,
     temperature: float,
     top_p: float,
+    repetition_penalty: float,
     stop: list[str],
 ) -> dict[str, Any]:
     return {
@@ -593,6 +597,7 @@ def _build_chat_payload(
         "max_tokens": max_tokens,
         "temperature": temperature,
         "top_p": top_p,
+        "repetition_penalty": repetition_penalty,
         "stop": stop,
     }
 
