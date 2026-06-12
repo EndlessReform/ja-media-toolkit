@@ -430,6 +430,7 @@ dependencies = [
     { name = "httpx" },
     { name = "huggingface-hub" },
     { name = "ja-media-core" },
+    { name = "ja-media-frontend" },
     { name = "ja-media-media" },
     { name = "ja-media-transcripts" },
     { name = "librosa" },
@@ -448,6 +449,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "huggingface-hub", specifier = ">=1.14.0" },
     { name = "ja-media-core", editable = "../../packages/core" },
+    { name = "ja-media-frontend", editable = "../../packages/frontend" },
     { name = "ja-media-media", editable = "../../packages/media" },
     { name = "ja-media-transcripts", editable = "../../packages/transcripts" },
     { name = "librosa", specifier = ">=0.11.0" },
@@ -479,6 +481,15 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2.14.1" },
     { name = "soundfile", specifier = ">=0.13.1" },
 ]
+
+[[package]]
+name = "ja-media-frontend"
+version = "0.1.0"
+source = { editable = "../../packages/frontend" }
+
+[package.metadata]
+requires-dist = [{ name = "ja-media-apple", marker = "extra == 'apple'", editable = "." }]
+provides-extras = ["apple"]
 
 [[package]]
 name = "ja-media-media"
