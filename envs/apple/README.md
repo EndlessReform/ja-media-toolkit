@@ -11,6 +11,37 @@ cd envs/apple
 uv sync
 ```
 
+## Persistent Tool Install
+
+Use the checked-out env while developing:
+
+```sh
+cd envs/apple
+uv run ja-media --help
+```
+
+If you want a persistent `ja-media` command on your PATH, install the shared
+frontend package from Git with the Apple backend extra:
+
+```sh
+uv tool install --python 3.13 \
+  'ja-media-frontend[apple] @ git+ssh://git@github.com/EndlessReform/ja-media-toolkit.git@<branch-or-commit>#subdirectory=packages/frontend'
+```
+
+This works because `packages/frontend` owns the console script and its `[apple]`
+extra depends on `envs/apple`. uv follows the Git subdirectory sources and builds
+the Apple env plus the shared packages from the same remote ref.
+
+After installing:
+
+```sh
+command -v ja-media
+ja-media --help
+```
+
+If `ja-media` is already installed and you want to replace it with another ref,
+add `--force` to the `uv tool install` command.
+
 ## Transcription
 
 `transcribe` is the main Apple-local ASR entrypoint. It loads a local

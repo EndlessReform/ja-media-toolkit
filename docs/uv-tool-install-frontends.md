@@ -1,7 +1,7 @@
 # uv tool installs, frontends, and environment extras
 
-This note records a small packaging experiment from the `srt-desync` branch. The
-goal was to answer a practical question:
+This note records the packaging shape for installing the shared `ja-media`
+frontend from this Git monorepo. The goal was to answer a practical question:
 
 > Can one shared `ja-media` frontend choose an Apple or CUDA implementation with
 > extras, instead of copying the CLI into every `envs/*` package?
@@ -35,12 +35,16 @@ The key mental model: `uv tool install` installs **one package's scripts**. It
 does not install "the workspace" as a first-class thing. If a package lives in a
 Git monorepo subdirectory, the package spec points at that subdirectory.
 
-For example, this is the shape for a future Git install:
+For example, this is the validated Git install shape:
 
 ```sh
-uv tool install \
-  'ja-media-frontend[apple] @ git+https://github.com/YOU/ja-media-toolkit.git@COMMIT#subdirectory=packages/frontend'
+uv tool install --python 3.13 \
+  'ja-media-frontend[apple] @ git+ssh://git@github.com/EndlessReform/ja-media-toolkit.git@<branch-or-commit>#subdirectory=packages/frontend'
 ```
+
+Use a branch, tag, or full commit hash that already exists on the remote. uv
+will fetch the repository, enter `packages/frontend`, and resolve the
+`ja-media-frontend[apple]` package from there.
 
 For local development, this equivalent shape worked:
 
@@ -49,7 +53,7 @@ cd envs/apple
 uv run --isolated --with-editable '../../packages/frontend[apple]' ja-media --help
 ```
 
-## What changed in this branch
+## Package shape
 
 I added one deliberately small frontend package:
 
@@ -133,7 +137,7 @@ members = [
 This keeps the root lockfile cheap and contract-focused. The frontend is still a
 package in the repo, but it is not part of the shared root workspace lock.
 
-## What passed locally
+## What passed locally and from Git
 
 From `envs/apple`, the normal Apple env still syncs:
 
@@ -171,6 +175,33 @@ uv run --isolated --with-editable '../../packages/frontend[apple]' \
 
 That command failed because the file was intentionally missing, but the
 traceback showed execution had reached `ja_media_apple.cli.run_vad_local`.
+
+The real remote tool install also worked:
+
+```sh
+uv tool install --python 3.13 \
+  'ja-media-frontend[apple] @ git+ssh://git@github.com/EndlessReform/ja-media-toolkit.git@<commit>#subdirectory=packages/frontend'
+```
+
+uv built these repo packages from the same Git ref:
+
+- `ja-media-frontend` from `packages/frontend`
+- `ja-media-apple` from `envs/apple`
+- `ja-media-core` from `packages/core`
+- `ja-media-media` from `packages/media`
+- `ja-media-transcripts` from `packages/transcripts`
+
+The installed executable was:
+
+```sh
+ja-media
+```
+
+And this smoke test passed:
+
+```sh
+ja-media --help
+```
 
 ## What this means for CUDA
 
