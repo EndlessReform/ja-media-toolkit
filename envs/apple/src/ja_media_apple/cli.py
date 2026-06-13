@@ -9,9 +9,6 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from rich.console import Console
-from rich.logging import RichHandler
-
 from ja_media_apple.asr_config import (
     build_selected_asr_backend,
     load_apple_asr_config,
@@ -32,119 +29,13 @@ from ja_media_core.vad import (
 )
 
 
-_CONSOLE = Console(stderr=True)
 _LOG = logging.getLogger("ja_media_apple")
 
 
 def main() -> None:
-    _configure_logging()
-    parser = argparse.ArgumentParser(
-        prog="ja-media",
-        description="Apple-local ja-media utilities",
-    )
-    subparsers = parser.add_subparsers(dest="command")
+    from ja_media_frontend.cli import main as frontend_main
 
-    vad_parser = subparsers.add_parser(
-        "vad-local",
-        help="Run local MLX VAD on a client-local audio file",
-    )
-    vad_parser.add_argument("input", help="Local audio file path")
-    vad_parser.add_argument("--start-s", type=float, default=0.0)
-    vad_parser.add_argument("--end-s", type=float)
-    vad_parser.add_argument("--threshold", type=float)
-    vad_parser.add_argument("--min-speech-s", type=float, default=0.25)
-    vad_parser.add_argument("--min-silence-s", type=float, default=0.20)
-    vad_parser.add_argument("--speech-pad-s", type=float, default=0.05)
-    vad_parser.add_argument("--merge-gap-s", type=float, default=0.10)
-    vad_parser.add_argument("--channel", type=int)
-    vad_parser.add_argument("--model-id", default=DEFAULT_MLX_AUDIO_VAD_MODEL)
-    vad_parser.add_argument(
-        "--dump-speech-dir",
-        help=(
-            "Write output chunks as audio files: detected speech spans in plain "
-            "VAD mode, planned split chunks with --split-every-minutes"
-        ),
-    )
-    vad_parser.add_argument(
-        "--dump-audio-format",
-        choices=("wav", "flac"),
-        default="wav",
-        help="Audio format for dumped chunks. WAV is the default for macOS playback.",
-    )
-    vad_parser.add_argument(
-        "--split-every-minutes",
-        type=float,
-        help="Plan cuts near every N minutes using bounded VAD search windows",
-    )
-    vad_parser.add_argument(
-        "--split-radius-s",
-        type=float,
-        default=60.0,
-        help="Seconds to inspect on each side of each split target",
-    )
-    vad_parser.add_argument(
-        "--prefer-before-target",
-        action="store_true",
-        help="Prefer silence before the target when cut candidates tie",
-    )
-    vad_parser.add_argument(
-        "--format",
-        choices=("json", "text"),
-        default="json",
-    )
-
-    transcribe_parser = subparsers.add_parser(
-        "transcribe",
-        help="Run the configured Apple ASR backend on a client-local audio file",
-    )
-    transcribe_parser.add_argument(
-        "input",
-        nargs="+",
-        help="Local audio file path or glob pattern. Quote globs to let ja-media expand them.",
-    )
-    transcribe_parser.add_argument(
-        "-c",
-        "--config",
-        help="Path to ja-media-toolkit TOML config. Defaults to JA_MEDIA_CONFIG or XDG config.",
-    )
-    transcribe_parser.add_argument(
-        "--backend",
-        help="Configured ASR backend name. Defaults to [asr].default_backend.",
-    )
-    transcribe_parser.add_argument("--start-s", type=float, default=0.0)
-    transcribe_parser.add_argument("--end-s", type=float)
-    transcribe_parser.add_argument("--language", default="ja")
-    transcribe_parser.add_argument("--context-info")
-    transcribe_parser.add_argument("--hotword", action="append", default=[])
-    transcribe_parser.add_argument(
-        "--max-concurrent-requests",
-        type=int,
-        help="Override the selected ASR backend's concurrent vLLM request limit.",
-    )
-    transcribe_parser.add_argument(
-        "--startup-only",
-        action="store_true",
-        help="Load config/model and print startup metadata without calling vLLM.",
-    )
-    transcribe_parser.add_argument(
-        "--format",
-        choices=("json", "text"),
-        default="json",
-    )
-    transcribe_parser.add_argument(
-        "--srt-dir",
-        help="Write one .srt file per transcribed input into this directory.",
-    )
-
-    args = parser.parse_args()
-    if args.command == "vad-local":
-        run_vad_local(args)
-        return
-    if args.command == "transcribe":
-        run_transcribe(args)
-        return
-
-    parser.print_help()
+    frontend_main()
 
 
 def run_transcribe(args: argparse.Namespace) -> None:
@@ -234,25 +125,6 @@ def run_transcribe(args: argparse.Namespace) -> None:
                     for payload in payloads
                 )
             )
-
-
-def _configure_logging() -> None:
-    if logging.getLogger().handlers:
-        return
-    for logger_name in ("httpx", "httpcore", "huggingface_hub", "urllib3"):
-        logging.getLogger(logger_name).setLevel(logging.WARNING)
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(message)s",
-        handlers=[
-            RichHandler(
-                console=_CONSOLE,
-                markup=True,
-                show_path=False,
-                show_time=True,
-            )
-        ],
-    )
 
 
 async def _transcribe_prepared_async(

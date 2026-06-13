@@ -94,11 +94,16 @@ The root workspace can include the shared packages:
 ```toml
 [tool.uv.workspace]
 members = [
-  "packages/*",
+  "packages/core",
+  "packages/media",
+  "packages/transcripts",
 ]
 ```
 
-The root is for editing shared code. Environments are for running real jobs.
+The root is for editing shared contracts. Environments are for running real
+jobs. See [uv tool installs, frontends, and environment extras](uv-tool-install-frontends.md)
+for why the shared CLI frontend intentionally stays outside this cheap root
+workspace.
 
 ## Environment Rules
 
@@ -113,16 +118,18 @@ name = "ja-media-apple"
 requires-python = ">=3.13"
 dependencies = [
   "ja-media-core",
+  "ja-media-frontend",
   "ja-media-media",
   "ja-media-transcripts",
   "mlx-audio",
 ]
 
 [project.scripts]
-ja-media = "ja_media_apple.cli:main"
+ja-media = "ja_media_frontend.cli:main"
 
 [tool.uv.sources]
 ja-media-core = { path = "../../packages/core", editable = true }
+ja-media-frontend = { path = "../../packages/frontend", editable = true }
 ja-media-media = { path = "../../packages/media", editable = true }
 ja-media-transcripts = { path = "../../packages/transcripts", editable = true }
 ```
@@ -135,6 +142,7 @@ name = "ja-media-cuda"
 requires-python = ">=3.13"
 dependencies = [
   "ja-media-core",
+  "ja-media-frontend",
   "ja-media-media",
   "ja-media-transcripts",
   "torch",
@@ -142,10 +150,11 @@ dependencies = [
 ]
 
 [project.scripts]
-ja-media = "ja_media_cuda.cli:main"
+ja-media = "ja_media_frontend.cli:main"
 
 [tool.uv.sources]
 ja-media-core = { path = "../../packages/core", editable = true }
+ja-media-frontend = { path = "../../packages/frontend", editable = true }
 ja-media-media = { path = "../../packages/media", editable = true }
 ja-media-transcripts = { path = "../../packages/transcripts", editable = true }
 ```

@@ -1,4 +1,4 @@
-from ja_media_transcripts.srt import (
+from ja_media_core.srt import (
     SubtitleCue,
     format_srt,
     format_srt_timestamp,

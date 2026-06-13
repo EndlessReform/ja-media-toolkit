@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ja-media reader</title>
+    <link rel="stylesheet" href="/static/reader.css">
+  </head>
+  <body>
+    <div class="shell">
+      <header class="topbar">
+        <div class="brand">ja-media reader</div>
+      </header>
+
+      <main class="layout">
+        <section class="meta panel">
+          <div class="pathline"><span>source:</span><b id="media-name"></b></div>
+          <div class="pathline"><span>subtitle:</span><b id="subtitle-name"></b></div>
+          <div class="stat-grid">
+            <div><span>cue</span><b id="cue-stat">0/0</b></div>
+            <div><span>active</span><b id="active-stat">0.0s</b></div>
+            <div><span>span</span><b id="span-stat">0.0s</b></div>
+          </div>
+          <label class="font-select">
+            <span>JP font</span>
+            <select id="jp-font">
+              <option value="mincho" selected>mincho</option>
+              <option value="gothic">gothic</option>
+              <option value="system">system</option>
+            </select>
+          </label>
+        </section>
+
+        <section class="timeline panel">
+          <div class="panel-title">
+            <span class="timeline-metrics">
+              <span class="metric"><span class="metric-label">window:</span> <span class="metric-value" id="window-range">00:00.000 -> 00:00.000</span></span>
+              <span class="metric"><span class="metric-label">span:</span> <span class="metric-value" id="window-span">60.0s</span></span>
+            </span>
+            <span id="playback-label">stopped</span>
+          </div>
+          <div id="timeline-tracks" class="timeline-tracks"></div>
+          <div class="ticks">
+            <span id="tick-start">00:00.000</span>
+            <span id="tick-mid">00:00.000</span>
+            <span id="tick-end">00:00.000</span>
+          </div>
+        </section>
+
+        <section class="reader panel">
+          <div class="current">
+            <div class="current-time" id="current-time">0  00:00.000 -> 00:00.000</div>
+            <div class="current-text jp-text" id="current-text"></div>
+          </div>
+          <ol class="cue-list" id="cue-list"></ol>
+        </section>
+      </main>
+
+      <footer class="keybar">
+        <span>space play/stop</span>
+        <span>j/k cue</span>
+        <span>h/l cue</span>
+        <span>gg/G start/end</span>
+        <span>f/b page</span>
+        <span>d/u half-page</span>
+        <span>+/- zoom</span>
+      </footer>
+    </div>
+    <audio id="audio" preload="metadata" src="/media"></audio>
+    <script src="/static/reader.js"></script>
+  </body>
+</html>
