@@ -19,3 +19,6 @@ envs/apple/config.local.toml
 
 # Upstream
 docs/repo-symlinks/*
+
+# Secrets
+.env

@@ -71,6 +71,16 @@ uv run ja-media transcribe episode.mp3
 
 Prefer tomllib + Pydantic Settings for configuration where possible.
 
+## Assume available on PATH
+
+Assume you have (at a minimum):
+- ffmpeg, ffprobe, etc
+- jq
+- curl
+- rg
+
+Secrets are in `.env` in repo root. NEVER read this file directly. If you need to check that it exists, `stat .env` instead of trying to use any sort of read tool. `source` in CLI or use idiomatic tooling (eg python-dotenv for python).
+
 ## Smoke-testing
 
 ### About the system
