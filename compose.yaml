@@ -43,10 +43,10 @@ services:
       KITSUNEKKO_SUBTITLES_DB_PATH: "/var/lib/kitsunekko-subtitles/kitsunekko_subtitles.sqlite"
       KITSUNEKKO_SUBTITLES_CROSSWALK_DB_PATH: "/var/lib/anime-crosswalk-ro/anime_lists.sqlite"
       KITSUNEKKO_SUBTITLES_MIRROR_DIR: "/var/lib/kitsunekko-subtitles/kitsunekko-mirror"
-      KITSUNEKKO_SUBTITLES_UPSTREAM_REPO_URL: "git@github.com:Ajatt-Tools/kitsunekko-mirror.git"
+      KITSUNEKKO_SUBTITLES_UPSTREAM_REPO_URL: "https://github.com/Ajatt-Tools/kitsunekko-mirror.git"
       KITSUNEKKO_SUBTITLES_UPSTREAM_REPO_NAME: "Ajatt-Tools/kitsunekko-mirror"
       KITSUNEKKO_SUBTITLES_UPSTREAM_BRANCH: "main"
-      KITSUNEKKO_SUBTITLES_UPDATE_INTERVAL_SECONDS: "3600"
+      KITSUNEKKO_SUBTITLES_UPDATE_INTERVAL_SECONDS: "${KITSUNEKKO_SUBTITLES_UPDATE_INTERVAL_SECONDS:-3600}"
     volumes:
       - kitsunekko-subtitles-data:/var/lib/kitsunekko-subtitles
       - anime-crosswalk-data:/var/lib/anime-crosswalk-ro:ro

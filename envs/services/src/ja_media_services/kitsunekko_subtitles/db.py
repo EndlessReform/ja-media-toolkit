@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
+from typing import Any
 
 
 SCHEMA_VERSION = "1"
@@ -22,7 +23,7 @@ def initialize_schema(connection: sqlite3.Connection) -> None:
     connection.executescript(
         """
         CREATE TABLE subtitle_file (
-          subtitle_id INTEGER PRIMARY KEY,
+          subtitle_id TEXT PRIMARY KEY,
           anilist_id INTEGER NOT NULL,
           repo_path TEXT NOT NULL UNIQUE,
           filename TEXT NOT NULL,
@@ -43,21 +44,6 @@ def initialize_schema(connection: sqlite3.Connection) -> None:
         CREATE INDEX subtitle_file_episode_idx
         ON subtitle_file(anilist_id, episode_local);
 
-        CREATE TABLE subtitle_lookup (
-          source TEXT NOT NULL,
-          external_id TEXT NOT NULL,
-          media_kind TEXT,
-          anilist_id INTEGER NOT NULL,
-          subtitle_id INTEGER NOT NULL REFERENCES subtitle_file(subtitle_id),
-          PRIMARY KEY (source, external_id, media_kind, subtitle_id)
-        );
-
-        CREATE INDEX subtitle_lookup_source_id_idx
-        ON subtitle_lookup(source, external_id);
-
-        CREATE INDEX subtitle_lookup_source_id_kind_idx
-        ON subtitle_lookup(source, external_id, media_kind);
-
         CREATE TABLE metadata (
           key TEXT PRIMARY KEY,
           value TEXT NOT NULL
@@ -73,6 +59,165 @@ def fetch_metadata(connection: sqlite3.Connection) -> dict[str, str]:
         str(row["key"]): str(row["value"])
         for row in connection.execute("SELECT key, value FROM metadata ORDER BY key")
     }
+
+
+def row_to_subtitle_file(row: sqlite3.Row) -> dict[str, Any]:
+    """Convert one DB subtitle row into the API response shape."""
+
+    return {
+        "subtitle_id": str(row["subtitle_id"]),
+        "anilist_id": int(row["anilist_id"]),
+        "repo_path": str(row["repo_path"]),
+        "filename": str(row["filename"]),
+        "extension": str(row["extension"]),
+        "episode_local": row["episode_local"],
+        "episode_absolute": row["episode_absolute"],
+        "episode_raw": row["episode_raw"],
+        "episode_confidence": str(row["episode_confidence"]),
+        "group_hint": row["group_hint"],
+        "language_hint": row["language_hint"],
+        "release_tags": json_loads_list(str(row["release_tags_json"])),
+        "last_modified": row["last_modified"],
+    }
+
+
+def json_loads_list(value: str) -> list[str]:
+    """Parse a stored JSON list while keeping API rendering defensive."""
+
+    import json
+
+    parsed = json.loads(value)
+    if not isinstance(parsed, list):
+        return []
+    return [str(item) for item in parsed]
+
+
+def fetch_files_by_anilist(connection: sqlite3.Connection, anilist_id: int) -> list[dict[str, Any]]:
+    """Return subtitle rows directly indexed under one AniList ID."""
+
+    rows = connection.execute(
+        """
+        SELECT *
+        FROM subtitle_file
+        WHERE anilist_id = ?
+        ORDER BY episode_local IS NULL, episode_local, repo_path
+        """,
+        (anilist_id,),
+    ).fetchall()
+    return [row_to_subtitle_file(row) for row in rows]
+
+
+def fetch_files_by_anilist_with_prefix(
+    connection: sqlite3.Connection,
+    anilist_id: int,
+    prefix: str | None,
+) -> list[dict[str, Any]]:
+    """Return subtitle rows for one AniList ID, optionally scoped by repo path prefix."""
+
+    if not prefix:
+        return fetch_files_by_anilist(connection, anilist_id)
+    rows = connection.execute(
+        """
+        SELECT *
+        FROM subtitle_file
+        WHERE anilist_id = ?
+          AND repo_path LIKE ? || '%'
+        ORDER BY episode_local IS NULL, episode_local, repo_path
+        """,
+        (anilist_id, prefix),
+    ).fetchall()
+    return [row_to_subtitle_file(row) for row in rows]
+
+
+def fetch_files_by_anilist_ids(
+    connection: sqlite3.Connection,
+    anilist_ids: list[int],
+) -> list[dict[str, Any]]:
+    """Return subtitle rows for several AniList IDs."""
+
+    if not anilist_ids:
+        return []
+    placeholders = ",".join("?" for _ in anilist_ids)
+    rows = connection.execute(
+        f"""
+        SELECT *
+        FROM subtitle_file
+        WHERE anilist_id IN ({placeholders})
+        ORDER BY anilist_id,
+                 episode_local IS NULL,
+                 episode_local,
+                 repo_path
+        """,
+        tuple(anilist_ids),
+    ).fetchall()
+    return [row_to_subtitle_file(row) for row in rows]
+
+
+def fetch_files_by_anilist_ids_with_prefix(
+    connection: sqlite3.Connection,
+    anilist_ids: list[int],
+    prefix: str | None,
+) -> list[dict[str, Any]]:
+    """Return subtitle rows for several AniList IDs, optionally scoped by repo path prefix."""
+
+    if not prefix:
+        return fetch_files_by_anilist_ids(connection, anilist_ids)
+    if not anilist_ids:
+        return []
+    placeholders = ",".join("?" for _ in anilist_ids)
+    rows = connection.execute(
+        f"""
+        SELECT *
+        FROM subtitle_file
+        WHERE anilist_id IN ({placeholders})
+          AND repo_path LIKE ? || '%'
+        ORDER BY anilist_id,
+                 episode_local IS NULL,
+                 episode_local,
+                 repo_path
+        """,
+        (*anilist_ids, prefix),
+    ).fetchall()
+    return [row_to_subtitle_file(row) for row in rows]
+
+
+def fetch_file_by_subtitle_id(
+    connection: sqlite3.Connection,
+    subtitle_id: str,
+) -> dict[str, Any] | None:
+    """Return one subtitle row by stable UUID."""
+
+    row = connection.execute(
+        "SELECT * FROM subtitle_file WHERE subtitle_id = ?",
+        (subtitle_id,),
+    ).fetchone()
+    return row_to_subtitle_file(row) if row is not None else None
+
+
+def fetch_files_by_repo_path(
+    connection: sqlite3.Connection,
+    repo_path: str,
+) -> list[dict[str, Any]]:
+    """Return subtitle rows matching an exact mirror-relative repository path."""
+
+    rows = connection.execute(
+        "SELECT * FROM subtitle_file WHERE repo_path = ? ORDER BY repo_path",
+        (repo_path,),
+    ).fetchall()
+    return [row_to_subtitle_file(row) for row in rows]
+
+
+def fetch_files_by_filename(
+    connection: sqlite3.Connection,
+    filename: str,
+) -> list[dict[str, Any]]:
+    """Return subtitle rows matching an exact filename."""
+
+    rows = connection.execute(
+        "SELECT * FROM subtitle_file WHERE filename = ? ORDER BY repo_path",
+        (filename,),
+    ).fetchall()
+    return [row_to_subtitle_file(row) for row in rows]
 
 
 def validate_generated_db(db_path: Path) -> dict[str, str]:
@@ -92,7 +237,7 @@ def validate_generated_db(db_path: Path) -> dict[str, str]:
     finally:
         connection.close()
 
-    required_tables = {"subtitle_file", "subtitle_lookup", "metadata"}
+    required_tables = {"subtitle_file", "metadata"}
     missing_tables = required_tables - tables
     if missing_tables:
         raise ValueError(f"Generated DB is missing tables: {sorted(missing_tables)}")
@@ -103,4 +248,8 @@ def validate_generated_db(db_path: Path) -> dict[str, str]:
     for key in ("crosswalk_source_commit", "built_at", "subtitle_row_count", "lookup_row_count"):
         if key not in metadata:
             raise ValueError(f"Generated DB metadata is missing {key}")
+    if int(metadata.get("subtitle_row_count", "0")) < 0:
+        raise ValueError("Generated DB subtitle row count is invalid")
+    if int(metadata.get("lookup_row_count", "0")) < 0:
+        raise ValueError("Generated DB lookup row count is invalid")
     return metadata

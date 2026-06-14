@@ -119,13 +119,51 @@ fi
 : "${KITSUNEKKO_SUBTITLES_DB_PATH:=/var/lib/kitsunekko-subtitles/kitsunekko_subtitles.sqlite}"
 : "${KITSUNEKKO_SUBTITLES_CROSSWALK_DB_PATH:=/var/lib/anime-crosswalk-ro/anime_lists.sqlite}"
 : "${KITSUNEKKO_SUBTITLES_MIRROR_DIR:=$KITSUNEKKO_SUBTITLES_DATA_DIR/kitsunekko-mirror}"
-: "${KITSUNEKKO_SUBTITLES_UPSTREAM_REPO_URL:=git@github.com:Ajatt-Tools/kitsunekko-mirror.git}"
+: "${KITSUNEKKO_SUBTITLES_UPSTREAM_REPO_URL:=https://github.com/Ajatt-Tools/kitsunekko-mirror.git}"
 : "${KITSUNEKKO_SUBTITLES_UPSTREAM_REPO_NAME:=Ajatt-Tools/kitsunekko-mirror}"
 : "${KITSUNEKKO_SUBTITLES_UPSTREAM_BRANCH:=main}"
+: "${KITSUNEKKO_SUBTITLES_UPDATE_INTERVAL_SECONDS:=3600}"
 : "${KITSUNEKKO_SUBTITLES_UPDATE_ON_START:=1}"
 
 export KITSUNEKKO_SUBTITLES_DB_PATH
 export KITSUNEKKO_SUBTITLES_CROSSWALK_DB_PATH
+export KITSUNEKKO_SUBTITLES_MIRROR_DIR
+
+kitsunekko_subtitles_commit_path="$KITSUNEKKO_SUBTITLES_DATA_DIR/mirror_commit"
+
+kitsunekko_subtitles_sync_repo() {
+  mkdir -p "$KITSUNEKKO_SUBTITLES_DATA_DIR"
+
+  started_at="$(date +%s)"
+  if [ -d "$KITSUNEKKO_SUBTITLES_MIRROR_DIR/.git" ]; then
+    echo "kitsunekko-subtitles: fetching $KITSUNEKKO_SUBTITLES_UPSTREAM_REPO_NAME $KITSUNEKKO_SUBTITLES_UPSTREAM_BRANCH" >&2
+    if ! git -C "$KITSUNEKKO_SUBTITLES_MIRROR_DIR" fetch --quiet --depth 1 origin "$KITSUNEKKO_SUBTITLES_UPSTREAM_BRANCH"; then
+      echo "kitsunekko-subtitles: git fetch failed" >&2
+      return 70
+    fi
+    if ! git -C "$KITSUNEKKO_SUBTITLES_MIRROR_DIR" reset --quiet --hard FETCH_HEAD; then
+      echo "kitsunekko-subtitles: git reset failed" >&2
+      return 70
+    fi
+  else
+    echo "kitsunekko-subtitles: cloning $KITSUNEKKO_SUBTITLES_UPSTREAM_REPO_NAME $KITSUNEKKO_SUBTITLES_UPSTREAM_BRANCH into $KITSUNEKKO_SUBTITLES_MIRROR_DIR; first clone can take several minutes" >&2
+    rm -rf "$KITSUNEKKO_SUBTITLES_MIRROR_DIR"
+    if ! git clone \
+      --quiet \
+      --depth 1 \
+      --branch "$KITSUNEKKO_SUBTITLES_UPSTREAM_BRANCH" \
+      --single-branch \
+      "$KITSUNEKKO_SUBTITLES_UPSTREAM_REPO_URL" \
+      "$KITSUNEKKO_SUBTITLES_MIRROR_DIR"; then
+      echo "kitsunekko-subtitles: git clone failed" >&2
+      return 70
+    fi
+  fi
+  finished_at="$(date +%s)"
+  echo "kitsunekko-subtitles: mirror sync finished in $((finished_at - started_at))s" >&2
+
+  git -C "$KITSUNEKKO_SUBTITLES_MIRROR_DIR" rev-parse HEAD
+}
 
 kitsunekko_subtitles_update_once() {
   mkdir -p "$KITSUNEKKO_SUBTITLES_DATA_DIR"
@@ -139,29 +177,89 @@ kitsunekko_subtitles_update_once() {
     return 70
   fi
 
-  echo "kitsunekko-subtitles: Kitsunekko git sync is not enabled yet; building crosswalk-only DB"
+  old_commit=""
+  if [ -r "$kitsunekko_subtitles_commit_path" ]; then
+    old_commit="$(cat "$kitsunekko_subtitles_commit_path")"
+  fi
+
+  if ! new_commit="$(kitsunekko_subtitles_sync_repo)"; then
+    if [ -s "$KITSUNEKKO_SUBTITLES_DB_PATH" ]; then
+      echo "kitsunekko-subtitles: mirror sync failed; keeping existing DB" >&2
+      return 0
+    fi
+    echo "kitsunekko-subtitles: mirror sync failed and no DB exists" >&2
+    return 70
+  fi
+
+  if [ -s "$KITSUNEKKO_SUBTITLES_DB_PATH" ] && [ "$old_commit" = "$new_commit" ]; then
+    if uv run --no-sync kitsunekko-subtitles-smoke "$KITSUNEKKO_SUBTITLES_DB_PATH" >/dev/null; then
+      echo "kitsunekko-subtitles: DB is current at $new_commit"
+      return 0
+    fi
+    echo "kitsunekko-subtitles: existing DB failed smoke test; rebuilding $new_commit" >&2
+  fi
 
   mkdir -p "$(dirname "$KITSUNEKKO_SUBTITLES_DB_PATH")"
   next_db="${KITSUNEKKO_SUBTITLES_DB_PATH}.next"
   rm -f "$next_db"
 
-  uv run --no-sync kitsunekko-subtitles-ingest \
+  if ! uv run --no-sync kitsunekko-subtitles-ingest \
     --output "$next_db" \
     --crosswalk-db "$KITSUNEKKO_SUBTITLES_CROSSWALK_DB_PATH" \
+    --mirror-dir "$KITSUNEKKO_SUBTITLES_MIRROR_DIR" \
     --mirror-repo "$KITSUNEKKO_SUBTITLES_UPSTREAM_REPO_NAME" \
     --mirror-branch "$KITSUNEKKO_SUBTITLES_UPSTREAM_BRANCH" \
-    --mirror-commit "not-synced"
+    --mirror-commit "$new_commit"; then
+    echo "kitsunekko-subtitles: ingest failed; not promoting DB" >&2
+    rm -f "$next_db"
+    return 70
+  fi
 
-  uv run --no-sync kitsunekko-subtitles-smoke "$next_db"
+  if ! uv run --no-sync kitsunekko-subtitles-smoke "$next_db"; then
+    echo "kitsunekko-subtitles: smoke test failed; not promoting DB" >&2
+    rm -f "$next_db"
+    return 70
+  fi
 
   mv "$next_db" "$KITSUNEKKO_SUBTITLES_DB_PATH"
-  echo "kitsunekko-subtitles: promoted crosswalk-only DB from $KITSUNEKKO_SUBTITLES_CROSSWALK_DB_PATH"
-  return 0
+  printf '%s\n' "$new_commit" > "$kitsunekko_subtitles_commit_path"
+  echo "kitsunekko-subtitles: updated DB from ${old_commit:-none} to $new_commit"
+  return 10
 }
 
 run_kitsunekko_subtitles_prelude() {
 if [ "$KITSUNEKKO_SUBTITLES_UPDATE_ON_START" != "0" ] || [ ! -s "$KITSUNEKKO_SUBTITLES_DB_PATH" ]; then
+  set +e
   kitsunekko_subtitles_update_once
+  update_status="$?"
+  set -e
+  if [ "$update_status" -ne 0 ] && [ "$update_status" -ne 10 ]; then
+    exit "$update_status"
+  fi
+elif [ ! -s "$KITSUNEKKO_SUBTITLES_DB_PATH" ]; then
+  echo "kitsunekko-subtitles: update on start is disabled and no DB exists" >&2
+  exit 64
+fi
+
+if [ "$KITSUNEKKO_SUBTITLES_UPDATE_INTERVAL_SECONDS" -gt 0 ] 2>/dev/null; then
+  (
+    while :; do
+      sleep "$KITSUNEKKO_SUBTITLES_UPDATE_INTERVAL_SECONDS" || exit 0
+      set +e
+      kitsunekko_subtitles_update_once
+      update_status="$?"
+      set -e
+
+      if [ "$update_status" -eq 10 ]; then
+        echo "kitsunekko-subtitles: DB changed; restarting API process"
+        kill -TERM 1
+        exit 0
+      fi
+      if [ "$update_status" -ne 0 ]; then
+        echo "kitsunekko-subtitles: scheduled update failed" >&2
+      fi
+    done
+  ) &
 fi
 }
 
