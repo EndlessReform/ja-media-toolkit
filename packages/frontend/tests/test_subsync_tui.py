@@ -204,6 +204,32 @@ class SubsyncTuiTest(unittest.TestCase):
         self.assertEqual(cue_index, 1)
         self.assertTrue(terminated)
 
+    def test_ctrl_c_copies_current_subtitle_instead_of_quitting(self) -> None:
+        async def run_app() -> tuple[str, int]:
+            with TemporaryDirectory() as tmpdir:
+                tmp = Path(tmpdir)
+                media = tmp / "episode.mp3"
+                srt = tmp / "episode.ja.srt"
+                media.write_bytes(b"fake")
+                srt.write_text(SRT_TEXT, encoding="utf-8")
+
+                app = SubsyncTuiApp(
+                    source_path=media,
+                    tracks=[SubtitleTrack(srt, read_srt(srt))],
+                    initial_window_s=10.0,
+                )
+                with patch("ja_media_frontend.subsync_tui.write_clipboard") as copy:
+                    async with app.run_test() as pilot:
+                        await pilot.press("ctrl+c")
+                        await pilot.press("l")
+                        copied_text = copy.call_args.args[0]
+                        return copied_text, app.cue_index
+
+        copied_text, cue_index = asyncio.run(run_app())
+
+        self.assertEqual(copied_text, "hello")
+        self.assertEqual(cue_index, 1)
+
     def test_candidate_table_has_one_body_row_per_track(self) -> None:
         with TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)
@@ -270,7 +296,7 @@ class SubsyncTuiTest(unittest.TestCase):
                     "subtitle_id": "abc",
                     "repo_path": "subtitles/anime_tv/GANTZ/[Group] GANTZ - 16.srt",
                     "filename": "[Group] GANTZ - 16.srt",
-                    "extension": ".srt",
+                    "extension": "srt",
                 },
             )
             fake_client.file_content.return_value = SRT_TEXT.encode("utf-8")

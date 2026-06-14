@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import glob
+import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -398,6 +399,8 @@ class SubsyncTuiApp(App[None]):
         if char == "q":
             self.stop_playback()
             self.exit()
+        elif key == "ctrl+c":
+            self.copy_current_subtitle()
         elif key == "f6":
             self.action_open_remote_lookup()
         elif key == "space" or char == " ":
@@ -659,9 +662,28 @@ class SubsyncTuiApp(App[None]):
         playback = f"  {self.playback_status()}" if self.playback_status() else ""
         return (
             "space play/stop  h/l cue  j/k SRT  gg/G start/end  Ctrl-f/b page  "
-            "Ctrl-d/u half-page  +/- zoom  F6 kitsunekko  q quit"
+            "Ctrl-d/u half-page  +/- zoom  Ctrl-c copy  F6 kitsunekko  q quit"
             f"{pending}{playback}"
         )
+
+    def copy_current_subtitle(self) -> None:
+        """Copy the selected cue text to the system clipboard."""
+
+        cue = self.current_cue
+        if cue is None or not cue.text.strip():
+            self._playback_status = "nothing to copy"
+            self.refresh_view()
+            return
+
+        try:
+            write_clipboard(cue.text)
+        except RuntimeError as exc:
+            self._playback_status = str(exc)
+            self.notify(str(exc), severity="warning")
+        else:
+            self._playback_status = "copied subtitle"
+            self.notify("Copied subtitle")
+        self.refresh_view()
 
     def remote_label(self) -> str:
         source = self.remote_state.source
@@ -718,7 +740,8 @@ class SubsyncTuiApp(App[None]):
         response = self._remote_file_list(client)
         added = 0
         for file in response.files:
-            if str(file.get("extension", "")).lower() != ".srt":
+            extension = str(file.get("extension", "")).lower().lstrip(".")
+            if extension != "srt":
                 continue
             subtitle_id = str(file.get("subtitle_id") or "")
             if subtitle_id and any(
@@ -925,3 +948,35 @@ def playback_range(cue: SubtitleCue) -> tuple[float, float]:
     start_s = max(0.0, cue.start_s)
     end_s = max(start_s, cue.end_s)
     return start_s, max(0.001, end_s - start_s)
+
+
+def write_clipboard(text: str) -> None:
+    """Write text to the user's desktop clipboard using common local tools."""
+
+    command = clipboard_command()
+    if command is None:
+        raise RuntimeError("clipboard command not found")
+    try:
+        subprocess.run(
+            command,
+            input=text.encode("utf-8"),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise RuntimeError("clipboard copy failed") from exc
+
+
+def clipboard_command() -> list[str] | None:
+    """Return the first available command for writing clipboard text."""
+
+    for command in (
+        ["pbcopy"],
+        ["wl-copy"],
+        ["xclip", "-selection", "clipboard"],
+        ["xsel", "--clipboard", "--input"],
+    ):
+        if shutil.which(command[0]) is not None:
+            return command
+    return None
