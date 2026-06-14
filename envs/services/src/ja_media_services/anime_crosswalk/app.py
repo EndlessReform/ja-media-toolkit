@@ -11,6 +11,7 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, PlainTextResponse, Response
 from ja_media_core.crosswalk import normalize_media_kind, normalize_source
+from pydantic import BaseModel, Field
 
 from ja_media_services.anime_crosswalk.db import (
     connect_readonly,
@@ -38,6 +39,20 @@ VALID_SOURCES = {
 VALID_MEDIA_KINDS = {"tv", "movie"}
 
 logger = logging.getLogger(__name__)
+
+
+class BulkLookupItem(BaseModel):
+    """One lookup request within a bulk resolve call."""
+
+    source: str
+    id: str | int
+    media_kind: str | None = None
+
+
+class BulkLookupRequest(BaseModel):
+    """Request body for resolving several independent IDs in one HTTP call."""
+
+    lookups: list[BulkLookupItem] = Field(..., min_length=1, max_length=500)
 
 
 def get_settings() -> AnimeCrosswalkSettings:
@@ -121,6 +136,7 @@ def build_llms_txt(settings: AnimeCrosswalkSettings) -> str:
             "- [Source JSON](/data/anime-list-full.json): Original anime-list-full.json; send `Accept-Encoding: gzip` for compressed transfer.",
             "- [Resolve broad](/resolve/tvdb/79099): Resolve `/{source}/{id}` with all matches.",
             "- [Resolve by kind](/resolve/tmdb/tv/8864): Resolve `/{source}/{media_kind}/{id}` for TV/movie-specific sources.",
+            "- `POST /resolve/bulk`: Resolve up to 500 `{source, id, media_kind}` requests in one call.",
             "- [TVDB](/tvdb/79099): Shortcut for broad TVDB lookup.",
             "- [TVDB series](/tvdb/series/79099): Shortcut for TVDB series-like lookup.",
             "- [TVDB movie](/tvdb/movie/79099): Shortcut for TVDB movie lookup.",
@@ -139,6 +155,9 @@ def build_llms_txt(settings: AnimeCrosswalkSettings) -> str:
             "",
             "No match is a `200` with `count: 0` and an empty `results` array. "
             "Invalid sources or media kinds are `400` responses.",
+            "",
+            "Bulk resolve returns the same per-lookup response contract under "
+            "`results`, preserving request order.",
             "",
             "## Optional",
             "",
@@ -221,6 +240,19 @@ def create_app(settings: AnimeCrosswalkSettings | None = None) -> FastAPI:
             media_kind=media_kind,
             settings=active_settings,
         )
+
+    @app.post("/resolve/bulk")
+    def resolve_bulk(request: BulkLookupRequest) -> dict[str, Any]:
+        results = [
+            lookup(
+                source=item.source,
+                external_id=str(item.id),
+                media_kind=item.media_kind,
+                settings=active_settings,
+            )
+            for item in request.lookups
+        ]
+        return {"count": len(results), "results": results}
 
     @app.get("/tvdb/{external_id}")
     def tvdb(external_id: str) -> dict[str, Any]:

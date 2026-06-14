@@ -32,20 +32,23 @@ base="${ANIME_CROSSWALK_BASE_URL%/}"
 curl -fsS "$base/tvdb/movie/79099"
 curl -fsS "$base/resolve/anilist/3269"
 curl -fsS "$base/tmdb/tv/8864"
+curl -fsS "$base/resolve/bulk" \
+  -H 'Content-Type: application/json' \
+  -d '{"lookups":[{"source":"tvdb","id":"79099","media_kind":"movie"},{"source":"mal","id":"3269"}]}'
 ```
 
 For scripted lookups, use `scripts/resolve.sh`:
 
 ```sh
 ANIME_CROSSWALK_BASE_URL=http://host:58834 \
-  skills/anime-crosswalk/scripts/resolve.sh tvdb 79099 movie
+  .agents/skills/anime-crosswalk/scripts/resolve.sh tvdb 79099 movie
 ```
 
 For the full upstream JSON dump, use gzip transfer:
 
 ```sh
 ANIME_CROSSWALK_BASE_URL=http://host:58834 \
-  skills/anime-crosswalk/scripts/download-dump.sh /tmp/anime-list-full.json
+  .agents/skills/anime-crosswalk/scripts/download-dump.sh /tmp/anime-list-full.json
 ```
 
 ## What To Read
@@ -62,6 +65,13 @@ Bridge Sonarr/TVDB to AniList characters:
 3. Read `results[*].anilist_id` from the response.
 4. Use the AniList ID with the AniList GraphQL API or the target project logic.
 5. If `count` is `0`, stop and report no local crosswalk match. Do not invent an ID.
+
+Bulk bridge many IDs:
+
+1. Use `POST /resolve/bulk` with `{"lookups": [...]}` for page-sized batches.
+2. Keep each item shaped as `{"source": "...", "id": "...", "media_kind": "tv|movie"}`.
+3. Read `results` in order; each entry has the same contract as a single lookup.
+4. Treat per-item `count: 0` as a normal no-match result.
 
 Compute metadata coverage:
 
@@ -82,5 +92,6 @@ Add client code:
 - The service is LAN/tailnet oriented and normally unauthenticated.
 - Invalid source or media kind returns HTTP `400`.
 - No match returns HTTP `200` with `count: 0`.
+- Bulk lookup preserves request order and accepts up to 500 lookup items.
 - TVDB and TMDB can have TV/movie ambiguity; use kind-specific endpoints when the caller knows the kind.
 - Keep copied client code tiny. Do not vendor this whole repo into another project.

@@ -72,6 +72,44 @@ def test_missing_lookup_is_empty_200(tmp_path: Path) -> None:
     assert response.json()["results"] == []
 
 
+def test_bulk_lookup_preserves_order_and_no_match_payloads(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+
+    response = client.post(
+        "/resolve/bulk",
+        json={
+            "lookups": [
+                {"source": "tvdb", "id": 79099, "media_kind": "movie"},
+                {"source": "mal", "id": 999999},
+                {"source": "tmdb", "id": 222, "media_kind": "tv"},
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["count"] == 3
+    assert payload["results"][0]["source"] == "tvdb"
+    assert payload["results"][0]["count"] == 1
+    assert payload["results"][1] == {
+        "source": "mal",
+        "id": "999999",
+        "media_kind": None,
+        "count": 0,
+        "results": [],
+    }
+    assert payload["results"][2]["source"] == "tmdb"
+    assert payload["results"][2]["results"][0]["tvdb_id"] == 111
+
+
+def test_bulk_lookup_invalid_source_is_400(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+
+    response = client.post("/resolve/bulk", json={"lookups": [{"source": "nope", "id": 1}]})
+
+    assert response.status_code == 400
+
+
 def test_invalid_source_is_400(tmp_path: Path) -> None:
     client = make_client(tmp_path)
 

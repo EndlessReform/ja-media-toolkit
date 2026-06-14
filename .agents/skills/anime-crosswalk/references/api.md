@@ -31,6 +31,7 @@ Generic:
 ```text
 GET /resolve/{source}/{id}
 GET /resolve/{source}/{media_kind}/{id}
+POST /resolve/bulk
 ```
 
 Shortcuts:
@@ -93,6 +94,42 @@ Rules:
 - HTTP `400` means invalid source or media kind.
 - `results` may contain more than one row. Do not assume uniqueness.
 - IDs in the path can be strings. Preserve IDs from payloads as returned.
+
+Bulk lookups accept up to 500 independent lookups in one request:
+
+```sh
+curl -fsS "$base/resolve/bulk" \
+  -H 'Content-Type: application/json' \
+  -d '{"lookups":[{"source":"tvdb","id":"79099","media_kind":"movie"},{"source":"mal","id":"3269"}]}'
+```
+
+Bulk responses preserve request order and wrap normal lookup payloads:
+
+```json
+{
+  "count": 2,
+  "results": [
+    {
+      "source": "tvdb",
+      "id": "79099",
+      "media_kind": "movie",
+      "count": 1,
+      "results": [{"anilist_id": 3269}]
+    },
+    {
+      "source": "mal",
+      "id": "3269",
+      "media_kind": null,
+      "count": 1,
+      "results": [{"anilist_id": 3269}]
+    }
+  ]
+}
+```
+
+If any bulk item has an invalid source or media kind, the request returns
+HTTP `400`. Per-item no-matches stay successful lookup payloads with
+`count: 0`.
 
 ## Common Bridge: TVDB To AniList
 

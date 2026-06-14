@@ -30,6 +30,12 @@ class CrosswalkLookup:
     results: list[dict[str, Any]]
 
 
+@dataclass(frozen=True)
+class CrosswalkBulkLookup:
+    count: int
+    results: list[CrosswalkLookup]
+
+
 class AnimeCrosswalkClient:
     def __init__(self, base_url: str | None = None, timeout: float = 10.0) -> None:
         base = base_url or os.environ.get("ANIME_CROSSWALK_BASE_URL")
@@ -68,6 +74,34 @@ class AnimeCrosswalkClient:
             results=list(payload["results"]),
         )
 
+    def resolve_many(self, lookups: list[dict[str, Any]]) -> CrosswalkBulkLookup:
+        payload = json.dumps({"lookups": lookups}).encode("utf-8")
+        request = Request(
+            f"{self.base_url}/resolve/bulk",
+            data=payload,
+            headers={"Accept": "application/json", "Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=self.timeout) as response:
+                data = json.loads(response.read().decode("utf-8"))
+        except HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"anime crosswalk HTTP {exc.code}: {detail}") from exc
+        return CrosswalkBulkLookup(
+            count=int(data["count"]),
+            results=[
+                CrosswalkLookup(
+                    source=item["source"],
+                    id=item["id"],
+                    media_kind=item.get("media_kind"),
+                    count=int(item["count"]),
+                    results=list(item["results"]),
+                )
+                for item in data["results"]
+            ],
+        )
+
     def tvdb(self, tvdb_id: str | int, media_kind: str | None = None) -> CrosswalkLookup:
         return self.resolve("tvdb", tvdb_id, media_kind)
 
@@ -84,6 +118,10 @@ class AnimeCrosswalkClient:
 client = AnimeCrosswalkClient()
 lookup = client.tvdb(79099, media_kind="movie")
 anilist_ids = [row["anilist_id"] for row in lookup.results if row.get("anilist_id")]
+bulk = client.resolve_many([
+    {"source": "tvdb", "id": 79099, "media_kind": "movie"},
+    {"source": "mal", "id": 3269},
+])
 ```
 
 ## TypeScript Client
@@ -121,6 +159,20 @@ export class AnimeCrosswalkClient {
     return (await response.json()) as CrosswalkLookup;
   }
 
+  async resolveMany(
+    lookups: Array<{source: string; id: string | number; media_kind?: "tv" | "movie"}>,
+  ): Promise<{count: number; results: CrosswalkLookup[]}> {
+    const response = await fetch(`${this.baseUrl}/resolve/bulk`, {
+      method: "POST",
+      headers: {Accept: "application/json", "Content-Type": "application/json"},
+      body: JSON.stringify({lookups}),
+    });
+    if (!response.ok) {
+      throw new Error(`anime crosswalk HTTP ${response.status}: ${await response.text()}`);
+    }
+    return (await response.json()) as {count: number; results: CrosswalkLookup[]};
+  }
+
   tvdb(id: string | number, mediaKind?: "tv" | "movie") {
     return this.resolve("tvdb", id, mediaKind);
   }
@@ -145,5 +197,7 @@ export class AnimeCrosswalkClient {
 - Add one no-match test: response `count: 0` should not throw.
 - Add one multiple-match test: caller should not silently take the first result
   unless that is a deliberate product decision.
+- If using bulk lookup, add one mixed hit/no-match test and assert response
+  order matches request order.
 - Keep network errors separate from no-match results.
 - If the target project already has HTTP retry/backoff conventions, use them.

@@ -13,6 +13,7 @@ wheels/
 output
 envs/apple/config.local.toml
 envs/services/data
+*.jsonl.gz
 *.srt
 
 # OS

@@ -6,82 +6,14 @@ import sqlite3
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
+from ja_media_core.crosswalk import anime_list_lookup_rows as lookup_rows
 from ja_media_services.anime_crosswalk.db import (
     SCHEMA_VERSION,
     initialize_schema,
     validate_generated_db,
 )
-
-
-SOURCE_FIELDS = {
-    "anidb_id": "anidb",
-    "mal_id": "mal",
-    "anilist_id": "anilist",
-    "kitsu_id": "kitsu",
-    "tvdb_id": "tvdb",
-    "imdb_id": "imdb",
-    "anime-planet_id": "anime-planet",
-    "anisearch_id": "anisearch",
-    "animenewsnetwork_id": "animenewsnetwork",
-    "livechart_id": "livechart",
-    "simkl_id": "simkl",
-}
-
-
-def scalar_ids(value: Any) -> Iterable[str]:
-    """Yield normalized scalar IDs from upstream values.
-
-    Upstream fields are usually single numbers or strings, but preserving a
-    small iterable path makes ingestion tolerant of source-side shape changes.
-    """
-
-    if value is None or value == "":
-        return
-    if isinstance(value, list):
-        for item in value:
-            yield from scalar_ids(item)
-        return
-    yield str(value)
-
-
-def infer_tvdb_kind(payload: dict[str, Any]) -> str:
-    """Conservatively infer TVDB media kind from upstream row shape.
-
-    Fribb/anime-lists gives TMDB explicit TV/movie slots but TVDB is less
-    direct. Treat movie rows without a TVDB season marker as movies; everything
-    else is series-like. Broad kindless TVDB lookup rows are also emitted, so
-    this classification only affects callers that explicitly ask for a kind.
-    """
-
-    season = payload.get("season")
-    tvdb_season = season.get("tvdb") if isinstance(season, dict) else None
-    if payload.get("type") == "MOVIE" and tvdb_season in (None, 0, "0", ""):
-        return "movie"
-    return "tv"
-
-
-def lookup_rows(payload: dict[str, Any], row_id: int) -> list[tuple[str, str, str | None, int]]:
-    """Build lookup-table rows for one upstream anime-list object."""
-
-    rows: list[tuple[str, str, str | None, int]] = []
-    for field, source in SOURCE_FIELDS.items():
-        for external_id in scalar_ids(payload.get(field)):
-            rows.append((source, external_id, None, row_id))
-            if source == "tvdb":
-                rows.append((source, external_id, infer_tvdb_kind(payload), row_id))
-
-    tmdb_ids = payload.get("themoviedb_id")
-    if isinstance(tmdb_ids, dict):
-        for media_kind in ("tv", "movie"):
-            for external_id in scalar_ids(tmdb_ids.get(media_kind)):
-                rows.append(("tmdb", external_id, media_kind, row_id))
-                rows.append(("tmdb", external_id, None, row_id))
-    else:
-        for external_id in scalar_ids(tmdb_ids):
-            rows.append(("tmdb", external_id, None, row_id))
-    return rows
 
 
 def build_database(

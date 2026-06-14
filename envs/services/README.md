@@ -36,6 +36,9 @@ From the repo root on the Debian VM:
 docker compose up -d --build
 curl http://127.0.0.1:58834/healthz
 curl 'http://127.0.0.1:58834/tvdb/movie/79099'
+curl -X POST http://127.0.0.1:58834/resolve/bulk \
+  -H 'Content-Type: application/json' \
+  -d '{"lookups":[{"source":"tvdb","id":"79099","media_kind":"movie"},{"source":"mal","id":"3269"}]}'
 curl --compressed http://127.0.0.1:58834/data/anime-list-full.json >/dev/null
 ```
 
@@ -68,8 +71,11 @@ Useful endpoints:
 - `GET /data/anime-list-full.json`
 - `GET /resolve/{source}/{id}`
 - `GET /resolve/{source}/{media_kind}/{id}`
+- `POST /resolve/bulk`
 - `GET /tvdb/{id}`, `/tvdb/series/{id}`, `/tvdb/movie/{id}`
 - `GET /mal/{id}`, `/anidb/{id}`, `/tmdb/tv/{id}`, `/tmdb/movie/{id}`
 
 Full JSON file responses are compressed when the client advertises
 `Accept-Encoding: gzip`. Use `curl --compressed` to request and decode gzip.
+Bulk resolve accepts up to 500 lookup objects and returns normal lookup
+payloads in request order.

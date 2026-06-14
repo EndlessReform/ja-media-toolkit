@@ -400,6 +400,7 @@ GET /tmdb/tv/{id}
 GET /tmdb/movie/{id}
 GET /resolve/{source}/{id}
 GET /resolve/{source}/{media_kind}/{id}
+POST /resolve/bulk
 ```
 
 Response shape should always allow multiple results, even when there is usually
@@ -444,6 +445,22 @@ For invalid sources, return a clear `400`.
 
 For missing IDs, return `200` with empty results. This is lookup semantics, not
 a missing-resource read.
+
+Bulk lookup accepts a JSON body with up to 500 lookup objects:
+
+```json
+{
+  "lookups": [
+    {"source": "tvdb", "id": "79099", "media_kind": "movie"},
+    {"source": "mal", "id": "3269"}
+  ]
+}
+```
+
+It returns `{"count": N, "results": [...]}` where every result is the same shape
+as a single lookup response. Results preserve request order. Invalid sources or
+media kinds still return `400`; individual no-matches are successful lookup
+responses with `count: 0`.
 
 ### Full Source JSON
 
@@ -551,8 +568,11 @@ timeout_s = 5.0
 Also support environment variables for simple scripts:
 
 ```text
-JA_MEDIA_ANIME_CROSSWALK_URL=http://anime-crosswalk.lan:8000
+ANIME_CROSSWALK_BASE_URL=http://anime-crosswalk.lan:8000
 ```
+
+`JA_MEDIA_ANIME_CROSSWALK_URL` remains accepted as a legacy fallback for older
+local scripts.
 
 ## FastAPI Behavior
 
