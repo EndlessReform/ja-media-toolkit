@@ -12,6 +12,7 @@ from ja_media_frontend.subsync_tui import (
     SPAN_BLOCK,
     SubtitleTrack,
     SubsyncTuiApp,
+    extracted_audio_source,
     playback_range,
     resolve_srt_inputs,
     runtime_episode_number,
@@ -50,6 +51,69 @@ class SubsyncTuiTest(unittest.TestCase):
 
     def test_runtime_episode_number_parses_media_filename_stem(self) -> None:
         self.assertEqual(runtime_episode_number("[Group] GANTZ.S01E16.1080p"), 16)
+
+    def test_extracted_audio_source_leaves_non_mkv_sources_alone(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            source = Path(tmpdir) / "episode.opus"
+            source.write_bytes(b"fake")
+
+            self.assertEqual(extracted_audio_source(source, Path(tmpdir)), source)
+
+    def test_extracted_audio_source_bails_loudly_when_ffmpeg_is_missing(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            source = Path(tmpdir) / "episode.mkv"
+            source.write_bytes(b"fake")
+
+            with patch("ja_media_frontend.subsync_tui.shutil.which", return_value=None):
+                with self.assertRaisesRegex(SystemExit, "ffmpeg not found"):
+                    extracted_audio_source(source, Path(tmpdir))
+
+    def test_extracted_audio_source_copies_first_mkv_audio_stream(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            source = tmp / "Episode S01E06.mkv"
+            source.write_bytes(b"fake")
+
+            def fake_run(command, **kwargs):  # type: ignore[no-untyped-def]
+                Path(command[-1]).write_bytes(b"audio")
+                return Mock(returncode=0, stderr="")
+
+            with (
+                patch("ja_media_frontend.subsync_tui.shutil.which", return_value="ffmpeg"),
+                patch(
+                    "ja_media_frontend.subsync_tui.subprocess.run",
+                    side_effect=fake_run,
+                ) as run,
+            ):
+                extracted = extracted_audio_source(source, tmp)
+
+            command = run.call_args.args[0]
+            self.assertEqual(extracted.name, "Episode S01E06.audio.mka")
+            self.assertEqual(extracted.read_bytes(), b"audio")
+            self.assertEqual(
+                command[:6],
+                ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i"],
+            )
+            self.assertEqual(command[6], str(source))
+            self.assertIn("-map", command)
+            self.assertIn("0:a:0", command)
+            self.assertIn("-c:a", command)
+            self.assertIn("copy", command)
+
+    def test_extracted_audio_source_includes_ffmpeg_stderr_on_failure(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            source = Path(tmpdir) / "episode.mkv"
+            source.write_bytes(b"fake")
+
+            with (
+                patch("ja_media_frontend.subsync_tui.shutil.which", return_value="ffmpeg"),
+                patch(
+                    "ja_media_frontend.subsync_tui.subprocess.run",
+                    return_value=Mock(returncode=1, stderr="Stream map failed"),
+                ),
+            ):
+                with self.assertRaisesRegex(SystemExit, "Stream map failed"):
+                    extracted_audio_source(source, Path(tmpdir))
 
     def test_key_navigation_moves_current_cue(self) -> None:
         async def run_app() -> tuple[int, str]:

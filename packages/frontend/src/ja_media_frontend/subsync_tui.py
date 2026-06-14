@@ -134,12 +134,14 @@ def run_subsync_tui(
             raise SystemExit(f"Could not parse {path}: {exc}") from exc
 
     with tempfile.TemporaryDirectory(prefix="ja-media-subsync-") as tmpdir:
+        session_dir = Path(tmpdir)
+        playback_source = extracted_audio_source(source, session_dir)
         app = SubsyncTuiApp(
-            source_path=source,
+            source_path=playback_source,
             tracks=tracks,
             initial_window_s=window_s,
             remote_state=remote_state,
-            download_dir=Path(tmpdir),
+            download_dir=session_dir,
         )
         if fetch_subs:
             app.fetch_remote_tracks_or_exit()
@@ -177,6 +179,56 @@ def resolve_srt_inputs(inputs: list[str], *, allow_empty: bool = False) -> list[
     if not paths and not allow_empty:
         raise SystemExit("No SRT candidates were provided")
     return paths
+
+
+def extracted_audio_source(source: Path, output_dir: Path) -> Path:
+    """Return an audio-only source for MKV inputs, preserving other media as-is.
+
+    The timing review loop only needs audio playback. Pulling the first audio
+    stream into the session directory keeps repeated cue playback snappy while
+    avoiding durable sidecar files next to the user's media.
+    """
+
+    if source.suffix.lower() != ".mkv":
+        return source
+    if shutil.which("ffmpeg") is None:
+        raise SystemExit("ffmpeg not found; cannot extract audio from MKV source")
+
+    output_path = output_dir / f"{source.stem}.audio.mka"
+    command = [
+        "ffmpeg",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-i",
+        str(source),
+        "-map",
+        "0:a:0",
+        "-vn",
+        "-c:a",
+        "copy",
+        str(output_path),
+    ]
+    result = subprocess.run(
+        command,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        check=False,
+        text=True,
+    )
+    if result.returncode != 0:
+        detail = result.stderr.strip() or "ffmpeg produced no diagnostic output"
+        raise SystemExit(
+            "Could not extract first audio stream from MKV source with ffmpeg:\n"
+            f"{detail}"
+        )
+    if not output_path.is_file():
+        raise SystemExit(
+            "ffmpeg completed but did not create an audio file: "
+            f"{output_path}"
+        )
+    return output_path
 
 
 def runtime_episode_number(filename_stem: str) -> int | None:
