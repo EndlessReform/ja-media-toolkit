@@ -7,6 +7,7 @@ import json
 import logging
 import sqlite3
 import tarfile
+import urllib.parse
 import uuid
 from functools import lru_cache
 from pathlib import Path
@@ -176,10 +177,16 @@ def mirror_file_path(mirror_dir: Path, file: dict[str, Any]) -> Path:
 
 
 def content_disposition(filename: str) -> str:
-    """Return a conservative attachment header value for generated responses."""
+    """Return an RFC 5987 Content-Disposition header with ASCII fallback.
+
+    Provides both ``filename`` (ASCII-only fallback for legacy clients)
+    and ``filename*`` (UTF-8 percent-encoded original per RFC 5987).
+    """
 
     safe = filename.replace("\\", "_").replace("/", "_").replace('"', "'")
-    return f'attachment; filename="{safe}"'
+    ascii_safe = "".join(c for c in safe if ord(c) < 128)
+    utf8_encoded = urllib.parse.quote(safe, encoding="utf-8")
+    return f'attachment; filename="{ascii_safe}"; filename*=UTF-8\'\'{utf8_encoded}'
 
 
 def single_file_response(

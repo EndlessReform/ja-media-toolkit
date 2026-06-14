@@ -46,11 +46,26 @@ Use a branch, tag, or full commit hash that already exists on the remote. uv
 will fetch the repository, enter `packages/frontend`, and resolve the
 `ja-media-frontend[apple]` package from there.
 
-For local development, this equivalent shape worked:
+For local development, run frontend-owned commands from the frontend package:
+
+```sh
+cd packages/frontend
+uv run ja-media subsync tui --help
+```
+
+Run Apple-runtime commands from the Apple environment:
 
 ```sh
 cd envs/apple
-uv run --isolated --with-editable '../../packages/frontend[apple]' ja-media --help
+uv run ja-media transcribe --help
+```
+
+To smoke-test the persistent install shape from a checkout, this equivalent
+command also works:
+
+```sh
+cd packages/frontend
+uv run --isolated --with-editable '.[apple]' ja-media transcribe --help
 ```
 
 ## Package shape
@@ -76,7 +91,9 @@ The Apple package still owns the actual Apple work:
 - VAD-backed chunk planning
 - VibeVoice/vLLM backend construction
 - local VAD execution
-- subtitle TUI implementation
+
+The shared frontend package owns cheap user-facing surfaces that do not need
+Apple-only dependencies, including the subtitle TUI.
 
 The frontend imports Apple code lazily, only after a command needs it. That
 means `ja-media --help` can run from the frontend package without importing MLX,
@@ -136,6 +153,8 @@ members = [
 
 This keeps the root lockfile cheap and contract-focused. The frontend is still a
 package in the repo, but it is not part of the shared root workspace lock.
+The root project itself should not depend on `ja-media-frontend`; otherwise uv
+will try to make the root lockfile own user-facing runtime dependencies again.
 
 ## What passed locally and from Git
 

@@ -15,8 +15,15 @@ workflows.
 
 ## Persistent CLI Install
 
-For normal development, prefer `cd envs/apple && uv run ja-media ...`; that uses
-the checked-out source tree and the Apple env lockfile.
+For normal development, run the command from the package that owns the work:
+
+- `cd packages/frontend && uv run ja-media subsync tui ...` for the lightweight
+  subtitle TUI and other frontend-owned tools.
+- `cd envs/apple && uv run ja-media transcribe ...` for Apple-local
+  transcription, VAD, and other MLX/audio runtime work.
+
+The repository root coordinates shared packages and docs; it is not the normal
+place to run the `ja-media` console script.
 
 When you want a persistent `ja-media` command outside the repo venv, install the
 shared frontend package from Git and select the Apple backend with the
@@ -47,16 +54,25 @@ add `--force` to the `uv tool install` command.
 
 ## Local Checkout Usage
 
-When working from a checkout, run commands through the Apple env:
+When working from a checkout, run frontend-owned commands through
+`packages/frontend`:
+
+```sh
+cd packages/frontend
+uv sync
+uv run ja-media subsync tui --help
+```
+
+Run Apple runtime commands through `envs/apple`:
 
 ```sh
 cd envs/apple
 uv sync
-uv run ja-media --help
+uv run ja-media transcribe --help
 ```
 
-The root project coordinates shared packages. The runnable Apple dependencies
-live under `envs/apple`.
+The root project coordinates shared packages. The frontend command surface lives
+under `packages/frontend`; runnable Apple dependencies live under `envs/apple`.
 
 ## Transcription
 

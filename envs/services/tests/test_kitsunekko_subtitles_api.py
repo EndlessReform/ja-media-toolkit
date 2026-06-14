@@ -9,7 +9,12 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from ja_media_services.kitsunekko_subtitles.app import create_app, get_connection, get_crosswalk_connection
+from ja_media_services.kitsunekko_subtitles.app import (
+    content_disposition,
+    create_app,
+    get_connection,
+    get_crosswalk_connection,
+)
 from ja_media_services.kitsunekko_subtitles.ingest import build_database
 from ja_media_services.kitsunekko_subtitles.settings import KitsunekkoSubtitlesSettings
 
@@ -167,7 +172,7 @@ def test_file_content_endpoint_fetches_by_uuid_and_supports_gzip(tmp_path: Path)
     assert plain_response.status_code == 200
     assert plain_response.text.startswith("1\n")
     assert "こんにちは" in plain_response.text
-    assert plain_response.headers["content-disposition"].endswith('.srt"')
+    assert ".srt" in plain_response.headers["content-disposition"]
 
     gzip_response = client.get(f"/files/{listed['subtitle_id']}/content?compression=gzip")
 
@@ -261,3 +266,26 @@ def test_llms_txt_documents_episode_endpoints(tmp_path: Path) -> None:
     assert "/series/anilist/395/episodes/16/files" in response.text
     assert "/series/tvdb/79099/episodes/16/files" in response.text
     assert "parse-torrent-title" in response.text
+
+
+def test_content_disposition_ascii_only() -> None:
+    value = content_disposition("episode1.srt")
+    assert 'attachment; filename="episode1.srt"' in value
+    assert "filename*=UTF-8''episode1.srt" in value
+
+
+def test_content_disposition_unicode_filename() -> None:
+    value = content_disposition("日本語字幕.srt")
+    # ASCII fallback strips non-ASCII characters
+    assert 'attachment; filename=".srt"' in value
+    # RFC 5987 UTF-8 encoded original preserves the full filename
+    import urllib.parse
+
+    expected_encoded = urllib.parse.quote("日本語字幕.srt", encoding="utf-8")
+    assert f"filename*=UTF-8''{expected_encoded}" in value
+
+
+def test_content_disposition_sanitizes_path_separators() -> None:
+    value = content_disposition("dir/subtitle\\file.srt")
+    # Backslashes and slashes are replaced with underscores
+    assert "dir_subtitle_file.srt" in value
