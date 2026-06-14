@@ -37,6 +37,10 @@ semantics.
   lists, and an `Optional` section for secondary context. The file should
   advertise the service API and reproduce the repository README at the bottom
   so an LLM or agent can understand both the service and the broader toolkit.
+- Provide a Docker Compose path for a single Debian VM deployment. This should
+  use uv inside the container and keep the host contract simple: pull the
+  branch, build the image, and start the service. Upstream clone/update details
+  belong inside the container, not in host cron jobs or host bind mounts.
 
 ## Non-Goals
 
@@ -207,7 +211,9 @@ Use:
 - uv
 - FastAPI
 - SQLite
-- systemd service plus systemd timer or a cron-style update script
+- Docker Compose for the current VM deployment
+- systemd service plus systemd timer or a cron-style update script for hosts
+  where containers are not desirable
 - Prometheus metrics endpoint
 - stdout/stderr logs suitable for Loki
 
@@ -236,6 +242,71 @@ ja_media_core.crosswalk.HttpAnimeCrosswalkClient used by local tools
 Do not use Postgres for v0. The service is a read-heavy static lookup service
 with occasional full rebuilds. SQLite is enough and keeps the blast radius
 small.
+
+## Docker VM Deployment
+
+The current default deployment target is a small Docker-enabled Debian VM on
+the tailnet. Since there is not yet a clean domain/proxy story, the root
+`compose.yaml` publishes the service directly on the uncommon host port
+`58834`:
+
+```text
+host:58834 -> container:8000
+```
+
+The image is built from `envs/services/Dockerfile`, based on Astral's official
+uv Python image:
+
+```text
+ghcr.io/astral-sh/uv:python3.13-trixie-slim
+```
+
+The container runs service commands through `uv run`. The host should not know
+where the upstream JSON lives. On startup, `envs/services/docker-entrypoint.sh`
+keeps the `Fribb/anime-lists` clone under the service data directory, fetches
+the configured branch, and builds the generated SQLite database when missing or
+stale.
+
+VM-local expectations:
+
+- keep generated DB state in the named Docker volume
+  `ja-media-services_anime-crosswalk-data`
+- no host cron job
+- no host checkout of `Fribb/anime-lists`
+- no host bind mount for `anime-list-full.json`
+
+Container-local defaults:
+
+- upstream repo URL:
+  `https://github.com/Fribb/anime-lists.git`
+- upstream branch: `master`
+- upstream clone:
+  `/var/lib/anime-crosswalk/anime-lists`
+- generated DB:
+  `/var/lib/anime-crosswalk/anime_lists.sqlite`
+- update interval:
+  `43200` seconds
+
+Manual deploy flow:
+
+```sh
+git pull
+docker compose up -d --build
+curl http://127.0.0.1:58834/healthz
+curl 'http://127.0.0.1:58834/tvdb/movie/79099'
+curl --compressed http://127.0.0.1:58834/data/anime-list-full.json >/dev/null
+```
+
+On first boot, the container clones upstream, builds `anime_lists.sqlite`,
+smoke-tests it, and starts FastAPI. On scheduled updates, a changed upstream
+commit causes the updater to build `anime_lists.sqlite.next`, smoke-test it,
+atomically move it over the live DB, and terminate PID 1. Docker's
+`restart: unless-stopped` policy then restarts the container so FastAPI opens a
+fresh SQLite connection against the new DB.
+
+This intentionally avoids Caddy, Coolify, Kubernetes, or GitHub Actions for v0.
+Those can be added later if several services start needing shared TLS,
+external routing, or automated deployment.
 
 ## SQLite Schema
 

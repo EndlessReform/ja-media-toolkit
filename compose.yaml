@@ -1,0 +1,32 @@
+name: ja-media-services
+
+services:
+  anime-crosswalk:
+    build:
+      context: .
+      dockerfile: envs/services/Dockerfile
+    image: ja-media/anime-crosswalk:local
+    restart: unless-stopped
+    ports:
+      - "58834:8000"
+    environment:
+      ANIME_CROSSWALK_HOST: "0.0.0.0"
+      ANIME_CROSSWALK_PORT: "8000"
+      ANIME_CROSSWALK_DB_PATH: "/var/lib/anime-crosswalk/anime_lists.sqlite"
+      ANIME_CROSSWALK_DATA_DIR: "/var/lib/anime-crosswalk"
+      ANIME_CROSSWALK_SOURCE_JSON_PATH: "/var/lib/anime-crosswalk/anime-lists/anime-list-full.json"
+      ANIME_CROSSWALK_UPSTREAM_REPO_URL: "https://github.com/Fribb/anime-lists.git"
+      ANIME_CROSSWALK_UPSTREAM_REPO_NAME: "Fribb/anime-lists"
+      ANIME_CROSSWALK_UPSTREAM_BRANCH: "master"
+      ANIME_CROSSWALK_UPDATE_INTERVAL_SECONDS: "43200"
+    volumes:
+      - anime-crosswalk-data:/var/lib/anime-crosswalk
+    healthcheck:
+      test: ["CMD-SHELL", "uv run --no-sync anime-crosswalk-smoke \"$${ANIME_CROSSWALK_DB_PATH}\" >/dev/null"]
+      interval: 1m
+      timeout: 20s
+      retries: 3
+      start_period: 1m
+
+volumes:
+  anime-crosswalk-data:

@@ -1,0 +1,20 @@
+# Local Python environments and generated artifacts
+**/.venv
+**/__pycache__
+**/*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Local service data
+envs/services/data/
+output/
+
+# Host-local upstream checkouts and secrets
+docs/repo-symlinks/
+.env
+
+# Repository/admin noise
+.git/
+.DS_Store
