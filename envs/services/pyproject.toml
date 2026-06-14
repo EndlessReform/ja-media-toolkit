@@ -1,0 +1,30 @@
+[project]
+name = "ja-media-services"
+version = "0.1.0"
+description = "LAN services for ja-media-toolkit"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.124.0",
+    "ja-media-core",
+    "prometheus-client>=0.23.0",
+    "pydantic-settings>=2.14.1",
+    "uvicorn>=0.38.0",
+]
+
+[project.scripts]
+anime-crosswalk = "ja_media_services.anime_crosswalk.app:main"
+anime-crosswalk-ingest = "ja_media_services.anime_crosswalk.ingest:main"
+anime-crosswalk-smoke = "ja_media_services.anime_crosswalk.smoke:main"
+
+[dependency-groups]
+dev = [
+    "httpx2>=2.4.0",
+    "pytest>=9.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv.sources]
+ja-media-core = { path = "../../packages/core", editable = true }

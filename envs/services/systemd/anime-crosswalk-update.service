@@ -1,0 +1,9 @@
+[Unit]
+Description=Update ja-media anime metadata crosswalk DB
+
+[Service]
+Type=oneshot
+Environment=TOOLKIT_DIR=/opt/ja-media-toolkit
+Environment=REPO_DIR=/srv/anime-lists
+Environment=DATA_DIR=/var/lib/anime-crosswalk
+ExecStart=/opt/ja-media-toolkit/envs/services/scripts/update_anime_crosswalk.sh

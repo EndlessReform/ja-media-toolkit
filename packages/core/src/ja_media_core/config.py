@@ -79,6 +79,19 @@ class AsrConfig(BackendGroupConfig):
         return super().get_backend_config(name)  # type: ignore[return-value]
 
 
+class MetadataCrosswalkConfig(BaseModel):
+    """Client settings for the LAN anime metadata crosswalk service."""
+
+    base_url: str | None = None
+    timeout_s: float = 5.0
+
+
+class MetadataConfig(BaseModel):
+    """Metadata service integrations used by repo tools."""
+
+    crosswalk: MetadataCrosswalkConfig = Field(default_factory=MetadataCrosswalkConfig)
+
+
 class JaMediaConfig(BaseModel):
     """Top-level user config file.
 
@@ -88,6 +101,7 @@ class JaMediaConfig(BaseModel):
     """
 
     asr: AsrConfig = Field(default_factory=AsrConfig)
+    metadata: MetadataConfig = Field(default_factory=MetadataConfig)
 
 
 @dataclass
