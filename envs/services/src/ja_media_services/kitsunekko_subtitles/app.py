@@ -28,6 +28,7 @@ from ja_media_services.kitsunekko_subtitles.db import (
     fetch_files_by_repo_path,
     fetch_metadata,
 )
+from ja_media_services.kitsunekko_subtitles.episode import filter_files_by_runtime_episode
 from ja_media_services.kitsunekko_subtitles.metrics import render_metrics
 from ja_media_services.kitsunekko_subtitles.settings import KitsunekkoSubtitlesSettings
 
@@ -239,14 +240,20 @@ def build_llms_txt(settings: KitsunekkoSubtitlesSettings) -> str:
             "- [Metrics](/metrics): Prometheus-format DB gauges.",
             "- [Series by AniList](/series/anilist/395): Series summary by AniList ID.",
             "- [Files by AniList](/series/anilist/395/files): Subtitle file list by AniList ID.",
+            "- [Episode files by AniList](/series/anilist/395/episodes/16/files): Subtitle file list for one local episode number, parsed from filenames at request time.",
             "- [Files by TVDB](/series/tvdb/79099/files): Subtitle file list by broad TVDB ID.",
             "- [Files by TVDB kind](/series/tvdb/tv/79099/files): Subtitle file list by TVDB media kind.",
+            "- [Episode files by TVDB](/series/tvdb/79099/episodes/16/files): Subtitle file list for one local episode number after runtime TVDB-to-AniList resolution.",
+            "- [Episode files by TVDB kind](/series/tvdb/tv/79099/episodes/16/files): Kind-scoped TVDB episode subtitle file list.",
             "- [File metadata](/files/{subtitle_id-or-name}): One indexed subtitle row.",
             "- [File content](/files/{subtitle_id-or-name}/content): One subtitle file, optionally gzip-compressed.",
             "- [Multiple file content](/files/content?ref={subtitle_id}&ref={repo_path}): Tar or tar.gz archive for one or more file refs.",
             "- [Series content](/series/anilist/395/content): Tar or tar.gz archive for a series, optionally filtered by repo_path prefix.",
+            "- [Episode content by AniList](/series/anilist/395/episodes/16/content): Tar or tar.gz archive for one episode, optionally filtered by repo_path prefix.",
+            "- [Episode content by TVDB](/series/tvdb/79099/episodes/16/content): Tar or tar.gz archive for one TVDB-resolved episode.",
             "",
             "No public internet exposure or authentication is expected in the trusted LAN deployment.",
+            "Episode endpoints use `parse-torrent-title`/`PTN` against filenames at request time; episode numbers are local episode numbers, not globally materialized IDs.",
             "",
             f"Runtime DB: `{settings.db_path}`",
             f"Crosswalk DB: `{settings.crosswalk_db_path}`",
@@ -299,6 +306,44 @@ def create_app(settings: KitsunekkoSubtitlesSettings | None = None) -> FastAPI:
     def files_by_anilist(anilist_id: int) -> dict[str, Any]:
         files = fetch_files_by_anilist(get_connection(str(active_settings.db_path)), anilist_id)
         return {"anilist_id": anilist_id, "count": len(files), "files": files}
+
+    @app.get("/series/anilist/{anilist_id}/episodes/{episode_number}/files")
+    def files_by_anilist_episode(anilist_id: int, episode_number: int) -> dict[str, Any]:
+        files = filter_files_by_runtime_episode(
+            fetch_files_by_anilist(get_connection(str(active_settings.db_path)), anilist_id),
+            episode_number,
+        )
+        return {
+            "anilist_id": anilist_id,
+            "episode_number": episode_number,
+            "count": len(files),
+            "files": files,
+        }
+
+    @app.get("/series/anilist/{anilist_id}/episodes/{episode_number}/content")
+    def content_by_anilist_episode(
+        anilist_id: int,
+        episode_number: int,
+        prefix: str | None = None,
+        compression: str = "auto",
+        accept_encoding: str | None = Header(default=None),
+    ) -> Response:
+        files = filter_files_by_runtime_episode(
+            fetch_files_by_anilist(get_connection(str(active_settings.db_path)), anilist_id),
+            episode_number,
+            prefix=prefix,
+        )
+        if not files:
+            raise HTTPException(status_code=404, detail="No subtitle files matched this episode request")
+        gzip_enabled = wants_gzip(compression=compression, accept_encoding=accept_encoding)
+        suffix = ".tar.gz" if gzip_enabled else ".tar"
+        prefix_label = f"-{prefix.strip('/').replace('/', '_')}" if prefix else ""
+        return archive_response(
+            files=files,
+            mirror_dir=active_settings.mirror_dir,
+            archive_name=f"anilist-{anilist_id}-episode-{episode_number}{prefix_label}{suffix}",
+            gzip_enabled=gzip_enabled,
+        )
 
     @app.get("/series/anilist/{anilist_id}/content")
     def content_by_anilist(
@@ -365,6 +410,65 @@ def create_app(settings: KitsunekkoSubtitlesSettings | None = None) -> FastAPI:
             "count": len(files),
             "files": files,
         }
+
+    @app.get("/series/tvdb/{tvdb_id}/episodes/{episode_number}/files")
+    def files_by_tvdb_episode(tvdb_id: str, episode_number: int) -> dict[str, Any]:
+        anilist_ids = resolve_anilist_ids(
+            crosswalk_db_path=active_settings.crosswalk_db_path,
+            source="tvdb",
+            external_id=tvdb_id,
+            media_kind=None,
+        )
+        files = filter_files_by_runtime_episode(
+            fetch_files_by_anilist_ids(
+                get_connection(str(active_settings.db_path)),
+                anilist_ids,
+            ),
+            episode_number,
+        )
+        return {
+            "source": "tvdb",
+            "id": tvdb_id,
+            "media_kind": None,
+            "anilist_ids": anilist_ids,
+            "episode_number": episode_number,
+            "count": len(files),
+            "files": files,
+        }
+
+    @app.get("/series/tvdb/{tvdb_id}/episodes/{episode_number}/content")
+    def content_by_tvdb_episode(
+        tvdb_id: str,
+        episode_number: int,
+        prefix: str | None = None,
+        compression: str = "auto",
+        accept_encoding: str | None = Header(default=None),
+    ) -> Response:
+        anilist_ids = resolve_anilist_ids(
+            crosswalk_db_path=active_settings.crosswalk_db_path,
+            source="tvdb",
+            external_id=tvdb_id,
+            media_kind=None,
+        )
+        files = filter_files_by_runtime_episode(
+            fetch_files_by_anilist_ids(
+                get_connection(str(active_settings.db_path)),
+                anilist_ids,
+            ),
+            episode_number,
+            prefix=prefix,
+        )
+        if not files:
+            raise HTTPException(status_code=404, detail="No subtitle files matched this episode request")
+        gzip_enabled = wants_gzip(compression=compression, accept_encoding=accept_encoding)
+        suffix = ".tar.gz" if gzip_enabled else ".tar"
+        prefix_label = f"-{prefix.strip('/').replace('/', '_')}" if prefix else ""
+        return archive_response(
+            files=files,
+            mirror_dir=active_settings.mirror_dir,
+            archive_name=f"tvdb-{tvdb_id}-episode-{episode_number}{prefix_label}{suffix}",
+            gzip_enabled=gzip_enabled,
+        )
 
     @app.get("/series/tvdb/{tvdb_id}/content")
     def content_by_tvdb(
@@ -440,6 +544,72 @@ def create_app(settings: KitsunekkoSubtitlesSettings | None = None) -> FastAPI:
             "count": len(files),
             "files": files,
         }
+
+    @app.get("/series/tvdb/{media_kind}/{tvdb_id}/episodes/{episode_number}/files")
+    def files_by_tvdb_kind_episode(
+        media_kind: str,
+        tvdb_id: str,
+        episode_number: int,
+    ) -> dict[str, Any]:
+        normalized_kind = normalize_media_kind(media_kind)
+        anilist_ids = resolve_anilist_ids(
+            crosswalk_db_path=active_settings.crosswalk_db_path,
+            source="tvdb",
+            external_id=tvdb_id,
+            media_kind=normalized_kind,
+        )
+        files = filter_files_by_runtime_episode(
+            fetch_files_by_anilist_ids(
+                get_connection(str(active_settings.db_path)),
+                anilist_ids,
+            ),
+            episode_number,
+        )
+        return {
+            "source": "tvdb",
+            "id": tvdb_id,
+            "media_kind": normalized_kind,
+            "anilist_ids": anilist_ids,
+            "episode_number": episode_number,
+            "count": len(files),
+            "files": files,
+        }
+
+    @app.get("/series/tvdb/{media_kind}/{tvdb_id}/episodes/{episode_number}/content")
+    def content_by_tvdb_kind_episode(
+        media_kind: str,
+        tvdb_id: str,
+        episode_number: int,
+        prefix: str | None = None,
+        compression: str = "auto",
+        accept_encoding: str | None = Header(default=None),
+    ) -> Response:
+        normalized_kind = normalize_media_kind(media_kind)
+        anilist_ids = resolve_anilist_ids(
+            crosswalk_db_path=active_settings.crosswalk_db_path,
+            source="tvdb",
+            external_id=tvdb_id,
+            media_kind=normalized_kind,
+        )
+        files = filter_files_by_runtime_episode(
+            fetch_files_by_anilist_ids(
+                get_connection(str(active_settings.db_path)),
+                anilist_ids,
+            ),
+            episode_number,
+            prefix=prefix,
+        )
+        if not files:
+            raise HTTPException(status_code=404, detail="No subtitle files matched this episode request")
+        gzip_enabled = wants_gzip(compression=compression, accept_encoding=accept_encoding)
+        suffix = ".tar.gz" if gzip_enabled else ".tar"
+        prefix_label = f"-{prefix.strip('/').replace('/', '_')}" if prefix else ""
+        return archive_response(
+            files=files,
+            mirror_dir=active_settings.mirror_dir,
+            archive_name=f"tvdb-{normalized_kind}-{tvdb_id}-episode-{episode_number}{prefix_label}{suffix}",
+            gzip_enabled=gzip_enabled,
+        )
 
     @app.get("/series/tvdb/{media_kind}/{tvdb_id}/content")
     def content_by_tvdb_kind(

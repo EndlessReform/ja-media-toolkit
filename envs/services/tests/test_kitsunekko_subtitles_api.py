@@ -133,6 +133,31 @@ def test_tvdb_file_endpoint_resolves_anilist_at_runtime(tmp_path: Path) -> None:
     assert payload["files"][0]["repo_path"].endswith(".srt")
 
 
+def test_anilist_episode_file_endpoint_filters_with_runtime_filename_parse(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+
+    response = client.get("/series/anilist/395/episodes/16/files")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["episode_number"] == 16
+    assert payload["count"] == 1
+    assert payload["files"][0]["filename"] == "[Group] GANTZ.S01E16.ja[cc].srt"
+
+
+def test_tvdb_episode_file_endpoint_resolves_then_filters(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+
+    response = client.get("/series/tvdb/tv/12345/episodes/17/files")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["anilist_ids"] == [395]
+    assert payload["episode_number"] == 17
+    assert payload["count"] == 1
+    assert payload["files"][0]["filename"] == "[Other] GANTZ.S01E17.ja.srt"
+
+
 def test_file_content_endpoint_fetches_by_uuid_and_supports_gzip(tmp_path: Path) -> None:
     client = make_client(tmp_path)
     listed = client.get("/series/anilist/395/files").json()["files"][0]
@@ -206,3 +231,33 @@ def test_series_content_endpoint_supports_prefix_filter_and_gzip(tmp_path: Path)
         names = archive.getnames()
 
     assert names == ["subtitles/anime_tv/GANTZ 2/[Group] GANTZ.S01E16.ja[cc].srt"]
+
+
+def test_episode_content_endpoint_supports_prefix_filter_and_gzip(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+
+    response = client.get(
+        "/series/tvdb/12345/episodes/16/content",
+        params={
+            "prefix": "subtitles/anime_tv/GANTZ 2/[Group]",
+            "compression": "gzip",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/gzip")
+    with tarfile.open(fileobj=io.BytesIO(response.content), mode="r:gz") as archive:
+        names = archive.getnames()
+
+    assert names == ["subtitles/anime_tv/GANTZ 2/[Group] GANTZ.S01E16.ja[cc].srt"]
+
+
+def test_llms_txt_documents_episode_endpoints(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+
+    response = client.get("/llms.txt")
+
+    assert response.status_code == 200
+    assert "/series/anilist/395/episodes/16/files" in response.text
+    assert "/series/tvdb/79099/episodes/16/files" in response.text
+    assert "parse-torrent-title" in response.text

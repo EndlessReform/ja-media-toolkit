@@ -6,6 +6,7 @@ requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.124.0",
     "ja-media-core",
+    "parse-torrent-title>=2.8.2",
     "prometheus-client>=0.23.0",
     "pydantic-settings>=2.14.1",
     "uvicorn>=0.38.0",

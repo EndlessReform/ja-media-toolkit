@@ -79,3 +79,21 @@ Full JSON file responses are compressed when the client advertises
 `Accept-Encoding: gzip`. Use `curl --compressed` to request and decode gzip.
 Bulk resolve accepts up to 500 lookup objects and returns normal lookup
 payloads in request order.
+
+## Kitsunekko Subtitles
+
+The Kitsunekko subtitle API exposes an indexed local mirror. Episode-specific
+lookups parse subtitle filenames at request time with `parse-torrent-title`
+instead of materializing episode IDs in the generated DB.
+
+Useful endpoints:
+
+- `GET /series/anilist/{anilist_id}/files`
+- `GET /series/anilist/{anilist_id}/episodes/{episode_number}/files`
+- `GET /series/anilist/{anilist_id}/episodes/{episode_number}/content`
+- `GET /series/tvdb/{tvdb_id}/files`
+- `GET /series/tvdb/{tvdb_id}/episodes/{episode_number}/files`
+- `GET /series/tvdb/{tvdb_id}/episodes/{episode_number}/content`
+- `GET /series/tvdb/{media_kind}/{tvdb_id}/files`
+- `GET /series/tvdb/{media_kind}/{tvdb_id}/episodes/{episode_number}/files`
+- `GET /series/tvdb/{media_kind}/{tvdb_id}/episodes/{episode_number}/content`
