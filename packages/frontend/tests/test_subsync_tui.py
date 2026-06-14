@@ -6,15 +6,17 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
-from ja_media_apple.subsync_tui import (
+from ja_media_frontend.subsync_tui import (
     GAP_BLOCK,
+    RemoteLookupState,
     SPAN_BLOCK,
     SubtitleTrack,
     SubsyncTuiApp,
     playback_range,
     resolve_srt_inputs,
+    runtime_episode_number,
 )
-from ja_media_transcripts.srt import read_srt
+from ja_media_core.srt import read_srt
 
 
 SRT_TEXT = (
@@ -42,6 +44,12 @@ class SubsyncTuiTest(unittest.TestCase):
             [path.name for path in paths],
             ["episode.a.srt", "episode.b.srt"],
         )
+
+    def test_resolve_srt_inputs_can_be_empty_for_remote_lookup(self) -> None:
+        self.assertEqual(resolve_srt_inputs([], allow_empty=True), [])
+
+    def test_runtime_episode_number_parses_media_filename_stem(self) -> None:
+        self.assertEqual(runtime_episode_number("[Group] GANTZ.S01E16.1080p"), 16)
 
     def test_key_navigation_moves_current_cue(self) -> None:
         async def run_app() -> tuple[int, str]:
@@ -147,7 +155,7 @@ class SubsyncTuiTest(unittest.TestCase):
                     initial_window_s=10.0,
                 )
                 with patch(
-                    "ja_media_apple.subsync_tui.subprocess.Popen",
+                    "ja_media_frontend.subsync_tui.subprocess.Popen",
                     return_value=fake_process,
                 ) as popen:
                     async with app.run_test() as pilot:
@@ -183,7 +191,7 @@ class SubsyncTuiTest(unittest.TestCase):
                     initial_window_s=10.0,
                 )
                 with patch(
-                    "ja_media_apple.subsync_tui.subprocess.Popen",
+                    "ja_media_frontend.subsync_tui.subprocess.Popen",
                     return_value=fake_process,
                 ):
                     async with app.run_test() as pilot:
@@ -218,9 +226,69 @@ class SubsyncTuiTest(unittest.TestCase):
 
         self.assertEqual(len(table.rows), 2)
 
+    def test_empty_tui_state_renders_without_tracks(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            media = Path(tmpdir) / "episode.mp3"
+            media.write_bytes(b"fake")
+            app = SubsyncTuiApp(
+                source_path=media,
+                tracks=[],
+                initial_window_s=10.0,
+                remote_state=RemoteLookupState(
+                    source="anilist",
+                    external_id=395,
+                    episode_number=16,
+                ),
+            )
+
+            source = app.render_source().plain
+            candidates = app.render_candidates()
+
+        self.assertIn("anilist:395 ep:16", source)
+        self.assertEqual(len(candidates.rows), 1)
+
+    def test_fetch_remote_tracks_appends_srt_candidates(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            media = tmp / "episode.mp3"
+            media.write_bytes(b"fake")
+            app = SubsyncTuiApp(
+                source_path=media,
+                tracks=[],
+                initial_window_s=10.0,
+                remote_state=RemoteLookupState(
+                    source="anilist",
+                    external_id=395,
+                    episode_number=16,
+                ),
+                download_dir=tmp,
+            )
+
+            fake_client = Mock()
+            fake_client.anilist_episode_files.return_value.files = (
+                {
+                    "subtitle_id": "abc",
+                    "repo_path": "subtitles/anime_tv/GANTZ/[Group] GANTZ - 16.srt",
+                    "filename": "[Group] GANTZ - 16.srt",
+                    "extension": ".srt",
+                },
+            )
+            fake_client.file_content.return_value = SRT_TEXT.encode("utf-8")
+
+            with patch(
+                "ja_media_frontend.subsync_tui.HttpKitsunekkoSubtitlesClient",
+                return_value=fake_client,
+            ):
+                added = app.fetch_remote_tracks()
+
+        self.assertEqual(added, 1)
+        self.assertEqual(len(app.tracks), 1)
+        self.assertEqual(app.tracks[0].subtitle_id, "abc")
+        self.assertEqual(app.tracks[0].cues[0].text, "hello")
+
 
 def read_srt_from_text(text: str):
-    from ja_media_transcripts.srt import parse_srt
+    from ja_media_core.srt import parse_srt
 
     return parse_srt(text)
 

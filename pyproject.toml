@@ -4,10 +4,17 @@ version = "0.1.0"
 description = "Japanese media organization and transcription tools"
 readme = "README.md"
 requires-python = ">=3.13"
+dependencies = [
+  "ja-media-frontend",
+]
 
 [tool.uv.workspace]
 members = [
   "packages/core",
+  "packages/frontend",
   "packages/media",
   "packages/transcripts",
 ]
+
+[tool.uv.sources]
+ja-media-frontend = { workspace = true }

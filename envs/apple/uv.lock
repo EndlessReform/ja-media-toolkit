@@ -454,7 +454,6 @@ dependencies = [
     { name = "rich" },
     { name = "safetensors" },
     { name = "scipy" },
-    { name = "textual" },
     { name = "torch" },
     { name = "tqdm" },
     { name = "transformers" },
@@ -473,7 +472,6 @@ requires-dist = [
     { name = "rich", specifier = ">=15.0.0" },
     { name = "safetensors", specifier = ">=0.7.0" },
     { name = "scipy", specifier = ">=1.17.1" },
-    { name = "textual", specifier = ">=8.2.7" },
     { name = "torch", specifier = ">=2.12.0" },
     { name = "tqdm", specifier = ">=4.67.3" },
     { name = "transformers", git = "https://github.com/huggingface/transformers.git?rev=cbb65a4815d44f1d8b8ff7f51cca24ce491fc09e" },
@@ -505,17 +503,21 @@ source = { editable = "../../packages/frontend" }
 dependencies = [
     { name = "fastapi" },
     { name = "ja-media-core" },
+    { name = "parse-torrent-title" },
+    { name = "python-dotenv" },
+    { name = "textual" },
     { name = "uvicorn" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = ">=0.136.3" },
-    { name = "ja-media-apple", marker = "extra == 'apple'", editable = "." },
     { name = "ja-media-core", editable = "../../packages/core" },
+    { name = "parse-torrent-title", specifier = ">=2.8.2" },
+    { name = "python-dotenv", specifier = ">=1.2.2" },
+    { name = "textual", specifier = ">=8.2.7" },
     { name = "uvicorn", specifier = ">=0.49.0" },
 ]
-provides-extras = ["apple"]
 
 [[package]]
 name = "ja-media-media"
@@ -1096,6 +1098,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/d7/f1/e7a6dd94a8d4a5626c03e4e99c87f241ba9e350cd9e6d75123f992427270/packaging-26.2.tar.gz", hash = "sha256:ff452ff5a3e828ce110190feff1178bb1f2ea2281fa2075aadb987c2fb221661", size = 228134, upload-time = "2026-04-24T20:15:23.917Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/df/b2/87e62e8c3e2f4b32e5fe99e0b86d576da1312593b39f47d8ceef365e95ed/packaging-26.2-py3-none-any.whl", hash = "sha256:5fc45236b9446107ff2415ce77c807cee2862cb6fac22b8a73826d0693b0980e", size = 100195, upload-time = "2026-04-24T20:15:22.081Z" },
+]
+
+[[package]]
+name = "parse-torrent-title"
+version = "2.8.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/5b/c2/895f0bcfbf989c63da2c5d31819044d97169eba1aadd5720f0b346283f39/parse_torrent_title-2.8.2.tar.gz", hash = "sha256:fc35c8e8491bf5dce9a466713003013b2a3a27674792fc64e3a43eb7c4b2d805", size = 49132, upload-time = "2026-01-28T18:08:11.404Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e0/60/2027afee840bac28833c28002b6816a551e824ec156484dcbe404b2a91e2/parse_torrent_title-2.8.2-py3-none-any.whl", hash = "sha256:2f663b5db508a9aec060e0ad73ec789e46664f848b2c79f3b46202aff35ca7b5", size = 20318, upload-time = "2026-01-28T18:08:12.581Z" },
 ]
 
 [[package]]
