@@ -11,7 +11,10 @@ wheels/
 
 # Data
 output
+out
 envs/apple/config.local.toml
+envs/services/data
+*.jsonl.gz
 *.srt
 
 # OS
@@ -22,3 +25,4 @@ docs/repo-symlinks/*
 
 # Secrets
 .env
+

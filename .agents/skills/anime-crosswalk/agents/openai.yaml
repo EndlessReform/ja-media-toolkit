@@ -1,0 +1,6 @@
+interface:
+  display_name: "Anime Crosswalk"
+  short_description: "Use the LAN anime ID crosswalk"
+  default_prompt: "Use $anime-crosswalk to resolve anime metadata IDs or add an anime crosswalk client."
+policy:
+  allow_implicit_invocation: true

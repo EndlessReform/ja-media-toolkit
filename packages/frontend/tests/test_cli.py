@@ -1,0 +1,35 @@
+from __future__ import annotations
+
+import unittest
+
+from ja_media_frontend.cli import build_parser
+
+
+class FrontendCliTest(unittest.TestCase):
+    def test_subsync_tui_accepts_remote_lookup_without_srt_inputs(self) -> None:
+        parser = build_parser()
+
+        args = parser.parse_args(
+            [
+                "subsync",
+                "tui",
+                "episode.mkv",
+                "--anilist",
+                "395",
+                "--episode",
+                "16",
+                "--fetch-subs",
+            ]
+        )
+
+        self.assertEqual(args.command, "subsync")
+        self.assertEqual(args.subsync_command, "tui")
+        self.assertEqual(args.srt, [])
+        self.assertEqual(args.anilist, 395)
+        self.assertIsNone(args.tvdb)
+        self.assertEqual(args.episode, 16)
+        self.assertTrue(args.fetch_subs)
+
+
+if __name__ == "__main__":
+    unittest.main()

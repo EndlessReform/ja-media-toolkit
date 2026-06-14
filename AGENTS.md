@@ -74,12 +74,27 @@ Prefer tomllib + Pydantic Settings for configuration where possible.
 ## Assume available on PATH
 
 Assume you have (at a minimum):
-- ffmpeg, ffprobe, etc
-- jq
 - curl
+- ffmpeg, ffprobe, etc
+- gh
+- jq
 - rg
 
-Secrets are in `.env` in repo root. NEVER read this file directly. If you need to check that it exists, `stat .env` instead of trying to use any sort of read tool. `source` in CLI or use idiomatic tooling (eg python-dotenv for python).
+## Secrets
+
+Secrets and local service URLs are in `.env` in repo root. NEVER read this file
+directly with `cat`, `sed`, `rg`, editors, or any other content-printing tool.
+If you need to check that it exists, `stat .env`.
+
+When a command needs project environment variables, it is the agent's job to
+load them. Source `.env` inside the shell command or use idiomatic tooling
+(for example, python-dotenv for Python) so values are available to the process
+without being printed. Do not ask the user to export variables that already
+belong in repo `.env`.
+
+If an env handoff file is needed for a subprocess, put it in `/tmp` or another
+gitignored location, avoid echoing secret values into logs, and clean it up
+afterward.
 
 ## Smoke-testing
 

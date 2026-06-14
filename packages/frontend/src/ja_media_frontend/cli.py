@@ -40,10 +40,17 @@ def main() -> None:
             )
             return
         if args.subsync_command == "tui":
-            _load_apple_subsync_tui()(
+            from ja_media_frontend.subsync_tui import run_subsync_tui
+
+            run_subsync_tui(
                 source_path=args.source,
                 srt_inputs=args.srt,
                 window_s=args.window_s,
+                anilist_id=args.anilist,
+                tvdb_id=args.tvdb,
+                episode_number=args.episode,
+                fetch_subs=args.fetch_subs,
+                tvdb_media_kind=args.tvdb_kind,
             )
             return
         args.subsync_parser.print_help()
@@ -98,11 +105,36 @@ def build_parser() -> argparse.ArgumentParser:
     subsync_tui_parser.add_argument("source", help="Source media file path")
     subsync_tui_parser.add_argument(
         "srt",
-        nargs="+",
+        nargs="*",
         help=(
             "SRT file path(s) or quoted glob pattern(s), for example "
-            "'../../subs/*.srt'"
+            "'../../subs/*.srt'. Optional when using --fetch-subs or F6 lookup."
         ),
+    )
+    subsync_tui_parser.add_argument(
+        "--anilist",
+        type=int,
+        help="AniList series ID for Kitsunekko subtitle lookup.",
+    )
+    subsync_tui_parser.add_argument(
+        "--tvdb",
+        type=int,
+        help="TVDB series ID for Kitsunekko subtitle lookup.",
+    )
+    subsync_tui_parser.add_argument(
+        "--tvdb-kind",
+        default="tv",
+        help="TVDB media kind passed to the subtitle service. Defaults to tv.",
+    )
+    subsync_tui_parser.add_argument(
+        "--episode",
+        type=int,
+        help="Episode number override. Defaults to parsing the media filename stem.",
+    )
+    subsync_tui_parser.add_argument(
+        "--fetch-subs",
+        action="store_true",
+        help="Fetch matching Kitsunekko SRT candidates before opening the TUI.",
     )
     subsync_tui_parser.add_argument(
         "--window-s",
@@ -217,20 +249,10 @@ def _load_apple_command(name: str) -> Callable[[argparse.Namespace], None]:
     return getattr(apple_cli, name)
 
 
-def _load_apple_subsync_tui() -> Callable[..., None]:
-    try:
-        from ja_media_apple.subsync_tui import run_subsync_tui
-    except ModuleNotFoundError as exc:
-        if exc.name == "ja_media_apple":
-            _missing_apple_backend()
-        raise
-    return run_subsync_tui
-
-
 def _missing_apple_backend() -> NoReturn:
     raise SystemExit(
-        "This command currently needs the Apple backend. Install the frontend "
-        "with the Apple extra, for example: uv tool install 'ja-media-frontend[apple]'."
+        "This command currently needs the Apple backend. Run it from the "
+        "ja-media-apple runtime or install ja-media-apple alongside the frontend."
     )
 
 

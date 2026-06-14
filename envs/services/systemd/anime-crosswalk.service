@@ -1,0 +1,18 @@
+[Unit]
+Description=ja-media anime metadata crosswalk API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/ja-media-toolkit/envs/services
+Environment=ANIME_CROSSWALK_DB_PATH=/var/lib/anime-crosswalk/anime_lists.sqlite
+Environment=ANIME_CROSSWALK_SOURCE_JSON_PATH=/srv/anime-lists/anime-list-full.json
+Environment=ANIME_CROSSWALK_HOST=0.0.0.0
+Environment=ANIME_CROSSWALK_PORT=8000
+ExecStart=/usr/bin/env uv run anime-crosswalk
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
