@@ -123,17 +123,21 @@ combined with playback.
 | `F6` | Select AniList/TVDB ID and episode, then fetch Kitsunekko candidates |
 | `q` | Quit |
 
-Playback uses `ffplay` through `subprocess`, not a Python audio library. The
-clip starts exactly at the current cue start and stops exactly at the current
-cue end, so bad subtitle edges are audible. Moving with `h` or `l` stops active
-playback before selecting the next cue.
+Playback decodes the first audio stream once with `ffmpeg` into mono 48 kHz
+signed 16-bit PCM held in RAM, then plays cue-sized byte slices through
+`sounddevice`. This avoids repeated container seeks and lets cue boundaries map
+to exact sample offsets. Moving with `h` or `l` aborts the active output stream
+before selecting the next cue.
 
 ## Current Limits
 
 - No automatic candidate scoring yet.
 - No VAD-vs-subtitle comparison yet.
 - No offset nudging or sidecar write flow yet.
-- Playback depends on `ffplay` being available on `PATH`.
+- Playback depends on `ffmpeg` being available on `PATH` and `sounddevice`
+  being installed in the active environment.
+- Startup decodes the episode audio into memory. A typical 24-minute file is
+  roughly 138 MB at the TUI's mono 48 kHz review format.
 
 Those limits are intentional for the first shell: it is already useful as a
 manual timing review surface, and the later scoring/retiming work can plug into

@@ -506,6 +506,7 @@ dependencies = [
     { name = "ja-media-core" },
     { name = "parse-torrent-title" },
     { name = "python-dotenv" },
+    { name = "sounddevice" },
     { name = "textual" },
     { name = "uvicorn" },
 ]
@@ -522,6 +523,7 @@ requires-dist = [
     { name = "ja-media-core", editable = "../core" },
     { name = "parse-torrent-title", specifier = ">=2.8.2" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
+    { name = "sounddevice", specifier = ">=0.5.5" },
     { name = "textual", specifier = ">=8.2.7" },
     { name = "uvicorn", specifier = ">=0.49.0" },
 ]

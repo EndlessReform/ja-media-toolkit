@@ -104,7 +104,8 @@ Implemented behavior:
 - shows the currently selected subtitle text;
 - supports `h/l` for previous/next cue, `j/k` for candidate selection,
   `gg/G` for start/end, Vim-style page and half-page movement, and `+/-` zoom;
-- binds `space` to exact-boundary playback of the current cue through `ffplay`;
+- binds `space` to exact-boundary playback of the current cue from decoded
+  in-memory PCM;
 - stops active playback when moving between cues with `h/l` or quitting.
 
 The current shell intentionally does not score candidates, infer offsets, nudge

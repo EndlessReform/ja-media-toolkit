@@ -8,6 +8,7 @@ dependencies = [
     "ja-media-core>=0.1.0",
     "parse-torrent-title>=2.8.2",
     "python-dotenv>=1.2.2",
+    "sounddevice>=0.5.5",
     "textual>=8.2.7",
     "uvicorn>=0.49.0",
 ]

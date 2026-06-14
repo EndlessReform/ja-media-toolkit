@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import glob
+import importlib
 import shutil
 import subprocess
 import tempfile
+import threading
 from dataclasses import dataclass
 from pathlib import Path
+from types import ModuleType
 from typing import Any, Literal
 
 from dotenv import load_dotenv
@@ -42,6 +45,9 @@ GAP_STYLE = "dim"
 SPAN_BLOCK = "▀"
 GAP_BLOCK = " "
 RemoteSourceKind = Literal["anilist", "tvdb"]
+PCM_SAMPLE_RATE = 48_000
+PCM_CHANNELS = 1
+PCM_SAMPLE_WIDTH_BYTES = 2
 
 
 @dataclass(frozen=True)
@@ -87,6 +93,118 @@ class RemoteLookupRequest:
     external_id: int
     episode_number: int
     media_kind: str | None = "tv"
+
+
+@dataclass(frozen=True)
+class PcmAudioSource:
+    """Decoded audio held in RAM for deterministic subtitle cue playback.
+
+    The TUI repeatedly auditions very short cue ranges. Owning decoded PCM means
+    each cue becomes a byte slice, so playback no longer depends on container
+    seeking, decoder preroll, or killing a fresh player process per keypress.
+    """
+
+    source_path: Path
+    sample_rate: int
+    channels: int
+    sample_width_bytes: int
+    pcm: bytes
+
+    @property
+    def bytes_per_frame(self) -> int:
+        return self.channels * self.sample_width_bytes
+
+    @property
+    def frame_count(self) -> int:
+        return len(self.pcm) // self.bytes_per_frame
+
+    @property
+    def duration_s(self) -> float:
+        return self.frame_count / self.sample_rate
+
+    def slice_bytes(self, start_s: float, duration_s: float) -> bytes:
+        """Return the exact PCM frame range for a subtitle cue."""
+
+        start_frame = max(0, round(start_s * self.sample_rate))
+        requested_frames = max(1, round(duration_s * self.sample_rate))
+        end_frame = min(self.frame_count, start_frame + requested_frames)
+        if end_frame <= start_frame:
+            return b""
+        start_byte = start_frame * self.bytes_per_frame
+        end_byte = end_frame * self.bytes_per_frame
+        return self.pcm[start_byte:end_byte]
+
+
+class PcmSlicePlayer:
+    """Play in-memory PCM slices through the system's default audio device."""
+
+    def __init__(self, audio: PcmAudioSource) -> None:
+        self.audio = audio
+        self._lock = threading.Lock()
+        self._stop_event = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._stream: Any | None = None
+
+    def play(self, start_s: float, duration_s: float) -> None:
+        """Stop any active slice and start playing the requested cue bytes."""
+
+        self.stop()
+        data = self.audio.slice_bytes(start_s, duration_s)
+        if not data:
+            return
+        sounddevice = _load_sounddevice()
+        self._stop_event = threading.Event()
+        self._thread = threading.Thread(
+            target=self._play_bytes,
+            args=(sounddevice, data, self._stop_event),
+            name="subsync-pcm-playback",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def stop(self) -> None:
+        """Abort queued output and wait briefly for the playback worker to exit."""
+
+        thread = self._thread
+        self._thread = None
+        self._stop_event.set()
+        with self._lock:
+            stream = self._stream
+        if stream is not None:
+            try:
+                stream.abort()
+            except Exception:
+                pass
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=0.5)
+
+    def is_playing(self) -> bool:
+        thread = self._thread
+        return thread is not None and thread.is_alive()
+
+    def _play_bytes(
+        self,
+        sounddevice: ModuleType,
+        data: bytes,
+        stop_event: threading.Event,
+    ) -> None:
+        chunk_size = self.audio.bytes_per_frame * 2048
+        try:
+            with sounddevice.RawOutputStream(
+                samplerate=self.audio.sample_rate,
+                channels=self.audio.channels,
+                dtype="int16",
+                blocksize=2048,
+            ) as stream:
+                with self._lock:
+                    self._stream = stream
+                for offset in range(0, len(data), chunk_size):
+                    if stop_event.is_set():
+                        break
+                    stream.write(data[offset : offset + chunk_size])
+        finally:
+            with self._lock:
+                self._stream = None
 
 
 def run_subsync_tui(
@@ -135,9 +253,9 @@ def run_subsync_tui(
 
     with tempfile.TemporaryDirectory(prefix="ja-media-subsync-") as tmpdir:
         session_dir = Path(tmpdir)
-        playback_source = extracted_audio_source(source, session_dir)
+        playback_source = load_pcm_audio_source(source)
         app = SubsyncTuiApp(
-            source_path=playback_source,
+            audio_source=playback_source,
             tracks=tracks,
             initial_window_s=window_s,
             remote_state=remote_state,
@@ -181,54 +299,67 @@ def resolve_srt_inputs(inputs: list[str], *, allow_empty: bool = False) -> list[
     return paths
 
 
-def extracted_audio_source(source: Path, output_dir: Path) -> Path:
-    """Return an audio-only source for MKV inputs, preserving other media as-is.
+def load_pcm_audio_source(source: Path) -> PcmAudioSource:
+    """Decode the first audio stream into review-grade PCM held in memory.
 
-    The timing review loop only needs audio playback. Pulling the first audio
-    stream into the session directory keeps repeated cue playback snappy while
-    avoiding durable sidecar files next to the user's media.
+    This intentionally pays the decode cost once at TUI startup. For a typical
+    24-minute episode, mono 48 kHz signed 16-bit PCM is roughly 138 MB, which is
+    a worthwhile trade for exact cue slicing and local playback even when the
+    source media lives on flaky network storage.
     """
 
-    if source.suffix.lower() != ".mkv":
-        return source
     if shutil.which("ffmpeg") is None:
-        raise SystemExit("ffmpeg not found; cannot extract audio from MKV source")
+        raise SystemExit("ffmpeg not found; cannot decode source audio")
 
-    output_path = output_dir / f"{source.stem}.audio.mka"
     command = [
         "ffmpeg",
         "-hide_banner",
         "-loglevel",
         "error",
-        "-y",
         "-i",
         str(source),
         "-map",
         "0:a:0",
         "-vn",
+        "-ac",
+        str(PCM_CHANNELS),
+        "-ar",
+        str(PCM_SAMPLE_RATE),
         "-c:a",
-        "copy",
-        str(output_path),
+        "pcm_s16le",
+        "-f",
+        "s16le",
+        "pipe:1",
     ]
     result = subprocess.run(
         command,
-        stdout=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         check=False,
-        text=True,
     )
     if result.returncode != 0:
-        detail = result.stderr.strip() or "ffmpeg produced no diagnostic output"
+        detail = result.stderr.decode("utf-8", errors="replace").strip()
+        detail = detail or "ffmpeg produced no diagnostic output"
         raise SystemExit(
-            "Could not extract first audio stream from MKV source with ffmpeg:\n"
+            "Could not decode first audio stream with ffmpeg:\n"
             f"{detail}"
         )
-    if not output_path.is_file():
-        raise SystemExit(
-            "ffmpeg completed but did not create an audio file: "
-            f"{output_path}"
-        )
-    return output_path
+    if not result.stdout:
+        raise SystemExit(f"ffmpeg decoded no audio from source: {source}")
+    return PcmAudioSource(
+        source_path=source,
+        sample_rate=PCM_SAMPLE_RATE,
+        channels=PCM_CHANNELS,
+        sample_width_bytes=PCM_SAMPLE_WIDTH_BYTES,
+        pcm=result.stdout,
+    )
+
+
+def _load_sounddevice() -> ModuleType:
+    try:
+        return importlib.import_module("sounddevice")
+    except ImportError as exc:
+        raise RuntimeError("sounddevice not installed; cannot play PCM audio") from exc
 
 
 def runtime_episode_number(filename_stem: str) -> int | None:
@@ -404,14 +535,14 @@ class SubsyncTuiApp(App[None]):
     def __init__(
         self,
         *,
-        source_path: Path,
+        audio_source: PcmAudioSource,
         tracks: list[SubtitleTrack],
         initial_window_s: float,
         remote_state: RemoteLookupState | None = None,
         download_dir: Path | None = None,
     ) -> None:
         super().__init__()
-        self.source_path = source_path
+        self.audio_source = audio_source
         self.tracks = tracks
         self.track_index = 0
         self.cue_indices = [0 for _ in tracks]
@@ -422,7 +553,7 @@ class SubsyncTuiApp(App[None]):
             tempfile.mkdtemp(prefix="ja-media-subsync-")
         )
         self._pending_g = False
-        self._playback_process: subprocess.Popen[bytes] | None = None
+        self._player = PcmSlicePlayer(audio_source)
         self._playback_status = ""
 
     def compose(self) -> ComposeResult:
@@ -603,7 +734,16 @@ class SubsyncTuiApp(App[None]):
     def render_source(self) -> Text:
         text = Text()
         text.append("source: ", style="bold")
-        text.append(str(self.source_path))
+        text.append(str(self.audio_source.source_path))
+        text.append("  ")
+        text.append(
+            (
+                f"pcm {self.audio_source.sample_rate}Hz "
+                f"{self.audio_source.channels}ch "
+                f"{format_duration(self.audio_source.duration_s)}"
+            ),
+            style="dim",
+        )
         remote_label = self.remote_label()
         if remote_label:
             text.append("  ")
@@ -711,7 +851,8 @@ class SubsyncTuiApp(App[None]):
 
     def render_help(self) -> str:
         pending = "  g..." if self._pending_g else ""
-        playback = f"  {self.playback_status()}" if self.playback_status() else ""
+        playback_status = self.playback_status()
+        playback = f"  {playback_status}" if playback_status else ""
         return (
             "space play/stop  h/l cue  j/k SRT  gg/G start/end  Ctrl-f/b page  "
             "Ctrl-d/u half-page  +/- zoom  Ctrl-c copy  F6 kitsunekko  q quit"
@@ -858,29 +999,11 @@ class SubsyncTuiApp(App[None]):
             return
 
         start_s, duration_s = playback_range(cue)
-        command = [
-            "ffplay",
-            "-nodisp",
-            "-autoexit",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-ss",
-            f"{start_s:.3f}",
-            "-t",
-            f"{duration_s:.3f}",
-            str(self.source_path),
-        ]
         try:
-            self._playback_process = subprocess.Popen(
-                command,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-        except FileNotFoundError:
-            self._playback_process = None
-            self._playback_status = "ffplay not found"
+            self._player.play(start_s, duration_s)
+        except RuntimeError as exc:
+            self._playback_status = str(exc)
+            self.notify(str(exc), severity="error")
         else:
             end_s = start_s + duration_s
             self._playback_status = (
@@ -889,26 +1012,16 @@ class SubsyncTuiApp(App[None]):
         self.refresh_view()
 
     def stop_playback(self) -> None:
-        process = self._playback_process
-        self._playback_process = None
-        if process is None or process.poll() is not None:
-            return
-        process.terminate()
-        try:
-            process.wait(timeout=0.2)
-        except subprocess.TimeoutExpired:
-            process.kill()
+        self._player.stop()
 
     def is_playing(self) -> bool:
-        process = self._playback_process
-        return process is not None and process.poll() is None
+        return self._player.is_playing()
 
     def playback_status(self) -> str:
         if self.is_playing():
             return self._playback_status
-        if self._playback_process is not None:
-            self._playback_process = None
-            return "playback finished"
+        if self._playback_status.startswith("playing "):
+            self._playback_status = "playback finished"
         return self._playback_status
 
     def _activity_bar(

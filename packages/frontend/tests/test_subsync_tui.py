@@ -8,11 +8,15 @@ from unittest.mock import Mock, patch
 
 from ja_media_frontend.subsync_tui import (
     GAP_BLOCK,
+    PCM_CHANNELS,
+    PCM_SAMPLE_RATE,
+    PCM_SAMPLE_WIDTH_BYTES,
+    PcmAudioSource,
     RemoteLookupState,
     SPAN_BLOCK,
     SubtitleTrack,
     SubsyncTuiApp,
-    extracted_audio_source,
+    load_pcm_audio_source,
     playback_range,
     resolve_srt_inputs,
     runtime_episode_number,
@@ -28,6 +32,35 @@ SRT_TEXT = (
     "00:00:05,000 --> 00:00:06,000\n"
     "world\n"
 )
+
+
+def make_audio_source(path: Path, *, seconds: float = 10.0) -> PcmAudioSource:
+    frame_count = round(seconds * PCM_SAMPLE_RATE)
+    return PcmAudioSource(
+        source_path=path,
+        sample_rate=PCM_SAMPLE_RATE,
+        channels=PCM_CHANNELS,
+        sample_width_bytes=PCM_SAMPLE_WIDTH_BYTES,
+        pcm=b"\x00\x00" * frame_count,
+    )
+
+
+class FakePlayer:
+    def __init__(self) -> None:
+        self.play_args: tuple[float, float] | None = None
+        self.playing = False
+        self.stop_called = False
+
+    def play(self, start_s: float, duration_s: float) -> None:
+        self.play_args = (start_s, duration_s)
+        self.playing = True
+
+    def stop(self) -> None:
+        self.stop_called = True
+        self.playing = False
+
+    def is_playing(self) -> bool:
+        return self.playing
 
 
 class SubsyncTuiTest(unittest.TestCase):
@@ -52,55 +85,45 @@ class SubsyncTuiTest(unittest.TestCase):
     def test_runtime_episode_number_parses_media_filename_stem(self) -> None:
         self.assertEqual(runtime_episode_number("[Group] GANTZ.S01E16.1080p"), 16)
 
-    def test_extracted_audio_source_leaves_non_mkv_sources_alone(self) -> None:
+    def test_load_pcm_audio_source_decodes_first_audio_stream(self) -> None:
         with TemporaryDirectory() as tmpdir:
-            source = Path(tmpdir) / "episode.opus"
+            source = Path(tmpdir) / "episode.mkv"
             source.write_bytes(b"fake")
+            pcm = b"\x00\x00\x01\x00"
 
-            self.assertEqual(extracted_audio_source(source, Path(tmpdir)), source)
+            with (
+                patch("ja_media_frontend.subsync_tui.shutil.which", return_value="ffmpeg"),
+                patch(
+                    "ja_media_frontend.subsync_tui.subprocess.run",
+                    return_value=Mock(returncode=0, stdout=pcm, stderr=b""),
+                ) as run,
+            ):
+                audio = load_pcm_audio_source(source)
 
-    def test_extracted_audio_source_bails_loudly_when_ffmpeg_is_missing(self) -> None:
+            command = run.call_args.args[0]
+            self.assertEqual(audio.source_path, source)
+            self.assertEqual(audio.pcm, pcm)
+            self.assertEqual(audio.sample_rate, PCM_SAMPLE_RATE)
+            self.assertEqual(audio.channels, PCM_CHANNELS)
+            self.assertEqual(
+                command[:6],
+                ["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", str(source)],
+            )
+            self.assertIn("-map", command)
+            self.assertIn("0:a:0", command)
+            self.assertIn("pcm_s16le", command)
+            self.assertEqual(command[-2:], ["s16le", "pipe:1"])
+
+    def test_load_pcm_audio_source_bails_loudly_when_ffmpeg_is_missing(self) -> None:
         with TemporaryDirectory() as tmpdir:
             source = Path(tmpdir) / "episode.mkv"
             source.write_bytes(b"fake")
 
             with patch("ja_media_frontend.subsync_tui.shutil.which", return_value=None):
                 with self.assertRaisesRegex(SystemExit, "ffmpeg not found"):
-                    extracted_audio_source(source, Path(tmpdir))
+                    load_pcm_audio_source(source)
 
-    def test_extracted_audio_source_copies_first_mkv_audio_stream(self) -> None:
-        with TemporaryDirectory() as tmpdir:
-            tmp = Path(tmpdir)
-            source = tmp / "Episode S01E06.mkv"
-            source.write_bytes(b"fake")
-
-            def fake_run(command, **kwargs):  # type: ignore[no-untyped-def]
-                Path(command[-1]).write_bytes(b"audio")
-                return Mock(returncode=0, stderr="")
-
-            with (
-                patch("ja_media_frontend.subsync_tui.shutil.which", return_value="ffmpeg"),
-                patch(
-                    "ja_media_frontend.subsync_tui.subprocess.run",
-                    side_effect=fake_run,
-                ) as run,
-            ):
-                extracted = extracted_audio_source(source, tmp)
-
-            command = run.call_args.args[0]
-            self.assertEqual(extracted.name, "Episode S01E06.audio.mka")
-            self.assertEqual(extracted.read_bytes(), b"audio")
-            self.assertEqual(
-                command[:6],
-                ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i"],
-            )
-            self.assertEqual(command[6], str(source))
-            self.assertIn("-map", command)
-            self.assertIn("0:a:0", command)
-            self.assertIn("-c:a", command)
-            self.assertIn("copy", command)
-
-    def test_extracted_audio_source_includes_ffmpeg_stderr_on_failure(self) -> None:
+    def test_load_pcm_audio_source_includes_ffmpeg_stderr_on_failure(self) -> None:
         with TemporaryDirectory() as tmpdir:
             source = Path(tmpdir) / "episode.mkv"
             source.write_bytes(b"fake")
@@ -109,11 +132,11 @@ class SubsyncTuiTest(unittest.TestCase):
                 patch("ja_media_frontend.subsync_tui.shutil.which", return_value="ffmpeg"),
                 patch(
                     "ja_media_frontend.subsync_tui.subprocess.run",
-                    return_value=Mock(returncode=1, stderr="Stream map failed"),
+                    return_value=Mock(returncode=1, stdout=b"", stderr=b"Stream map failed"),
                 ),
             ):
                 with self.assertRaisesRegex(SystemExit, "Stream map failed"):
-                    extracted_audio_source(source, Path(tmpdir))
+                    load_pcm_audio_source(source)
 
     def test_key_navigation_moves_current_cue(self) -> None:
         async def run_app() -> tuple[int, str]:
@@ -125,7 +148,7 @@ class SubsyncTuiTest(unittest.TestCase):
                 srt.write_text(SRT_TEXT, encoding="utf-8")
 
                 app = SubsyncTuiApp(
-                    source_path=media,
+                    audio_source=make_audio_source(media),
                     tracks=[SubtitleTrack(srt, read_srt(srt))],
                     initial_window_s=10.0,
                 )
@@ -148,7 +171,7 @@ class SubsyncTuiTest(unittest.TestCase):
                 srt.write_text(SRT_TEXT, encoding="utf-8")
 
                 app = SubsyncTuiApp(
-                    source_path=media,
+                    audio_source=make_audio_source(media),
                     tracks=[SubtitleTrack(srt, read_srt(srt))],
                     initial_window_s=10.0,
                 )
@@ -175,7 +198,7 @@ class SubsyncTuiTest(unittest.TestCase):
                 )
 
                 app = SubsyncTuiApp(
-                    source_path=media,
+                    audio_source=make_audio_source(media),
                     tracks=[SubtitleTrack(srt, read_srt(srt))],
                     initial_window_s=4.0,
                 )
@@ -202,41 +225,34 @@ class SubsyncTuiTest(unittest.TestCase):
 
         self.assertEqual(playback_range(cue), (0.25, 0.75))
 
-    def test_space_starts_and_stops_ffplay_for_current_cue(self) -> None:
-        async def run_app() -> tuple[list[str], bool]:
+    def test_space_starts_and_stops_pcm_player_for_current_cue(self) -> None:
+        async def run_app() -> tuple[float, float, bool]:
             with TemporaryDirectory() as tmpdir:
                 tmp = Path(tmpdir)
                 media = tmp / "episode.mp3"
                 srt = tmp / "episode.ja.srt"
                 media.write_bytes(b"fake")
                 srt.write_text(SRT_TEXT, encoding="utf-8")
-                fake_process = Mock()
-                fake_process.poll.return_value = None
 
                 app = SubsyncTuiApp(
-                    source_path=media,
+                    audio_source=make_audio_source(media),
                     tracks=[SubtitleTrack(srt, read_srt(srt))],
                     initial_window_s=10.0,
                 )
-                with patch(
-                    "ja_media_frontend.subsync_tui.subprocess.Popen",
-                    return_value=fake_process,
-                ) as popen:
-                    async with app.run_test() as pilot:
-                        await pilot.press("space")
-                        command = popen.call_args.args[0]
-                        await pilot.press("space")
-                        return command, fake_process.terminate.called
+                fake_player = FakePlayer()
+                app._player = fake_player
+                async with app.run_test() as pilot:
+                    await pilot.press("space")
+                    assert fake_player.play_args is not None
+                    start_s, duration_s = fake_player.play_args
+                    await pilot.press("space")
+                    return start_s, duration_s, fake_player.stop_called
 
-        command, terminated = asyncio.run(run_app())
+        start_s, duration_s, stopped = asyncio.run(run_app())
 
-        self.assertEqual(command[0], "ffplay")
-        self.assertIn("-nodisp", command)
-        self.assertIn("-autoexit", command)
-        self.assertEqual(command[-5:-3], ["-ss", "1.000"])
-        self.assertEqual(command[-3:-1], ["-t", "1.000"])
-        self.assertTrue(command[-1].endswith("episode.mp3"))
-        self.assertTrue(terminated)
+        self.assertEqual(start_s, 1.0)
+        self.assertEqual(duration_s, 1.0)
+        self.assertTrue(stopped)
 
     def test_cue_navigation_stops_active_playback(self) -> None:
         async def run_app() -> tuple[int, bool]:
@@ -246,27 +262,23 @@ class SubsyncTuiTest(unittest.TestCase):
                 srt = tmp / "episode.ja.srt"
                 media.write_bytes(b"fake")
                 srt.write_text(SRT_TEXT, encoding="utf-8")
-                fake_process = Mock()
-                fake_process.poll.return_value = None
 
                 app = SubsyncTuiApp(
-                    source_path=media,
+                    audio_source=make_audio_source(media),
                     tracks=[SubtitleTrack(srt, read_srt(srt))],
                     initial_window_s=10.0,
                 )
-                with patch(
-                    "ja_media_frontend.subsync_tui.subprocess.Popen",
-                    return_value=fake_process,
-                ):
-                    async with app.run_test() as pilot:
-                        await pilot.press("space")
-                        await pilot.press("l")
-                        return app.cue_index, fake_process.terminate.called
+                fake_player = FakePlayer()
+                fake_player.playing = True
+                app._player = fake_player
+                async with app.run_test() as pilot:
+                    await pilot.press("l")
+                    return app.cue_index, fake_player.stop_called
 
-        cue_index, terminated = asyncio.run(run_app())
+        cue_index, stopped = asyncio.run(run_app())
 
         self.assertEqual(cue_index, 1)
-        self.assertTrue(terminated)
+        self.assertTrue(stopped)
 
     def test_ctrl_c_copies_current_subtitle_instead_of_quitting(self) -> None:
         async def run_app() -> tuple[str, int]:
@@ -278,7 +290,7 @@ class SubsyncTuiTest(unittest.TestCase):
                 srt.write_text(SRT_TEXT, encoding="utf-8")
 
                 app = SubsyncTuiApp(
-                    source_path=media,
+                    audio_source=make_audio_source(media),
                     tracks=[SubtitleTrack(srt, read_srt(srt))],
                     initial_window_s=10.0,
                 )
@@ -304,7 +316,7 @@ class SubsyncTuiTest(unittest.TestCase):
             first.write_text(SRT_TEXT, encoding="utf-8")
             second.write_text(SRT_TEXT, encoding="utf-8")
             app = SubsyncTuiApp(
-                source_path=media,
+                audio_source=make_audio_source(media),
                 tracks=[
                     SubtitleTrack(first, read_srt(first)),
                     SubtitleTrack(second, read_srt(second)),
@@ -321,7 +333,7 @@ class SubsyncTuiTest(unittest.TestCase):
             media = Path(tmpdir) / "episode.mp3"
             media.write_bytes(b"fake")
             app = SubsyncTuiApp(
-                source_path=media,
+                audio_source=make_audio_source(media),
                 tracks=[],
                 initial_window_s=10.0,
                 remote_state=RemoteLookupState(
@@ -343,7 +355,7 @@ class SubsyncTuiTest(unittest.TestCase):
             media = tmp / "episode.mp3"
             media.write_bytes(b"fake")
             app = SubsyncTuiApp(
-                source_path=media,
+                audio_source=make_audio_source(media),
                 tracks=[],
                 initial_window_s=10.0,
                 remote_state=RemoteLookupState(
