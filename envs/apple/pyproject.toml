@@ -33,3 +33,8 @@ ja-media-transcripts = { path = "../../packages/transcripts", editable = true }
 mlx-audio = { git = "https://github.com/Blaizzy/mlx-audio.git", rev = "f7c11556eda88731be5cc75ddbdf4a4cb9eeaafc" }
 transformers = { git = "https://github.com/huggingface/transformers.git", rev = "cbb65a4815d44f1d8b8ff7f51cca24ce491fc09e" }
 ja-media-frontend = { path = "../../packages/frontend", editable = true }
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.0",
+]

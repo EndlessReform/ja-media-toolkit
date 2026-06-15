@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
+from ja_media_core.config import JaMediaConfig, ServicesConfig
 from ja_media_core.kitsunekko import (
+    HttpKitsunekkoSubtitlesClient,
     KitsunekkoFileListResponse,
     anilist_content_path,
     anilist_episode_content_path,
@@ -18,6 +21,39 @@ from ja_media_core.kitsunekko import (
 
 
 class KitsunekkoContractTest(unittest.TestCase):
+    def test_config_root_url_resolves_to_gateway_subtitles_route(self) -> None:
+        config = JaMediaConfig(
+            services=ServicesConfig(root_url="http://magi06-ja-media-toolkit")
+        )
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch("ja_media_core.services.load_config", return_value=config),
+        ):
+            client = HttpKitsunekkoSubtitlesClient()
+
+        self.assertEqual(
+            client.base_url,
+            "http://magi06-ja-media-toolkit/api/v1/subtitles",
+        )
+        self.assertEqual(
+            client._url(anilist_episode_files_path(187869, 4)),
+            "http://magi06-ja-media-toolkit/api/v1/subtitles/series/anilist/187869/episodes/4/files",
+        )
+
+    def test_explicit_base_url_is_treated_as_exact_service_url(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {"KITSUNEKKO_SUBTITLES_BASE_URL": "http://127.0.0.1:8000"},
+            clear=True,
+        ):
+            client = HttpKitsunekkoSubtitlesClient()
+
+        self.assertEqual(client.base_url, "http://127.0.0.1:8000")
+        self.assertEqual(
+            client._url(anilist_files_path(395)),
+            "http://127.0.0.1:8000/series/anilist/395/files",
+        )
+
     def test_builds_anilist_paths(self) -> None:
         self.assertEqual(anilist_files_path(395), "/series/anilist/395/files")
         self.assertEqual(

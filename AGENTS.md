@@ -101,6 +101,27 @@ cd packages/frontend
 uv run --isolated --with-editable '.[apple]' ja-media transcribe --startup-only ../../examples/input/jfk.wav
 ```
 
+#### 4. Running Tests
+`pytest` is a declared dev dependency. Do not use ad hoc `uv run --with pytest ...` invocations unless you are intentionally testing outside the repo environments.
+
+For workspace packages (`packages/core`, `packages/media`, `packages/transcripts`), run tests from the repo root:
+```sh
+uv run pytest packages/core/tests
+uv run pytest packages/transcripts/tests
+```
+
+For standalone environments that are not root workspace members, run from that environment:
+```sh
+cd packages/frontend
+uv run pytest tests
+
+cd envs/apple
+uv run pytest tests
+
+cd envs/services
+uv run pytest tests
+```
+
 **Platform Verification**: Check you're on the right box before running heavyweight tools. If a task requires CUDA, verify the machine has it (e.g., `nvidia-smi`). If it requires MLX/Metal, verify you're on Apple Silicon.
 
 - Add dependencies with `uv add` **from within the relevant directory**.
@@ -134,4 +155,3 @@ belong in repo `.env`.
 If an env handoff file is needed for a subprocess, put it in `/tmp` or another
 gitignored location, avoid echoing secret values into logs, and clean it up
 afterward.
-

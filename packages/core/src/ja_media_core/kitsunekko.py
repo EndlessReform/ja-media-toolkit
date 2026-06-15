@@ -9,11 +9,12 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from ja_media_core.crosswalk import normalize_media_kind
-from ja_media_core.config import load_config
+from ja_media_core.services import service_base_url
 
 
 KITSUNEKKO_SUBTITLES_BASE_URL_ENV = "KITSUNEKKO_SUBTITLES_BASE_URL"
 KITSUNEKKO_SUBTITLES_URL_ENV = "JA_MEDIA_KITSUNEKKO_SUBTITLES_URL"
+KITSUNEKKO_SUBTITLES_GATEWAY_PATH = "/api/v1/subtitles"
 
 
 @dataclass(frozen=True)
@@ -268,13 +269,14 @@ class HttpKitsunekkoSubtitlesClient:
     """
 
     def __init__(self, base_url: str | None = None, *, timeout_s: float = 5.0) -> None:
-        configured_url = base_url or os.environ.get(KITSUNEKKO_SUBTITLES_BASE_URL_ENV) or os.environ.get(KITSUNEKKO_SUBTITLES_URL_ENV)
-
-        if not configured_url:
-            try:
-                configured_url = load_config().services.root_url
-            except Exception:
-                configured_url = None
+        configured_url = service_base_url(
+            base_url,
+            (
+                os.environ.get(KITSUNEKKO_SUBTITLES_BASE_URL_ENV),
+                os.environ.get(KITSUNEKKO_SUBTITLES_URL_ENV),
+            ),
+            KITSUNEKKO_SUBTITLES_GATEWAY_PATH,
+        )
 
         if not configured_url:
             raise ValueError(
@@ -421,20 +423,22 @@ class HttpKitsunekkoSubtitlesClient:
         return urllib.parse.urljoin(f"{self.base_url}/", path.lstrip("/"))
 
     def _get_json(self, path: str) -> dict[str, Any]:
-        request = urllib.request.Request(self._url(path), headers={"Accept": "application/json"})
+        url = self._url(path)
+        request = urllib.request.Request(url, headers={"Accept": "application/json"})
         try:
             with urllib.request.urlopen(request, timeout=self.timeout_s) as response:
                 charset = response.headers.get_content_charset() or "utf-8"
                 return json.loads(response.read().decode(charset))
         except urllib.error.HTTPError as error:
             body = error.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"Kitsunekko subtitles request failed: {error.code} {body}") from error
+            raise RuntimeError(f"Kitsunekko subtitles request failed for {url}: {error.code} {body}") from error
 
     def _get_bytes(self, path: str) -> bytes:
-        request = urllib.request.Request(self._url(path), headers={"Accept": "*/*"})
+        url = self._url(path)
+        request = urllib.request.Request(url, headers={"Accept": "*/*"})
         try:
             with urllib.request.urlopen(request, timeout=self.timeout_s) as response:
                 return response.read()
         except urllib.error.HTTPError as error:
             body = error.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"Kitsunekko subtitles request failed: {error.code} {body}") from error
+            raise RuntimeError(f"Kitsunekko subtitles request failed for {url}: {error.code} {body}") from error

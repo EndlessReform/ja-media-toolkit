@@ -28,3 +28,8 @@ build-backend = "hatchling.build"
 [tool.uv.sources]
 ja-media-core = { path = "../core", editable = true }
 ja-media-apple = { path = "../../envs/apple", editable = true }
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.0",
+]

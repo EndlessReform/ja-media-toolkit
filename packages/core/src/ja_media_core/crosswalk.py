@@ -8,6 +8,8 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any, Iterable, Literal, Protocol
 
+from ja_media_core.services import service_base_url
+
 
 AnimeIdSource = Literal[
     "anidb",
@@ -27,6 +29,7 @@ MediaKind = Literal["tv", "series", "movie"]
 
 ANIME_CROSSWALK_BASE_URL_ENV = "ANIME_CROSSWALK_BASE_URL"
 ANIME_CROSSWALK_URL_ENV = "JA_MEDIA_ANIME_CROSSWALK_URL"
+ANIME_CROSSWALK_GATEWAY_PATH = "/api/v1/crosswalk"
 
 SOURCE_FIELDS = {
     "anidb_id": "anidb",
@@ -248,15 +251,18 @@ class HttpAnimeCrosswalkClient:
     """
 
     def __init__(self, base_url: str | None = None, *, timeout_s: float = 5.0) -> None:
-        configured_url = (
-            base_url
-            or os.environ.get(ANIME_CROSSWALK_BASE_URL_ENV)
-            or os.environ.get(ANIME_CROSSWALK_URL_ENV)
+        configured_url = service_base_url(
+            base_url,
+            (
+                os.environ.get(ANIME_CROSSWALK_BASE_URL_ENV),
+                os.environ.get(ANIME_CROSSWALK_URL_ENV),
+            ),
+            ANIME_CROSSWALK_GATEWAY_PATH,
         )
         if not configured_url:
             raise ValueError(
-                "Anime crosswalk base URL is required, or set "
-                f"{ANIME_CROSSWALK_BASE_URL_ENV}"
+                "Anime crosswalk base URL is required. Set it via argument, "
+                f"{ANIME_CROSSWALK_BASE_URL_ENV}, or in your config.toml under [services].root_url"
             )
         self.base_url = configured_url.rstrip("/")
         self.timeout_s = timeout_s
@@ -322,8 +328,11 @@ class HttpAnimeCrosswalkClient:
     def health(self) -> dict[str, Any]:
         return self._get_json("/healthz")
 
+    def _url(self, path: str) -> str:
+        return urllib.parse.urljoin(f"{self.base_url}/", path.lstrip("/"))
+
     def _get_json(self, path: str) -> dict[str, Any]:
-        url = urllib.parse.urljoin(f"{self.base_url}/", path.lstrip("/"))
+        url = self._url(path)
         request = urllib.request.Request(url, headers={"Accept": "application/json"})
         try:
             with urllib.request.urlopen(request, timeout=self.timeout_s) as response:
@@ -334,7 +343,7 @@ class HttpAnimeCrosswalkClient:
             raise RuntimeError(f"Anime crosswalk request failed: {error.code} {body}") from error
 
     def _post_json(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
-        url = urllib.parse.urljoin(f"{self.base_url}/", path.lstrip("/"))
+        url = self._url(path)
         request = urllib.request.Request(
             url,
             data=json.dumps(payload).encode("utf-8"),
