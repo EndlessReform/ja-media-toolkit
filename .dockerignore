@@ -18,3 +18,4 @@ docs/repo-symlinks/
 # Repository/admin noise
 .git/
 .DS_Store
+**/node_modules

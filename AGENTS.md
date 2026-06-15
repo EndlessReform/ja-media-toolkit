@@ -34,6 +34,11 @@ TODO fill this in more.
 See [docs/monorepo-philosophy.md](docs/monorepo-philosophy.md) for the full rationale if needed.
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the durable ASR/config/backend boundaries.
 
+**Documentation Strategy:**
+- **User/Developer facing content** (guides, setup, references) lives in `site/src/content/docs/`. This is the default place for documenting new features.
+    - NOTE! This uses Astro Starlight, so the page title in frontmatter is shown by default. Only write headings at H2 or below, don't write a page title as this is redundant.
+- **Internal design/architectural notes** live in `docs/`.
+
 ```text
 packages/          contracts and shared libraries (workspace members)
 ├── core/          shared types, config, manifests, job/result contracts

@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from ja_media_core.crosswalk import normalize_media_kind
+from ja_media_core.config import load_config
 
 
 KITSUNEKKO_SUBTITLES_BASE_URL_ENV = "KITSUNEKKO_SUBTITLES_BASE_URL"
@@ -267,15 +268,18 @@ class HttpKitsunekkoSubtitlesClient:
     """
 
     def __init__(self, base_url: str | None = None, *, timeout_s: float = 5.0) -> None:
-        configured_url = (
-            base_url
-            or os.environ.get(KITSUNEKKO_SUBTITLES_BASE_URL_ENV)
-            or os.environ.get(KITSUNEKKO_SUBTITLES_URL_ENV)
-        )
+        configured_url = base_url or os.environ.get(KITSUNEKKO_SUBTITLES_BASE_URL_ENV) or os.environ.get(KITSUNEKKO_SUBTITLES_URL_ENV)
+
+        if not configured_url:
+            try:
+                configured_url = load_config().services.root_url
+            except Exception:
+                configured_url = None
+
         if not configured_url:
             raise ValueError(
-                "Kitsunekko subtitles base URL is required, or set "
-                f"{KITSUNEKKO_SUBTITLES_BASE_URL_ENV}"
+                "Kitsunekko subtitles base URL is required. Set it via argument, "
+                f"{KITSUNEKKO_SUBTITLES_BASE_URL_ENV}, or in your config.toml under [services].root_url"
             )
         self.base_url = configured_url.rstrip("/")
         self.timeout_s = timeout_s

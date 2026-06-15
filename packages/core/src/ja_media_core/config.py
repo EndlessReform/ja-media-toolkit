@@ -92,6 +92,16 @@ class MetadataConfig(BaseModel):
     crosswalk: MetadataCrosswalkConfig = Field(default_factory=MetadataCrosswalkConfig)
 
 
+class ServicesConfig(BaseModel):
+    """Global service discovery settings.
+
+    Use this to set base URLs for home-labbed services so that clients
+    don't need separate environment variables for every endpoint.
+    """
+
+    root_url: str | None = None
+
+
 class JaMediaConfig(BaseModel):
     """Top-level user config file.
 
@@ -102,6 +112,7 @@ class JaMediaConfig(BaseModel):
 
     asr: AsrConfig = Field(default_factory=AsrConfig)
     metadata: MetadataConfig = Field(default_factory=MetadataConfig)
+    services: ServicesConfig = Field(default_factory=ServicesConfig)
 
 
 @dataclass

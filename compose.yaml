@@ -1,14 +1,26 @@
 name: ja-media-services
 
 services:
+  docs:
+    build:
+      context: .
+      dockerfile: site/Dockerfile
+    image: ja-media/docs:local
+    ports:
+      - "${DOCS_PORT:-8080}:80"
+    restart: unless-stopped
+    depends_on:
+      anime-crosswalk:
+        condition: service_healthy
+      kitsunekko-subtitles:
+        condition: service_healthy
+
   anime-crosswalk:
     build:
       context: .
       dockerfile: envs/services/Dockerfile
     image: ja-media/services:local
     restart: unless-stopped
-    ports:
-      - "58834:8000"
     environment:
       ANIME_CROSSWALK_HOST: "0.0.0.0"
       ANIME_CROSSWALK_PORT: "8000"
@@ -34,8 +46,6 @@ services:
       dockerfile: envs/services/Dockerfile
     image: ja-media/services:local
     restart: unless-stopped
-    ports:
-      - "58835:8000"
     environment:
       KITSUNEKKO_SUBTITLES_HOST: "0.0.0.0"
       KITSUNEKKO_SUBTITLES_PORT: "8000"
