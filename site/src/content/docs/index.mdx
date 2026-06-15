@@ -1,0 +1,32 @@
+---
+title: ja-media-toolkit
+description: Tools and local services for managing Japanese media.
+template: splash
+hero:
+  tagline: Tools and local services for managing Japanese media.
+  actions:
+    - text: Set up CLI tools
+      link: /setup/tools/
+      icon: right-arrow
+    - text: Set up services
+      link: /setup/services/
+      icon: setting
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+## Start here
+
+<CardGrid stagger>
+	<Card title="CLI tools" icon="terminal">
+		Install the `ja-media` command for transcription, subtitle alignment,
+		and local media workflows.
+	</Card>
+	<Card title="Services" icon="setting">
+		Start the Docker stack for the documentation gateway and local metadata APIs.
+	</Card>
+	<Card title="Configuration" icon="document">
+		Review the durable settings used by tools and services.
+	</Card>
+</CardGrid>

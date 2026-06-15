@@ -1,0 +1,15 @@
+:80 {
+    # Serve static files from the Astro build
+    root * /usr/share/caddy
+    file_server
+
+    # Reverse proxy for backend services
+    # handle_path strips the prefix before sending to the backend
+    handle_path /api/v1/crosswalk* {
+        reverse_proxy anime-crosswalk:8000
+    }
+
+    handle_path /api/v1/subtitles* {
+        reverse_proxy kitsunekko-subtitles:8000
+    }
+}

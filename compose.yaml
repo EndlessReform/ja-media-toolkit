@@ -1,17 +1,30 @@
 name: ja-media-services
 
 services:
+  docs:
+    build:
+      context: .
+      dockerfile: site/Dockerfile
+    image: ja-media/docs:local
+    ports:
+      - "${DOCS_PORT:-8080}:80"
+    restart: unless-stopped
+    depends_on:
+      anime-crosswalk:
+        condition: service_healthy
+      kitsunekko-subtitles:
+        condition: service_healthy
+
   anime-crosswalk:
     build:
       context: .
       dockerfile: envs/services/Dockerfile
     image: ja-media/services:local
     restart: unless-stopped
-    ports:
-      - "58834:8000"
     environment:
       ANIME_CROSSWALK_HOST: "0.0.0.0"
       ANIME_CROSSWALK_PORT: "8000"
+      ANIME_CROSSWALK_ROOT_PATH: "/api/v1/crosswalk"
       ANIME_CROSSWALK_DB_PATH: "/var/lib/anime-crosswalk/anime_lists.sqlite"
       ANIME_CROSSWALK_DATA_DIR: "/var/lib/anime-crosswalk"
       ANIME_CROSSWALK_SOURCE_JSON_PATH: "/var/lib/anime-crosswalk/anime-lists/anime-list-full.json"
@@ -34,11 +47,10 @@ services:
       dockerfile: envs/services/Dockerfile
     image: ja-media/services:local
     restart: unless-stopped
-    ports:
-      - "58835:8000"
     environment:
       KITSUNEKKO_SUBTITLES_HOST: "0.0.0.0"
       KITSUNEKKO_SUBTITLES_PORT: "8000"
+      KITSUNEKKO_SUBTITLES_ROOT_PATH: "/api/v1/subtitles"
       KITSUNEKKO_SUBTITLES_DATA_DIR: "/var/lib/kitsunekko-subtitles"
       KITSUNEKKO_SUBTITLES_DB_PATH: "/var/lib/kitsunekko-subtitles/kitsunekko_subtitles.sqlite"
       KITSUNEKKO_SUBTITLES_CROSSWALK_DB_PATH: "/var/lib/anime-crosswalk-ro/anime_lists.sqlite"

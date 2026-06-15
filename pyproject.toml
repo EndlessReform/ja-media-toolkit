@@ -12,3 +12,8 @@ members = [
   "packages/media",
   "packages/transcripts",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.0",
+]

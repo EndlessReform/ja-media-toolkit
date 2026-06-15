@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
+from ja_media_core.config import JaMediaConfig, ServicesConfig
 from ja_media_core.crosswalk import (
     CrosswalkBulkLookupResponse,
     CrosswalkLookupResponse,
+    HttpAnimeCrosswalkClient,
     anime_list_lookup_rows,
     normalize_media_kind,
     normalize_source,
@@ -13,6 +16,39 @@ from ja_media_core.crosswalk import (
 
 
 class CrosswalkContractTest(unittest.TestCase):
+    def test_config_root_url_resolves_to_gateway_crosswalk_route(self) -> None:
+        config = JaMediaConfig(
+            services=ServicesConfig(root_url="http://magi06-ja-media-toolkit")
+        )
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch("ja_media_core.services.load_config", return_value=config),
+        ):
+            client = HttpAnimeCrosswalkClient()
+
+        self.assertEqual(
+            client.base_url,
+            "http://magi06-ja-media-toolkit/api/v1/crosswalk",
+        )
+        self.assertEqual(
+            client._url(resolve_path("tvdb", 79099)),
+            "http://magi06-ja-media-toolkit/api/v1/crosswalk/resolve/tvdb/79099",
+        )
+
+    def test_explicit_base_url_is_treated_as_exact_service_url(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {"ANIME_CROSSWALK_BASE_URL": "http://127.0.0.1:8000"},
+            clear=True,
+        ):
+            client = HttpAnimeCrosswalkClient()
+
+        self.assertEqual(client.base_url, "http://127.0.0.1:8000")
+        self.assertEqual(
+            client._url(resolve_path("mal", 1)),
+            "http://127.0.0.1:8000/resolve/mal/1",
+        )
+
     def test_normalizes_sources_and_media_kinds(self) -> None:
         self.assertEqual(normalize_source("TheMovieDB"), "tmdb")
         self.assertEqual(normalize_source("myanimelist"), "mal")
