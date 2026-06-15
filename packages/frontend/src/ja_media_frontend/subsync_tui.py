@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import glob
 import importlib
+import os
 import shutil
 import subprocess
 import tempfile
 import threading
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 from dotenv import load_dotenv
 from rich.console import Group
@@ -48,6 +50,52 @@ RemoteSourceKind = Literal["anilist", "tvdb"]
 PCM_SAMPLE_RATE = 48_000
 PCM_CHANNELS = 1
 PCM_SAMPLE_WIDTH_BYTES = 2
+
+
+def _same_file(left: Path, right: Path) -> bool:
+    """Return whether two paths identify the same file, tolerating missing paths."""
+
+    try:
+        return left.samefile(right)
+    except OSError:
+        return False
+
+
+def _copy_file_contents_atomic(source: Path, destination: Path) -> None:
+    """Write a byte-for-byte copy without preserving source metadata.
+
+    `shutil.copy2()` is tempting here, but it preserves mode and timestamps after
+    the content copy. Some NFS mounts allow normal writes while rejecting those
+    metadata updates, which makes a successful promotion look like a permission
+    failure. A sidecar SRT only needs the bytes, so write a temporary file in the
+    destination directory and atomically replace the sidecar.
+    """
+
+    tmp_path: Path | None = None
+    try:
+        for _ in range(100):
+            candidate = destination.with_name(
+                f".{destination.name}.{uuid.uuid4().hex}.tmp"
+            )
+            try:
+                fd = os.open(candidate, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+            except FileExistsError:
+                continue
+            tmp_path = candidate
+            break
+        else:  # pragma: no cover - UUID collisions are not realistically reachable.
+            raise FileExistsError(f"could not allocate temp file for {destination}")
+
+        with os.fdopen(fd, "wb") as output_file, source.open("rb") as input_file:
+            shutil.copyfileobj(input_file, output_file)
+            output_file.flush()
+            os.fsync(output_file.fileno())
+
+        os.replace(tmp_path, destination)
+        tmp_path = None
+    finally:
+        if tmp_path is not None:
+            tmp_path.unlink(missing_ok=True)
 
 
 @dataclass(frozen=True)
@@ -243,6 +291,7 @@ def run_subsync_tui(
         media_kind=tvdb_media_kind,
     )
 
+    # (a) Explicit SRT inputs — always first, in CLI order.
     srt_paths = resolve_srt_inputs(srt_inputs, allow_empty=True)
     tracks = []
     for path in srt_paths:
@@ -261,8 +310,23 @@ def run_subsync_tui(
             remote_state=remote_state,
             download_dir=session_dir,
         )
+
+        # (c) Remote tracks — inserted between explicit and sidecar.
         if fetch_subs:
             app.fetch_remote_tracks_or_exit()
+
+        # (b) Existing sidecar — always appended at the back so the user can
+        # compare their pick against what's already on disk. Skip if already
+        # loaded via explicit input or remote fetch.
+        _loaded_paths = {t.path for t in app.tracks}
+        _sidecar = source.with_suffix(".srt")
+        if _sidecar.is_file() and _sidecar not in _loaded_paths:
+            try:
+                app.tracks.append(SubtitleTrack(path=_sidecar, cues=read_srt(_sidecar)))
+                app.cue_indices.append(0)
+            except ValueError as exc:
+                raise SystemExit(f"Could not parse sidecar {_sidecar}: {exc}") from exc
+
         app.run()
 
 
@@ -394,6 +458,57 @@ def _first_positive_int(value: Any) -> int | None:
             if parsed is not None:
                 return parsed
     return None
+
+
+class ConfirmOverwriteModal(ModalScreen[bool]):
+    """Ask the user whether to overwrite an existing sidecar SRT."""
+
+    CSS = """
+    ConfirmOverwriteModal {
+        align: center middle;
+    }
+
+    #confirm-dialog {
+        width: 64;
+        height: auto;
+        padding: 1 2;
+        background: $surface;
+        border: tall $accent;
+    }
+
+    #confirm-path {
+        height: auto;
+        margin-top: 1;
+        color: $text-muted;
+    }
+
+    #confirm-actions {
+        height: auto;
+        margin-top: 1;
+    }
+    """
+
+    def __init__(self, destination: Path) -> None:
+        super().__init__()
+        self.destination = destination
+
+    def compose(self) -> ComposeResult:
+        yield Vertical(
+            Label("Overwrite existing subtitle?"),
+            Static(str(self.destination), id="confirm-path"),
+            Horizontal(
+                Button("No", id="confirm-no"),
+                Button("Yes", variant="primary", id="confirm-yes"),
+                id="confirm-actions",
+            ),
+            id="confirm-dialog",
+        )
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "confirm-no":
+            self.dismiss(False)
+        elif event.button.id == "confirm-yes":
+            self.dismiss(True)
 
 
 class RemoteLookupModal(ModalScreen[RemoteLookupRequest | None]):
@@ -615,6 +730,8 @@ class SubsyncTuiApp(App[None]):
             self.page_window(-0.5)
         elif char in {"+", "="}:
             self.zoom_window(0.5)
+        elif char == "p":
+            self.action_promote()
         elif char in {"-", "_"}:
             self.zoom_window(2.0)
         else:
@@ -855,7 +972,7 @@ class SubsyncTuiApp(App[None]):
         playback = f"  {playback_status}" if playback_status else ""
         return (
             "space play/stop  h/l cue  j/k SRT  gg/G start/end  Ctrl-f/b page  "
-            "Ctrl-d/u half-page  +/- zoom  Ctrl-c copy  F6 kitsunekko  q quit"
+            "Ctrl-d/u half-page  +/- zoom  Ctrl-c copy  p promote  F6 kitsunekko  q quit"
             f"{pending}{playback}"
         )
 
@@ -889,6 +1006,53 @@ class SubsyncTuiApp(App[None]):
             label += f" ep:{episode_number}"
         return label
 
+    def action_promote(self) -> None:
+        """Promote the selected track's SRT alongside the source media file.
+
+        Writes the current candidate to `{stem}.srt` next to the source media so
+        players like mpv and Jellyfin can autodiscover it. If a sidecar already
+        exists, ask for confirmation (default No).
+        """
+
+        if not self.tracks:
+            self.notify("No subtitle tracks loaded", severity="error")
+            return
+
+        track = self.track
+        dest = self.audio_source.source_path.with_suffix(".srt")
+
+        if _same_file(track.path, dest):
+            self.notify(f"{dest.name} is already promoted")
+            return
+
+        if dest.exists():
+            self.push_screen(
+                ConfirmOverwriteModal(dest), self._apply_promote(track, dest)
+            )
+        else:
+            self._do_promote(track, dest)
+
+    def _apply_promote(
+        self, track: SubtitleTrack, dest: Path
+    ) -> Callable[[bool], None]:
+        """Return a modal callback that promotes iff the user confirmed."""
+
+        def callback(confirmed: bool) -> None:
+            if confirmed:
+                self._do_promote(track, dest)
+
+        return callback
+
+    def _do_promote(self, track: SubtitleTrack, dest: Path) -> None:
+        """Copy the selected track's SRT to the sidecar destination."""
+
+        try:
+            _copy_file_contents_atomic(track.path, dest)
+        except OSError as exc:
+            self.notify(f"Failed to write {dest.name}: {exc}", severity="error")
+        else:
+            self.notify(f"Promoted to {dest.name}")
+
     def action_open_remote_lookup(self) -> None:
         self.push_screen(RemoteLookupModal(self.remote_state), self.apply_remote_lookup)
 
@@ -904,25 +1068,25 @@ class SubsyncTuiApp(App[None]):
         )
         self.refresh_view()
         try:
-            added_count = self.fetch_remote_tracks()
+            added_count, first_idx = self.fetch_remote_tracks()
         except Exception as exc:  # pragma: no cover - transport details vary.
             self.remote_state.status = f"fetch failed: {exc}"
             self.notify(str(exc), severity="error")
         else:
             self.remote_state.status = f"fetched {added_count} track(s)"
             if added_count:
-                self.track_index = max(0, len(self.tracks) - added_count)
+                self.track_index = first_idx
                 self.select_cue_near_time(self.window_start_s + self.window_s / 2)
         self.refresh_view()
 
     def fetch_remote_tracks_or_exit(self) -> None:
         try:
-            added_count = self.fetch_remote_tracks()
+            added_count, _ = self.fetch_remote_tracks()
         except Exception as exc:
             raise SystemExit(f"Could not fetch Kitsunekko subtitles: {exc}") from exc
         self.remote_state.status = f"fetched {added_count} track(s)"
 
-    def fetch_remote_tracks(self) -> int:
+    def fetch_remote_tracks(self) -> tuple[int, int]:
         state = self.remote_state
         if state.source is None or state.external_id is None:
             raise ValueError("Choose --anilist or --tvdb before fetching subtitles")
@@ -931,6 +1095,15 @@ class SubsyncTuiApp(App[None]):
 
         client = HttpKitsunekkoSubtitlesClient()
         response = self._remote_file_list(client)
+
+        sidecar_path = self.audio_source.source_path.with_suffix(".srt")
+        insertion_idx = len(self.tracks)
+        for i, track in enumerate(self.tracks):
+            if track.path == sidecar_path:
+                insertion_idx = i
+                break
+
+        first_idx = insertion_idx
         added = 0
         for file in response.files:
             extension = str(file.get("extension", "")).lower().lstrip(".")
@@ -942,12 +1115,14 @@ class SubsyncTuiApp(App[None]):
             ):
                 continue
             track = self._track_from_remote_file(client, file)
-            self.tracks.append(track)
-            self.cue_indices.append(0)
+            self.tracks.insert(insertion_idx, track)
+            self.cue_indices.insert(insertion_idx, 0)
+            insertion_idx += 1
             added += 1
+
         if self.track_index >= len(self.tracks):
             self.track_index = max(0, len(self.tracks) - 1)
-        return added
+        return added, first_idx
 
     def _remote_file_list(
         self,
