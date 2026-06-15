@@ -271,7 +271,10 @@ def build_llms_txt(settings: KitsunekkoSubtitlesSettings) -> str:
 
 def create_app(settings: KitsunekkoSubtitlesSettings | None = None) -> FastAPI:
     active_settings = settings or KitsunekkoSubtitlesSettings()
-    app = FastAPI(title="ja-media Kitsunekko subtitles")
+    app = FastAPI(
+        title="ja-media Kitsunekko subtitles",
+        root_path=active_settings.root_path,
+    )
 
     @app.get("/healthz")
     def healthz() -> dict[str, Any]:

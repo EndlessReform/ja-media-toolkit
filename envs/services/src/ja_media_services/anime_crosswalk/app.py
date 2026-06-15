@@ -173,7 +173,10 @@ def build_llms_txt(settings: AnimeCrosswalkSettings) -> str:
 
 def create_app(settings: AnimeCrosswalkSettings | None = None) -> FastAPI:
     active_settings = settings or AnimeCrosswalkSettings()
-    app = FastAPI(title="ja-media anime crosswalk")
+    app = FastAPI(
+        title="ja-media anime crosswalk",
+        root_path=active_settings.root_path,
+    )
 
     @app.get("/healthz")
     def healthz() -> dict[str, Any]:

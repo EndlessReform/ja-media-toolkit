@@ -34,4 +34,5 @@ class KitsunekkoSubtitlesSettings(BaseSettings):
     repo_root: Path = default_repo_root()
     host: str = "127.0.0.1"
     port: int = 8000
+    root_path: str | None = None
     log_level: str = "INFO"

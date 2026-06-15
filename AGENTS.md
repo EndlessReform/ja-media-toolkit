@@ -4,16 +4,21 @@ This repo is a collection of tools to assist me (a native English speaker, JLPT 
 
 ## Project goals
 
-Here are some common tasks I as a language learner might need done on raw media files:
-- Batch renaming utilities: safely allow agents to bulk rename files to fit conventions, e.g. for Jellyfin or Mokuro, without inadvertently destroying files
-- Compare existing community .srt files against the actual voice activity in an audio / video file, to see which one has the best timing 
-- Generate `.srt` subtitles for longer files, eg radio/podcast .mp3s, which might not have official subtitles 
-    - Compare against known file metadata to correct for transcription errors, mislabeled named entities, etc.
-- Diarize audio to allow for tasks like separating out clips by speaker, visualization for shadowing, mining and analytics, etc.
-- Run my own REST API atop a homelab Kitsunekko mirror, to allow for:
-    - Offloading the upstream heavyweight git repo from edge clients like dev laptops
-    - Easier search 
-    - Using the transcript corpus for mining sentence examples
+The toolkit provides a flexible ecosystem of **Tools** and **Services** to assist a language learner in managing and mining native Japanese media.
+
+### Tools
+Utilities for processing and managing local media files (e.g., anime, podcasts, manga CBZ). Current and future focus areas include:
+- **ASR & Transcription**: E.g. enerating high-quality transcripts, benchmarking proprietary ASR systems, and implementing automatic "healing" or biasing of transcripts based on known metadata.
+- **Media Management**: E.g. splitting audio based on voice activity (VAD), and aligning community subtitles to actual audio.
+- **Mining & Analytics**: Diarizing audio for speaker separation and visualizing content for shadowing or sentence mining.
+
+### Services
+Infrastructure and APIs that facilitate the tools and coordinate data:
+- **Data Mirrors**: Local mirrors of heavyweight datasets (e.g., Kitsunekko) to reduce dependency on upstream git repos.
+- **Metadata Bridges**: Crosswalk services to resolve IDs across various anime databases (TVDB, MAL, AniList, etc.).
+- **Static Surfaces**: Documentation and search interfaces for transcript corpuses.
+
+*Note: These examples are illustrative; the system is designed to evolve as new language learning workflows are identified.*
 
 ## Philosophy
 
@@ -24,9 +29,13 @@ Here are some common tasks I as a language learner might need done on raw media 
     - Explain _why_ key decisions were made
     - Ensure config has nontrivial examples
 
-## Environment
+## Deployment & Infrastructure
 
-TODO fill this in more.
+The services are typically deployed as a suite of containers coordinated by `compose.yaml` in the root.
+
+- **Local Stack**: When running via Docker Compose, the primary entry point is `http://localhost:8080`.
+- **macOS Note**: If using OrbStack or Docker Desktop on Mac, verify active containers with `docker ps` to confirm port mapping.
+- **Gateway**: The `site/Caddyfile` defines the unified routing. It serves the static docsite and reverse-proxies `/api/v1/*` requests to the backend services (e.g., `anime-crosswalk` and `kitsunekko-subtitles`).
 
 
 ## Repo structure
@@ -40,43 +49,68 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the durable ASR/config/back
 - **Internal design/architectural notes** live in `docs/`.
 
 ```text
-packages/          contracts and shared libraries (workspace members)
-├── core/          shared types, config, manifests, job/result contracts
-├── media/         filesystem/media utilities: renaming, probing, chunks
-└── transcripts/   SRT/ASS parsing, normalization, alignment, scoring
-envs/              runnable environments with platform-specific dependencies
-├── apple/         MacBook workflows: MLX, Metal, local experiments
-├── cuda/          Nvidia workstation workflows: CUDA ASR, VAD, diarization
-└── services/      LXC/server workflows: Kitsunekko API, indexes, plugins
-docs/              design notes and references
-pyproject.toml     workspace coordination only (no ML deps)
+.
+├── compose.yaml           # Docker orchestration for the full service stack
+├── AGENTS.md              # Agent guidelines and repo map
+├── docs/                  # Internal design & architectural notes
+├── site/                  # User-facing documentation site (Astro/Starlight)
+│   └── Caddyfile          # Unified API Gateway & Static site config
+├── packages/              # Shared libraries (workspace members)
+│   ├── core/              # Shared types, config discovery, and contracts
+│   ├── frontend/          # CLI entrypoints and TUI surfaces
+│   └── transcripts/       # SRT/ASS parsing, normalization, alignment
+├── envs/                  # Platform-specific runtimes & dependencies
+│   ├── apple/             # MacBook workflows (MLX, Metal, local ASR/VAD)
+│   ├── cuda/              # Nvidia workstation workflows (CUDA ASR)
+│   └── services/          # Service deployments (Kitsunekko API, etc.)
+├── examples/              # Fixtures and sample media for smoke-testing
+└── pyproject.toml         # Workspace coordination
 ```
 
+---
 ## Toolchain
+
 ### Python
 
 This repo uses Astral uv.
 
-**Always work from an `envs/` directory, never from the root.** Each environment has its own `.venv` and dependency set. The root should only be used for editing shared code in `packages/`.
+**Always work from an environment that provides the dependencies required for your task.** 
 
+#### 1. Lightweight / Frontend Tools
+For TUI surfaces, simple file management, or subtitle alignment, use the `packages/frontend` environment. These tools do not require ML dependencies.
+```sh
+cd packages/frontend
+uv sync
+uv run ja-media subsync tui --help
+```
+
+#### 2. Heavyweight / ML Runtimes
+For transcription, VAD, and other audio-processing tasks, use the platform-specific runtime environment (e.g., `envs/apple` for MacBooks). Use this when developing the backend logic itself.
 ```sh
 cd envs/apple
 uv sync
 uv run ja-media transcribe episode.mp3
 ```
 
-**Check you're on the right box before running anything.** If a task requires CUDA, verify the machine has it (e.g. `nvidia-smi`). If it requires MLX/Metal, verify you're on Apple Silicon. Running an environment on the wrong platform will fail or silently produce wrong results.
+#### 3. Testing Integration (The "Tool Shape")
+If you need to test the `ja-media` CLI as a user would (integrating the frontend and the ML backend), use the `[apple]` extra from the frontend package. This mirrors the persistent install shape described in [docs/uv-tool-install-frontends.md](docs/uv-tool-install-frontends.md).
 
-- Add dependencies with `uv add` **from within the relevant `envs/` directory**.
-- **Never** add a dependency by:
-    - Editing `requirements.txt` or `requirements.in` (neither of these files exist!)
-    - Editing `pyproject.toml` directly (you can _check_ here though if something is installed)
-    - Directly running `pip install`
-- NEVER run a script using `python` or `python3`. Always use `uv run` from the correct environment.
+Example smoke-test with JFK fixture:
+```sh
+cd packages/frontend
+uv run --isolated --with-editable '.[apple]' ja-media transcribe --startup-only ../../examples/input/jfk.wav
+```
+
+**Platform Verification**: Check you're on the right box before running heavyweight tools. If a task requires CUDA, verify the machine has it (e.g., `nvidia-smi`). If it requires MLX/Metal, verify you're on Apple Silicon.
+
+- Add dependencies with `uv add` **from within the relevant directory**.
+- **Never** edit `pyproject.toml` directly to add dependencies.
+- NEVER run a script using `python` or `python3`. Always use `uv run` from the correct directory.
 
 Prefer tomllib + Pydantic Settings for configuration where possible.
 
-## Assume available on PATH
+---
+## System
 
 Assume you have (at a minimum):
 - curl
@@ -101,20 +135,3 @@ If an env handoff file is needed for a subprocess, put it in `/tmp` or another
 gitignored location, avoid echoing secret values into logs, and clean it up
 afterward.
 
-## Smoke-testing
-
-### About the system
-
-- Assume both macOS + Linux workstations have `ffmpeg` + `ffprobe` installed.
-
-### Current VAD implementation notes
-
-- VAD core contracts live in `packages/core`; model/runtime dependencies belong
-  in `envs/*`.
-- Keep `AudioChunk` lightweight. It describes source coordinates and metadata;
-  decoded arrays belong in `InMemoryAudioChunk`.
-- Use `materialize_audio_chunk` / an ingestor layer for decoding instead of
-  adding sample arrays to `AudioChunk`.
-- The Apple VAD path currently uses `mlx-community/silero-vad` through
-  `envs/apple`, with `mlx-audio` pinned to upstream git until PyPI includes the
-  Silero VAD implementation.
