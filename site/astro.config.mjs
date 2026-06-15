@@ -7,11 +7,16 @@ export default defineConfig({
 	integrations: [
 		starlight({
 			title: 'ja-media-toolkit Docs',
+			customCss: ['./src/styles/custom.css'],
 			social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/EndlessReform/ja-media-toolkit' }],
 			sidebar: [
 				{
 					label: 'Setup',
-					items: [{ autogenerate: { directory: 'setup' } }],
+					items: [
+						{ label: 'CLI Tools', link: '/setup/tools/' },
+						{ label: 'Services', link: '/setup/services/' },
+						{ label: 'Configuration', link: '/setup/config/' },
+					],
 				},
 				{
 					label: 'Guides',
