@@ -3,6 +3,7 @@ from __future__ import annotations
 import glob
 import importlib
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -21,7 +22,16 @@ from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Button, Footer, Header, Input, Label, Select, Static
+from textual.widgets import (
+    Button,
+    Footer,
+    Header,
+    Input,
+    Label,
+    OptionList,
+    Select,
+    Static,
+)
 
 import PTN
 
@@ -29,7 +39,7 @@ from ja_media_core.kitsunekko import (
     HttpKitsunekkoSubtitlesClient,
     KitsunekkoFileListResponse,
 )
-from ja_media_core.srt import SubtitleCue, read_srt
+from ja_media_core.srt import SubtitleCue, format_srt, read_srt
 
 
 SPAN_STYLES = [
@@ -141,6 +151,13 @@ class RemoteLookupRequest:
     external_id: int
     episode_number: int
     media_kind: str | None = "tv"
+
+
+@dataclass(frozen=True)
+class ManualSubtitlePickRequest:
+    """Remote subtitle row chosen from the full series inventory."""
+
+    file: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -404,10 +421,7 @@ def load_pcm_audio_source(source: Path) -> PcmAudioSource:
     if result.returncode != 0:
         detail = result.stderr.decode("utf-8", errors="replace").strip()
         detail = detail or "ffmpeg produced no diagnostic output"
-        raise SystemExit(
-            "Could not decode first audio stream with ffmpeg:\n"
-            f"{detail}"
-        )
+        raise SystemExit(f"Could not decode first audio stream with ffmpeg:\n{detail}")
     if not result.stdout:
         raise SystemExit(f"ffmpeg decoded no audio from source: {source}")
     return PcmAudioSource(
@@ -604,10 +618,127 @@ class RemoteLookupModal(ModalScreen[RemoteLookupRequest | None]):
         return int(raw_value)
 
 
+class RemoteFilePickModal(ModalScreen[ManualSubtitlePickRequest | None]):
+    """Typeahead modal for choosing one subtitle from a series inventory."""
+
+    CSS = """
+    RemoteFilePickModal {
+        align: center middle;
+    }
+
+    #remote-pick-dialog {
+        width: 96;
+        height: 30;
+        padding: 1 2;
+        background: $surface;
+        border: tall $accent;
+    }
+
+    #remote-pick-message {
+        height: auto;
+        color: $text-muted;
+    }
+
+    #remote-pick-filter {
+        margin-top: 1;
+        margin-bottom: 1;
+    }
+
+    #remote-pick-list {
+        height: 1fr;
+    }
+
+    #remote-pick-actions {
+        height: auto;
+        margin-top: 1;
+    }
+    """
+
+    MAX_OPTIONS = 25
+
+    def __init__(self, files: tuple[dict[str, Any], ...], *, message: str) -> None:
+        super().__init__()
+        self.files = files
+        self.message = message
+        self.filtered_files: list[dict[str, Any]] = []
+
+    def compose(self) -> ComposeResult:
+        yield Vertical(
+            Label("Choose Kitsunekko subtitle"),
+            Static(self.message, id="remote-pick-message"),
+            Input(
+                placeholder="Filter by filename, group, episode, tags...",
+                id="remote-pick-filter",
+            ),
+            OptionList(id="remote-pick-list"),
+            Horizontal(
+                Button("Use selected", variant="primary", id="remote-pick-use"),
+                Button("Cancel", id="remote-pick-cancel"),
+                id="remote-pick-actions",
+            ),
+            id="remote-pick-dialog",
+        )
+
+    def on_mount(self) -> None:
+        self._refresh_options("")
+        self.query_one("#remote-pick-filter", Input).focus()
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id == "remote-pick-filter":
+            self._refresh_options(event.value)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id == "remote-pick-filter":
+            self._dismiss_selected()
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        if event.option_list.id == "remote-pick-list":
+            self._dismiss_index(event.index)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "remote-pick-cancel":
+            self.dismiss(None)
+        elif event.button.id == "remote-pick-use":
+            self._dismiss_selected()
+
+    def _refresh_options(self, query: str) -> None:
+        if query.strip():
+            matches = sorted(
+                self.files,
+                key=lambda file: _remote_file_match_sort_key(file, query),
+            )
+        else:
+            matches = list(self.files)
+        self.filtered_files = matches[: self.MAX_OPTIONS]
+        option_list = self.query_one("#remote-pick-list", OptionList)
+        option_list.set_options(
+            [_remote_file_option_label(file) for file in self.filtered_files]
+        )
+        if self.filtered_files:
+            option_list.highlighted = 0
+
+    def _dismiss_selected(self) -> None:
+        option_list = self.query_one("#remote-pick-list", OptionList)
+        highlighted = option_list.highlighted
+        if highlighted is None:
+            self.notify("No subtitle selected", severity="error")
+            return
+        self._dismiss_index(highlighted)
+
+    def _dismiss_index(self, index: int) -> None:
+        if index < 0 or index >= len(self.filtered_files):
+            self.notify("No subtitle selected", severity="error")
+            return
+        self.dismiss(ManualSubtitlePickRequest(self.filtered_files[index]))
+
+
 class SubsyncTuiApp(App[None]):
     """A first-pass Textual shell for inspecting subtitle timing activity."""
 
-    BINDINGS = [("f6", "open_remote_lookup", "Kitsunekko")]
+    BINDINGS = [
+        ("f6", "open_remote_lookup", "Kitsunekko"),
+        ("f7", "open_remote_file_picker", "Pick subtitle"),
+    ]
 
     CSS = """
     Screen {
@@ -667,6 +798,7 @@ class SubsyncTuiApp(App[None]):
         self.download_dir = download_dir or Path(
             tempfile.mkdtemp(prefix="ja-media-subsync-")
         )
+        self._pending_remote_file_picker_message = ""
         self._pending_g = False
         self._player = PcmSlicePlayer(audio_source)
         self._playback_status = ""
@@ -682,6 +814,10 @@ class SubsyncTuiApp(App[None]):
 
     def on_mount(self) -> None:
         self.refresh_view()
+        if self._pending_remote_file_picker_message:
+            message = self._pending_remote_file_picker_message
+            self._pending_remote_file_picker_message = ""
+            self.call_after_refresh(self._open_remote_file_picker, message)
 
     def on_resize(self, event) -> None:  # type: ignore[no-untyped-def]
         if self.is_mounted:
@@ -701,6 +837,8 @@ class SubsyncTuiApp(App[None]):
             self.copy_current_subtitle()
         elif key == "f6":
             self.action_open_remote_lookup()
+        elif key == "f7":
+            self.action_open_remote_file_picker()
         elif key == "space" or char == " ":
             self.toggle_playback()
         elif char == "h":
@@ -917,7 +1055,9 @@ class SubsyncTuiApp(App[None]):
 
     def render_timeline(self) -> Panel:
         if not self.tracks:
-            return Panel("Press F6 to select a Kitsunekko lookup.", title="No subtitles")
+            return Panel(
+                "Press F6 to select a Kitsunekko lookup.", title="No subtitles"
+            )
         start_s = self.window_start_s
         end_s = start_s + self.window_s
         cue = self.current_cue
@@ -972,7 +1112,8 @@ class SubsyncTuiApp(App[None]):
         playback = f"  {playback_status}" if playback_status else ""
         return (
             "space play/stop  h/l cue  j/k SRT  gg/G start/end  Ctrl-f/b page  "
-            "Ctrl-d/u half-page  +/- zoom  Ctrl-c copy  p promote  F6 kitsunekko  q quit"
+            "Ctrl-d/u half-page  +/- zoom  Ctrl-c copy  p promote  "
+            "F6 kitsunekko  F7 pick  q quit"
             f"{pending}{playback}"
         )
 
@@ -1056,6 +1197,9 @@ class SubsyncTuiApp(App[None]):
     def action_open_remote_lookup(self) -> None:
         self.push_screen(RemoteLookupModal(self.remote_state), self.apply_remote_lookup)
 
+    def action_open_remote_file_picker(self) -> None:
+        self._open_remote_file_picker("Select one subtitle from the full series list.")
+
     def apply_remote_lookup(self, request: RemoteLookupRequest | None) -> None:
         if request is None:
             return
@@ -1070,8 +1214,18 @@ class SubsyncTuiApp(App[None]):
         try:
             added_count, first_idx = self.fetch_remote_tracks()
         except Exception as exc:  # pragma: no cover - transport details vary.
-            self.remote_state.status = f"fetch failed: {exc}"
-            self.notify(str(exc), severity="error")
+            if self._should_offer_manual_pick(exc):
+                self.remote_state.status = "episode not found; pick manually"
+                self.notify(
+                    "Episode lookup found no match. Opening full-series picker.",
+                    severity="warning",
+                )
+                self._open_remote_file_picker(
+                    "Episode lookup returned 404; choose from the full series list."
+                )
+            else:
+                self.remote_state.status = f"fetch failed: {exc}"
+                self.notify(str(exc), severity="error")
         else:
             self.remote_state.status = f"fetched {added_count} track(s)"
             if added_count:
@@ -1083,8 +1237,17 @@ class SubsyncTuiApp(App[None]):
         try:
             added_count, _ = self.fetch_remote_tracks()
         except Exception as exc:
-            raise SystemExit(f"Could not fetch Kitsunekko subtitles: {exc}") from exc
-        self.remote_state.status = f"fetched {added_count} track(s)"
+            if not self._should_offer_manual_pick(exc):
+                raise SystemExit(
+                    f"Could not fetch Kitsunekko subtitles: {exc}"
+                ) from exc
+            self.remote_state.status = "episode not found; pick manually"
+            self._pending_remote_file_picker_message = (
+                "Episode lookup returned 404; choose from the full series list."
+            )
+            return
+        else:
+            self.remote_state.status = f"fetched {added_count} track(s)"
 
     def fetch_remote_tracks(self) -> tuple[int, int]:
         state = self.remote_state
@@ -1106,8 +1269,7 @@ class SubsyncTuiApp(App[None]):
         first_idx = insertion_idx
         added = 0
         for file in response.files:
-            extension = str(file.get("extension", "")).lower().lstrip(".")
-            if extension != "srt":
+            if not _remote_file_is_subtitle(file):
                 continue
             subtitle_id = str(file.get("subtitle_id") or "")
             if subtitle_id and any(
@@ -1123,6 +1285,78 @@ class SubsyncTuiApp(App[None]):
         if self.track_index >= len(self.tracks):
             self.track_index = max(0, len(self.tracks) - 1)
         return added, first_idx
+
+    def _open_remote_file_picker(self, message: str) -> None:
+        try:
+            response = self.fetch_remote_series_files()
+        except Exception as exc:  # pragma: no cover - transport details vary.
+            self.remote_state.status = f"series fetch failed: {exc}"
+            self.notify(str(exc), severity="error")
+            self.refresh_view()
+            return
+
+        files = tuple(file for file in response.files if _remote_file_is_subtitle(file))
+        if not files:
+            self.remote_state.status = "series has no subtitle files"
+            self.notify("Series lookup returned no subtitle files", severity="error")
+            self.refresh_view()
+            return
+
+        self.remote_state.status = f"series has {len(files)} subtitle file(s)"
+        self.refresh_view()
+        self.push_screen(
+            RemoteFilePickModal(files, message=message),
+            self.apply_manual_remote_pick,
+        )
+
+    def apply_manual_remote_pick(
+        self, request: ManualSubtitlePickRequest | None
+    ) -> None:
+        if request is None:
+            return
+        client = HttpKitsunekkoSubtitlesClient()
+        try:
+            track = self._track_from_remote_file(client, request.file)
+        except Exception as exc:  # pragma: no cover - parse and transport details vary.
+            self.remote_state.status = f"download failed: {exc}"
+            self.notify(str(exc), severity="error")
+            self.refresh_view()
+            return
+
+        insertion_idx = self._remote_insertion_index()
+        self.tracks.insert(insertion_idx, track)
+        self.cue_indices.insert(insertion_idx, 0)
+        self.track_index = insertion_idx
+        self.select_cue_near_time(self.window_start_s + self.window_s / 2)
+        self.remote_state.status = "picked 1 track"
+        self.notify(f"Loaded {track.path.name}")
+        self.refresh_view()
+
+    def fetch_remote_series_files(self) -> KitsunekkoFileListResponse:
+        state = self.remote_state
+        if state.source is None or state.external_id is None:
+            raise ValueError("Choose --anilist or --tvdb before picking subtitles")
+
+        client = HttpKitsunekkoSubtitlesClient()
+        if state.source == "anilist":
+            return client.anilist_files(state.external_id)
+        return client.tvdb_files(state.external_id, media_kind=state.media_kind)
+
+    def _remote_insertion_index(self) -> int:
+        sidecar_path = self.audio_source.source_path.with_suffix(".srt")
+        for i, track in enumerate(self.tracks):
+            if track.path == sidecar_path:
+                return i
+        return len(self.tracks)
+
+    def _should_offer_manual_pick(self, exc: Exception) -> bool:
+        if re.search(r"\b404\b", str(exc)) is None:
+            return False
+        try:
+            response = self.fetch_remote_series_files()
+        except Exception:
+            return False
+        return any(_remote_file_is_subtitle(file) for file in response.files)
 
     def _remote_file_list(
         self,
@@ -1151,11 +1385,19 @@ class SubsyncTuiApp(App[None]):
         filename = Path(
             str(file.get("filename") or Path(repo_path).name or f"{subtitle_id}.srt")
         ).name
-        local_path = self.download_dir / f"{subtitle_id}-{filename}"
-        local_path.write_bytes(client.file_content(subtitle_id))
+        extension = str(file.get("extension", "")).lower().lstrip(".")
+        content = client.file_content(subtitle_id)
+        if extension == "ass":
+            cues = parse_ass(content.decode("utf-8-sig", errors="replace"))
+            local_path = self.download_dir / f"{subtitle_id}-{Path(filename).stem}.srt"
+            local_path.write_text(format_srt(cues), encoding="utf-8")
+        else:
+            local_path = self.download_dir / f"{subtitle_id}-{filename}"
+            local_path.write_bytes(content)
+            cues = read_srt(local_path)
         return SubtitleTrack(
             path=local_path,
-            cues=read_srt(local_path),
+            cues=cues,
             repo_path=repo_path,
             subtitle_id=subtitle_id,
         )
@@ -1288,6 +1530,145 @@ def playback_range(cue: SubtitleCue) -> tuple[float, float]:
     start_s = max(0.0, cue.start_s)
     end_s = max(start_s, cue.end_s)
     return start_s, max(0.001, end_s - start_s)
+
+
+def parse_ass(text: str, *, source_path: str | Path | None = None) -> list[SubtitleCue]:
+    """Parse ASS dialogue events into plain subtitle cues for timing review."""
+
+    events = False
+    fields: list[str] = []
+    cues: list[SubtitleCue] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith(";"):
+            continue
+        if stripped.startswith("[") and stripped.endswith("]"):
+            events = stripped.lower() == "[events]"
+            continue
+        if not events:
+            continue
+        if stripped.lower().startswith("format:"):
+            fields = [
+                field.strip().lower() for field in stripped.split(":", 1)[1].split(",")
+            ]
+            continue
+        if not stripped.lower().startswith("dialogue:") or not fields:
+            continue
+
+        values = stripped.split(":", 1)[1].split(",", max(0, len(fields) - 1))
+        if len(values) != len(fields):
+            continue
+        row = dict(zip(fields, values, strict=True))
+        try:
+            start_s = parse_ass_timestamp(row["start"])
+            end_s = parse_ass_timestamp(row["end"])
+        except (KeyError, ValueError):
+            continue
+        cue_text = clean_ass_text(row.get("text", ""))
+        cues.append(
+            SubtitleCue(
+                source_path=None if source_path is None else str(source_path),
+                index=len(cues) + 1,
+                start_s=start_s,
+                end_s=end_s,
+                text=cue_text,
+            )
+        )
+
+    if not cues:
+        label = f" from {source_path}" if source_path else ""
+        raise ValueError(f"No ASS dialogue cues found{label}")
+    return cues
+
+
+def parse_ass_timestamp(value: str) -> float:
+    parts = value.strip().split(":")
+    if len(parts) != 3:
+        raise ValueError(f"Invalid ASS timestamp: {value!r}")
+    hours = int(parts[0])
+    minutes = int(parts[1])
+    seconds = float(parts[2])
+    return hours * 3600 + minutes * 60 + seconds
+
+
+def clean_ass_text(value: str) -> str:
+    text = value.replace(r"\N", "\n").replace(r"\n", "\n").replace(r"\h", " ")
+    cleaned: list[str] = []
+    in_override = False
+    for char in text:
+        if char == "{":
+            in_override = True
+            continue
+        if char == "}":
+            in_override = False
+            continue
+        if not in_override:
+            cleaned.append(char)
+    return "".join(cleaned).strip()
+
+
+def _remote_file_is_subtitle(file: dict[str, Any]) -> bool:
+    extension = str(file.get("extension", "")).lower().lstrip(".")
+    return extension in {"srt", "ass"}
+
+
+def _remote_file_option_label(file: dict[str, Any]) -> Text:
+    text = Text()
+    episode = file.get("episode_local") or file.get("episode_absolute")
+    if episode is not None:
+        text.append(f"ep {episode}  ", style="bold cyan")
+    text.append(str(file.get("filename") or file.get("repo_path") or "<unnamed>"))
+    group = file.get("group_hint")
+    if group:
+        text.append(f"  [{group}]", style="dim")
+    return text
+
+
+def _remote_file_match_sort_key(file: dict[str, Any], query: str) -> tuple[int, str]:
+    haystack = _remote_file_search_text(file)
+    score = _fuzzy_score(query, haystack)
+    return (-score, haystack)
+
+
+def _remote_file_search_text(file: dict[str, Any]) -> str:
+    parts = [
+        file.get("filename"),
+        file.get("repo_path"),
+        file.get("group_hint"),
+        file.get("language_hint"),
+        file.get("episode_raw"),
+        file.get("episode_local"),
+        file.get("episode_absolute"),
+    ]
+    parts.extend(file.get("release_tags") or [])
+    return " ".join(str(part) for part in parts if part is not None).lower()
+
+
+def _fuzzy_score(query: str, haystack: str) -> int:
+    """Score a query as an ordered subsequence, favoring compact matches."""
+
+    needle = query.strip().lower()
+    if not needle:
+        return 0
+    index = 0
+    score = 0
+    streak = 0
+    for char in haystack:
+        if index >= len(needle):
+            break
+        if char == needle[index]:
+            index += 1
+            streak += 1
+            score += 10 + streak
+        elif char.isspace() or char in "._-/[]()":
+            streak = 0
+        else:
+            streak = max(0, streak - 1)
+    if index < len(needle):
+        return -10_000 + index
+    if needle in haystack:
+        score += 100
+    return score - max(0, len(haystack) - len(needle)) // 20
 
 
 def write_clipboard(text: str) -> None:
