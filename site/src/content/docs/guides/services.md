@@ -16,3 +16,9 @@ The Anime Crosswalk service creates a RESTful API over Fribb's GitHub-based [ani
 The Kitsunekko Subtitles service provides a local mirror and REST API for accessing Japanese subtitles from the [ajatt-tools Kitsunekko GitHub mirror](https://github.com/Ajatt-Tools/kitsunekko-mirror), facilitating easier mining and alignment.
 
 - **API Documentation:** [/api/v1/subtitles/docs](/api/v1/subtitles/docs)
+
+### AniList Search
+The AniList Search service provides BM25 fuzzy search over a local cache of the AniList anime dataset, resolving titles to AniList IDs.
+
+- **API Documentation:** [/api/v1/anilist/search/docs](/services/anilist-search)
+
