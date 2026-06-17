@@ -45,7 +45,7 @@ services:
     environment:
       ANILIST_SEARCH_HOST: "0.0.0.0"
       ANILIST_SEARCH_PORT: "8000"
-      ANILIST_SEARCH_ROOT_PATH: "/api/v1/anilist/search"
+      ANILIST_SEARCH_ROOT_PATH: "/api/v1/anilist"
       ANILIST_SEARCH_DATA_DIR: "/var/lib/anilist-search"
       ANILIST_SEARCH_DB_PATH: "/var/lib/anilist-search/anime_index.db"
       ANILIST_SEARCH_UPDATE_INTERVAL_SECONDS: "${ANILIST_SEARCH_UPDATE_INTERVAL_SECONDS:-3600}"

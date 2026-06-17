@@ -11,7 +11,7 @@ from typing import Any, Protocol
 from ja_media_core.services import service_base_url
 
 ANILIST_SEARCH_BASE_URL_ENV = "ANILIST_SEARCH_BASE_URL"
-ANILIST_SEARCH_GATEWAY_PATH = "/api/v1/anilist/search"
+ANILIST_SEARCH_GATEWAY_PATH = "/api/v1/anilist"
 
 
 @dataclass(frozen=True)
@@ -48,6 +48,26 @@ class SearchResponse:
         return cls(results=tuple(SearchResult.from_mapping(item) for item in data))
 
 
+@dataclass(frozen=True)
+class AnimeMetadata:
+    """One AniList metadata row from the local dataset cache."""
+
+    anilist_id: int
+    fields: dict[str, Any]
+
+    @classmethod
+    def from_mapping(cls, data: dict[str, Any]) -> AnimeMetadata:
+        anilist_id = int(data["anilist_id"])
+        return cls(
+            anilist_id=anilist_id,
+            fields={key: value for key, value in data.items() if key != "anilist_id"},
+        )
+
+    def get(self, field: str, default: Any = None) -> Any:
+        """Return a metadata field by its CSV column name."""
+        return self.fields.get(field, default)
+
+
 class AniListSearchClient(Protocol):
     """Synchronous anime title fuzzy-search client contract."""
 
@@ -60,6 +80,11 @@ class AniListSearchClient(Protocol):
         include_ova: bool = False,
         all_formats: bool = False,
     ) -> SearchResponse:
+        ...
+
+    def anime(
+        self, anilist_id: int, *, fields: tuple[str, ...] | None = None
+    ) -> AnimeMetadata:
         ...
 
     def health(self) -> dict[str, Any]:
@@ -86,8 +111,19 @@ class HttpAniListSearchClient:
                 "AniList search base URL is required. Set it via argument, "
                 f"{ANILIST_SEARCH_BASE_URL_ENV}, or in your config.toml under [services].root_url"
             )
-        self.base_url = configured_url.rstrip("/")
+        self.base_url = self._normalize_base_url(configured_url)
         self.timeout_s = timeout_s
+
+    @staticmethod
+    def _normalize_base_url(base_url: str) -> str:
+        """Accept the former gateway search endpoint as an AniList service root."""
+        normalized = base_url.rstrip("/")
+        parsed = urllib.parse.urlsplit(normalized)
+        if parsed.path.rstrip("/").endswith("/api/v1/anilist/search"):
+            return urllib.parse.urlunsplit(
+                parsed._replace(path=parsed.path.rstrip("/")[: -len("/search")])
+            ).rstrip("/")
+        return normalized
 
     def search(
         self,
@@ -108,6 +144,18 @@ class HttpAniListSearchClient:
         payload = self._get_json(f"/search?{params}")
         return SearchResponse.from_mapping(payload)
 
+    def anime(
+        self, anilist_id: int, *, fields: tuple[str, ...] | None = None
+    ) -> AnimeMetadata:
+        path = f"/anime/{anilist_id}"
+        if fields:
+            params = urllib.parse.urlencode({"fields": ",".join(fields)})
+            path = f"{path}?{params}"
+        payload = self._get_json(path)
+        if not isinstance(payload, dict):
+            raise RuntimeError("AniList metadata response was not an object")
+        return AnimeMetadata.from_mapping(payload)
+
     def health(self) -> dict[str, Any]:
         return self._get_json("/health")
 
@@ -123,4 +171,6 @@ class HttpAniListSearchClient:
                 return json.loads(response.read().decode(charset))
         except urllib.error.HTTPError as error:
             body = error.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"AniList search request failed: {error.code} {body}") from error
+            raise RuntimeError(
+                f"AniList search request failed: {error.code} {body}"
+            ) from error

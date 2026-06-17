@@ -14,9 +14,10 @@ from ja_media_services.anilist_search.db import (
     RefreshStatus,
     background_refresh,
     ensure_dataset,
+    fetch_anime_metadata,
     get_row_count,
     open_db,
-    rebuild_if_needed,
+    rebuild_from_cached_csv,
     resolve_formats,
     search,
 )
@@ -54,7 +55,7 @@ async def lifespan(app: FastAPI):
 
     con = open_db(db_path)
     with app_state._lock:
-        row_count = rebuild_if_needed(csv_path, db_path, con)
+        row_count = rebuild_from_cached_csv(csv_path, db_path, con)
 
     app_state.con = con
     app_state.csv_path = csv_path
@@ -117,6 +118,38 @@ def create_app() -> FastAPI:
         with app_state._lock:
             results = search(con, query, k, formats)
         return results
+
+    @app.get("/anime/{anilist_id}")
+    def anime_detail_endpoint(
+        anilist_id: int,
+        fields: str | None = Query(
+            None,
+            description=(
+                "Comma-separated CSV column names to return, for example "
+                "'title_romaji,description,characters'. Omit for the full row."
+            ),
+        ),
+    ) -> dict:
+        con = app_state.con
+        if con is None:
+            raise HTTPException(status_code=503, detail="Index not ready")
+
+        requested_fields = None
+        if fields:
+            requested_fields = tuple(
+                field.strip() for field in fields.split(",") if field.strip()
+            )
+
+        with app_state._lock:
+            try:
+                result = fetch_anime_metadata(
+                    con, anilist_id, fields=requested_fields
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if result is None:
+            raise HTTPException(status_code=404, detail="AniList anime not found")
+        return result
 
     @app.get("/health")
     def health() -> dict:

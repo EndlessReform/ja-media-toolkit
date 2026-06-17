@@ -7,7 +7,7 @@ The AniList Search service provides a high-performance fuzzy search over a local
 
 ## API Reference
 
-The service is exposed via the API Gateway at `/api/v1/anilist/search`.
+The service is exposed via the API Gateway at `/api/v1/anilist`.
 
 ### Search Anime
 `GET /search`
@@ -26,7 +26,48 @@ Returns a list of matching anime entries.
 
 **Example Request:**
 ```sh
-curl "http://localhost:8080/api/v1/anilist/search/search?query=Steins+Gate&k=5"
+curl "http://localhost:8080/api/v1/anilist/search?query=Steins+Gate&k=5"
+```
+
+### Anime Metadata
+`GET /anime/{anilist_id}`
+
+Returns the cached AniList CSV row for one anime. This is a broad metadata
+endpoint intended for local tooling that needs fields beyond fuzzy search, such
+as descriptions, MAL IDs, relations, staff, studios, and character data.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `fields` | `string` | All fields | Comma-separated CSV column names to return. |
+
+**Example Requests:**
+```sh
+curl "http://localhost:8080/api/v1/anilist/anime/395"
+
+curl "http://localhost:8080/api/v1/anilist/anime/395?fields=title_romaji,description,idMal,characters"
+```
+
+JSON-like CSV columns such as `characters`, `relations`, `staff`, `studios`,
+and `synonyms` are returned as JSON values when they parse cleanly.
+
+**Python SDK Example:**
+```python
+from ja_media_core.anilist_search import HttpAniListSearchClient
+
+client = HttpAniListSearchClient()
+metadata = client.anime(
+    395,
+    fields=("title_romaji", "description", "characters", "relations"),
+)
+
+print(metadata.anilist_id)
+print(metadata.get("title_romaji"))
+
+for character in metadata.get("characters", []):
+    name = character.get("node", {}).get("name", {})
+    print(name.get("native") or name.get("full"))
 ```
 
 ### Health Check

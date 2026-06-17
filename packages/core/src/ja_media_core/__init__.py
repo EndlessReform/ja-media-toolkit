@@ -1,6 +1,7 @@
 from ja_media_core.anilist_search import (
     ANILIST_SEARCH_BASE_URL_ENV,
     ANILIST_SEARCH_GATEWAY_PATH,
+    AnimeMetadata,
     AniListSearchClient,
     HttpAniListSearchClient,
     SearchResult,
@@ -94,6 +95,7 @@ from ja_media_core.vad import (
 __all__ = [
     "ANILIST_SEARCH_BASE_URL_ENV",
     "ANILIST_SEARCH_GATEWAY_PATH",
+    "AnimeMetadata",
     "AniListSearchClient",
     "AudioChunk",
     "AudioFormat",

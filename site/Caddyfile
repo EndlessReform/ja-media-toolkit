@@ -13,7 +13,7 @@
         reverse_proxy kitsunekko-subtitles:8000
     }
 
-    handle_path /api/v1/anilist/search* {
+    handle_path /api/v1/anilist* {
         reverse_proxy anilist-search:8000
     }
 }

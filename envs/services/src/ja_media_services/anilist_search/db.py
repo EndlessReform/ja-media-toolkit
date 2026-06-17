@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import logging
 import time
 import threading
 from pathlib import Path
+from typing import Any
 
 import duckdb
 import kagglehub
@@ -14,6 +16,8 @@ CSV_NAME = "anilist_anime_data_complete.csv"
 
 DEFAULT_FORMATS = ("TV", "ONA", "TV_SHORT")
 ALL_FORMATS = DEFAULT_FORMATS + ("MOVIE", "OVA", "SPECIAL", "MUSIC")
+JSON_COLUMNS = frozenset({"characters", "relations", "staff", "studios", "synonyms"})
+RESERVED_DETAIL_COLUMNS = frozenset({"aid", "search_text"})
 
 logger = logging.getLogger("ja_media_services.anilist_search.db")
 
@@ -138,11 +142,16 @@ def _table_exists(con: duckdb.DuckDBPyConnection, table_name: str) -> bool:
 
 
 def build_index(csv_path: Path, con: duckdb.DuckDBPyConnection, *, force: bool = False) -> int:
-    """Materialize search-relevant columns and build a BM25 index.
+    """Materialize the AniList CSV and build a BM25 index.
 
     The search_text column concatenates title variants with repetition for
     weighting: english (3x) > romaji (2x) > native (1x) > synonyms (1x).
     Stemming and stopwords are disabled to preserve exact Japanese matching.
+
+    The table intentionally keeps the full CSV payload, not just the FTS
+    columns. AniList's Kaggle export is useful as a local metadata cache for
+    ASR biasing and inventory work, and rebuilding this derived table is cheap
+    enough that a wide row is simpler than maintaining a separate detail store.
     """
     signature = dataset_signature(csv_path)
     existing_signature = _metadata_value(con, "dataset_signature")
@@ -169,24 +178,14 @@ def build_index(csv_path: Path, con: duckdb.DuckDBPyConnection, *, force: bool =
     con.execute("DROP SCHEMA IF EXISTS fts_main_anime CASCADE")
     con.execute("DROP TABLE IF EXISTS anime")
     con.execute("""
-        CREATE TABLE anime (
-            aid VARCHAR PRIMARY KEY,
-            title_romaji VARCHAR,
-            title_english VARCHAR,
-            title_native VARCHAR,
-            format VARCHAR,
-            search_text VARCHAR
-        )
-    """)
-
-    con.execute("""
-        INSERT INTO anime (aid, title_romaji, title_english, title_native, format, search_text)
+        CREATE TABLE anime AS
         SELECT
-            id::VARCHAR,
+            id::VARCHAR AS aid,
             title_romaji,
             title_english,
             title_native,
             format,
+            * EXCLUDE (id, title_romaji, title_english, title_native, format),
             COALESCE(title_english, '') || ' ' || COALESCE(title_english, '') || ' ' ||
             COALESCE(title_english, '') || ' ' ||
             COALESCE(title_romaji, '') || ' ' || COALESCE(title_romaji, '') || ' ' ||
@@ -194,9 +193,11 @@ def build_index(csv_path: Path, con: duckdb.DuckDBPyConnection, *, force: bool =
             CASE WHEN synonyms IS NOT NULL THEN
                 COALESCE((SELECT string_agg(value, ' ') FROM json_each(synonyms)), '')
             ELSE '' END
+            AS search_text
         FROM read_csv_auto(?)
         WHERE id IS NOT NULL
     """, [str(csv_path)])
+    con.execute("CREATE UNIQUE INDEX anime_aid_idx ON anime(aid)")
 
     con.commit()
     con.execute(
@@ -218,6 +219,20 @@ def rebuild_if_needed(
     """Rebuild the index when the downloaded CSV fingerprint changed."""
     del db_path
     return build_index(csv_path, con)
+
+
+def rebuild_from_cached_csv(
+    csv_path: Path, db_path: Path, con: duckdb.DuckDBPyConnection
+) -> int:
+    """Rebuild derived DuckDB tables from the cached AniList CSV.
+
+    The Kaggle CSV cache is durable across container restarts, but the DuckDB
+    schema is code-owned derived state. Startup rebuilds it unconditionally so
+    deploys can widen or otherwise change the materialized table without asking
+    users to manually clear the volume.
+    """
+    del db_path
+    return build_index(csv_path, con, force=True)
 
 
 def search(
@@ -252,6 +267,69 @@ def search(
         }
         for row in rows
     ]
+
+
+def _available_detail_columns(con: duckdb.DuckDBPyConnection) -> tuple[str, ...]:
+    rows = con.execute("PRAGMA table_info('anime')").fetchall()
+    return tuple(str(row[1]) for row in rows)
+
+
+def _detail_columns(
+    con: duckdb.DuckDBPyConnection, requested_fields: tuple[str, ...] | None
+) -> tuple[str, ...]:
+    available = _available_detail_columns(con)
+    available_set = set(available)
+    public_columns = tuple(
+        column for column in available if column not in RESERVED_DETAIL_COLUMNS
+    )
+    if requested_fields is None:
+        return public_columns
+
+    unknown = sorted(set(requested_fields) - available_set)
+    forbidden = sorted(set(requested_fields) & RESERVED_DETAIL_COLUMNS)
+    if unknown or forbidden:
+        bad = ", ".join([*unknown, *forbidden])
+        raise ValueError(f"Unknown AniList metadata field(s): {bad}")
+    return tuple(requested_fields)
+
+
+def _parse_detail_value(column: str, value: Any) -> Any:
+    if value is None or column not in JSON_COLUMNS or not isinstance(value, str):
+        return value
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        logger.warning("AniList metadata column %s did not contain valid JSON", column)
+        return value
+
+
+def fetch_anime_metadata(
+    con: duckdb.DuckDBPyConnection,
+    anilist_id: int | str,
+    *,
+    fields: tuple[str, ...] | None = None,
+) -> dict[str, Any] | None:
+    """Return one AniList metadata row by ID, optionally narrowed to fields.
+
+    The endpoint using this helper is intentionally a broad escape hatch while
+    downstream workflows shake out which specialized projections are worth
+    owning. Column names are validated against DuckDB metadata before SQL is
+    assembled so callers can request fields without opening an injection path.
+    """
+    columns = _detail_columns(con, fields)
+    select_columns = ["aid", *columns]
+    quoted_columns = ", ".join(f'"{column}"' for column in select_columns)
+    row = con.execute(
+        f"SELECT {quoted_columns} FROM anime WHERE aid = ?", [str(anilist_id)]
+    ).fetchone()
+    if row is None:
+        return None
+    payload = dict(zip(select_columns, row, strict=True))
+    payload["anilist_id"] = int(payload.pop("aid"))
+    return {
+        column: _parse_detail_value(column, value)
+        for column, value in payload.items()
+    }
 
 
 def resolve_formats(
