@@ -54,15 +54,26 @@ def _print_table(response: SearchResponse) -> None:
     table.add_column("Title (EN)")
     table.add_column("Title (JP)")
     table.add_column("Title (Romaji)")
+    table.add_column("Season", justify="center", width=13)
     table.add_column("Format", justify="center", width=6)
     table.add_column("Score", justify="right", width=8)
 
     for r in response.results:
+        season_str = ""
+        if r.season or r.season_year:
+            parts = []
+            if r.season:
+                parts.append(r.season.title())
+            if r.season_year:
+                parts.append(str(r.season_year))
+            season_str = " ".join(parts)
+
         table.add_row(
             str(r.anilist_id or "-"),
             r.title_english or "",
             r.title_native or "",
             r.title_romaji or "",
+            season_str,
             r.format or "",
             f"{r.score:.2f}",
         )
@@ -78,6 +89,8 @@ def _print_json(response: SearchResponse) -> None:
             "title_english": r.title_english,
             "title_native": r.title_native,
             "title_romaji": r.title_romaji,
+            "season": r.season,
+            "season_year": r.season_year,
             "format": r.format,
             "score": r.score,
         })

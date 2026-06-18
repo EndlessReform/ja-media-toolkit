@@ -22,6 +22,8 @@ class SearchResult:
     title_english: str | None
     title_native: str | None
     title_romaji: str | None
+    season: str | None
+    season_year: int | str | None
     format: str | None
     score: float
 
@@ -32,6 +34,8 @@ class SearchResult:
             title_english=data.get("title_english"),
             title_native=data.get("title_native"),
             title_romaji=data.get("title_romaji"),
+            season=data.get("season"),
+            season_year=data.get("season_year"),
             format=data.get("format"),
             score=float(data["score"]),
         )

@@ -14,7 +14,7 @@ from ja_media_services.anilist_search import db
 
 def write_dataset(path: Path, rows: list[dict[str, str]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    base_fields = ["id", "title_romaji", "title_english", "title_native", "format", "synonyms"]
+    base_fields = ["id", "title_romaji", "title_english", "title_native", "season", "seasonYear", "format", "synonyms"]
     extra_fields = [
         field
         for row in rows

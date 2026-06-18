@@ -22,6 +22,16 @@ RESERVED_DETAIL_COLUMNS = frozenset({"aid", "search_text"})
 logger = logging.getLogger("ja_media_services.anilist_search.db")
 
 
+def _safe_int(value: Any) -> int | str | None:
+    """Convert to int if possible, else pass through the raw value (or None)."""
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return value
+
+
 @dataclass
 class RefreshStatus:
     """Mutable operational state for the background dataset refresh loop."""
@@ -244,9 +254,9 @@ def search(
     """Search anime by name using BM25, filtered to the given formats."""
     format_filter = ", ".join(f"'{f}'" for f in formats)
     rows = con.execute(f"""
-        SELECT aid, title_english, title_native, title_romaji, format, score
+        SELECT aid, title_english, title_native, title_romaji, season, seasonYear, format, score
         FROM (
-            SELECT aid, title_english, title_native, title_romaji, format,
+            SELECT aid, title_english, title_native, title_romaji, season, seasonYear, format,
                    fts_main_anime.match_bm25(aid, ?) AS score
             FROM anime
             WHERE format IN ({format_filter})
@@ -262,8 +272,10 @@ def search(
             "title_english": row[1],
             "title_native": row[2],
             "title_romaji": row[3],
-            "format": row[4],
-            "score": round(float(row[5]), 4),
+            "season": row[4],
+            "season_year": _safe_int(row[5]),
+            "format": row[6],
+            "score": round(float(row[7]), 4),
         }
         for row in rows
     ]
