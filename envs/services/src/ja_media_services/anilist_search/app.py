@@ -9,6 +9,7 @@ from pathlib import Path
 import duckdb
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import Response
 
 from ja_media_services.anilist_search.db import (
     RefreshStatus,
@@ -150,6 +151,20 @@ def create_app() -> FastAPI:
         if result is None:
             raise HTTPException(status_code=404, detail="AniList anime not found")
         return result
+
+    @app.get("/metrics")
+    def metrics() -> Response:
+        con = app_state.con
+        if con is None:
+            raise HTTPException(status_code=503, detail="Index not ready")
+        from ja_media_services.anilist_search.metrics import render_metrics
+
+        with app_state._lock:
+            rows = get_row_count(con)
+        return Response(
+            render_metrics(app_state.refresh_status, rows),
+            media_type="text/plain; version=0.0.4",
+        )
 
     @app.get("/health")
     def health() -> dict:

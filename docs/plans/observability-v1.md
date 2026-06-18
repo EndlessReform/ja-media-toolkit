@@ -25,24 +25,40 @@ For `anilist-search`, the Python daemon thread tracks `consecutive_failures`, `l
 
 ## What we need (prioritized)
 
-### Tier 1: "The BIG last update time"
+### Tier 1a: Pipeline health — "is our check loop still running?"
 
-This is the single most important signal. If a service stops updating, its data rots silently.
+This tells us whether the service itself is healthy and can reach its upstream. A check succeeds even when nothing has changed upstream.
 
 **Gauges needed per service:**
 
-- `service_last_successful_update_timestamp{service="anime-crosswalk|kitsunekko-subtitles|anilist-search"}` — Unix timestamp of the last successful data refresh
-- `service_seconds_since_last_update{service=...}` — derived in Grafana from the above, or exposed directly
+- `service_last_check_timestamp{service="anime-crosswalk|kitsunekko-subtitles|anilist-search"}` — Unix timestamp of the last successful poll (git fetch / Kaggle HEAD check), regardless of whether data changed
+- `service_seconds_since_last_check{service=...}` — derived in Grafana
 
-**Alert rule:** `service_seconds_since_last_update > expected_interval * 1.5` → page you
+**Alert rule:** `service_seconds_since_last_check > expected_interval * 1.5` → page you
 
-Expected intervals (from compose.yaml env vars):
+This catches: network partition, git remote gone down, Kaggle API outage, service crash.
 
-| Service | Interval | Alert threshold |
+### Tier 1b: Upstream liveness — "is anyone still updating this?"
+
+This tells us whether the upstream project is alive. Rebuilds only happen when new data arrives, which may be infrequent (Kitsunekko updates ~3–6× per day normally). The risk here isn't our pipeline breaking — it's an upstream silently dying and us sitting on months-old data.
+
+**Gauges needed per service:**
+
+- `service_last_rebuild_timestamp{service=...}` — Unix timestamp of the last time we actually rebuilt from new upstream data (commit changed, CSV changed, etc.)
+- `service_seconds_since_last_rebuild{service=...}` — derived in Grafana
+- `service_total_rebuilds{service=...}` — counter, useful for spotting long plateaus
+
+**Alert rule:** `service_seconds_since_last_rebuild > expected_staleness_days * 86400` → notify (not page, until we know what "normal" looks like)
+
+Expected staleness thresholds (TBD after observing real patterns):
+
+| Service | Typical rebuild cadence | Stale threshold (placeholder) |
 |---|---|---|
-| anime-crosswalk | 43200s (12h) | ~18h |
-| kitsunekko-subtitles | 3600s (1h) | ~90m |
-| anilist-search | 3600s (1h) | ~90m |
+| anime-crosswalk | Unknown — Fribb/anime-lists updates irregularly | 7 days? |
+| kitsunekko-subtitles | ~3–6× per day | 48 hours? |
+| anilist-search | Kaggle dataset updates periodically | 7 days? |
+
+The thresholds above are placeholders. The key is having the signal so we can set them once we see actual rebuild frequency over a few weeks.
 
 ### Tier 2: Update failure visibility
 
@@ -80,18 +96,27 @@ Key metrics:
 
 ## Implementation plan
 
-### Step 1: Add `/metrics` to anilist-search (~15 min)
+### Step 1: Add `/metrics` to anilist-search (~15 min) — **DONE**
 
-The `RefreshStatus` dataclass already has everything needed (`last_success_unix`, `consecutive_failures`, `last_failure`). Add a `/metrics` route that renders `prometheus_client` gauges from the in-memory state, following the existing pattern in `anime_crosswalk/metrics.py` and `kitsunekko_subtitles/metrics.py`.
+The `RefreshStatus` dataclass already has everything needed. It distinguishes checks from rebuilds naturally:
+
+- `last_attempt_unix` — every poll attempt (check)
+- `last_success_unix` — last successful poll, regardless of whether data changed (check success)
+- `last_update_unix` — only set when `updated=True`, i.e., Kaggle actually had new data (rebuild)
+- `consecutive_failures`, `last_failure` — pipeline health
+
+Created `anilist_search/metrics.py` with a `render_metrics()` function and added a `/metrics` route to `app.py`, following the existing pattern in `anime_crosswalk/metrics.py`.
 
 New gauges:
 
 ```
 anilist_search_index_rows_total
-anilist_search_last_refresh_success (1.0 if consecutive_failures == 0)
 anilist_search_consecutive_refresh_failures
-anilist_search_last_successful_update_timestamp
+anilist_search_last_check_timestamp         # last_success_unix (check succeeded)
+anilist_search_last_rebuild_timestamp       # last_update_unix (data actually changed)
 ```
+
+Smoke-tested via Docker Compose — all four gauges present and correct, existing `/health` and `/search` endpoints unaffected.
 
 ### Step 2: Expose shell-loop status via status file (~1–2 hours)
 
@@ -99,16 +124,23 @@ The blocker for anime-crosswalk and kitsunekko-subtitles is that their update lo
 
 **Approach: status file (recommended for v1)**
 
-Have each shell loop write a small JSON status file on every iteration:
+Have each shell loop write a small JSON status file on every iteration — both successful checks and rebuilds:
 
 ```json
 {
-  "last_attempt_unix": 1718640000,
-  "last_success_unix": 1718639000,
+  "last_check_attempt_unix": 1718640000,
+  "last_check_success_unix": 1718639000,
+  "last_rebuild_unix": 1718500000,
   "consecutive_failures": 0,
   "last_error": null
 }
 ```
+
+Fields:
+
+- `last_check_success_unix` — set on every successful poll (git fetch succeeded, even if commit unchanged). This is the **pipeline health** signal.
+- `last_rebuild_unix` — set only when a rebuild actually occurred (commit changed → new DB built). This is the **upstream liveness** signal.
+- `consecutive_failures` — incremented on any poll failure, reset to 0 on success.
 
 Paths:
 
@@ -118,9 +150,11 @@ Paths:
 The existing Python `/metrics` handlers read this file alongside DB metadata and emit:
 
 ```
-anime_crosswalk_last_successful_update_timestamp
+anime_crosswalk_last_check_timestamp
+anime_crosswalk_last_rebuild_timestamp
 anime_crosswalk_consecutive_update_failures
-kitsunekko_subtitles_last_successful_update_timestamp
+kitsunekko_subtitles_last_check_timestamp
+kitsunekko_subtitles_last_rebuild_timestamp
 kitsunekko_subtitles_consecutive_update_failures
 ```
 
@@ -190,26 +224,34 @@ scrape_configs:
 
 Minimal dashboard layout:
 
-- **One "last update" gauge per service** — seconds since last successful refresh, with a red threshold at 1.5× expected interval
+- **One "last check" gauge per service** — seconds since last successful poll. Red threshold at 1.5× expected interval. This is your pipeline health.
+- **One "last rebuild" gauge per service** — seconds since upstream data actually changed. Threshold TBD after observing real patterns. This is your upstream liveness.
 - **One "consecutive failures" gauge per service** — 0 = green, >0 = yellow/red
 - **One node panel** — available memory and disk space for the Docker partition
 
 Alert rules in Prometheus (exported to Grafana or Alertmanager as desired):
 
 ```yaml
-# Data staleness
-- alert: ServiceDataStale
-  expr: time() - service_last_successful_update_timestamp > on(service) expected_interval_seconds * 1.5
+# Pipeline health: check loop stopped running
+- alert: ServiceCheckStale
+  expr: time() - service_last_check_timestamp > on(service) expected_interval_seconds * 1.5
   for: 5m
   labels:
     severity: critical
 
-# Persistent update failures
-- alert: ServiceUpdateFailing
+# Upstream liveness: no new data from upstream (threshold TBD)
+- alert: ServiceUpstreamStale
+  expr: time() - service_last_rebuild_timestamp > on(service) expected_staleness_seconds
+  for: 30m
+  labels:
+    severity: warning
+
+# Persistent check failures
+- alert: ServiceCheckFailing
   expr: service_consecutive_update_failures > 3
   for: 10m
   labels:
-    severity: warning
+    severity: warning```
 
 # Host resource pressure
 - alert: LowMemory
