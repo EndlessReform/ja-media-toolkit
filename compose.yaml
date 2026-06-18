@@ -9,11 +9,6 @@ services:
     ports:
       - "${DOCS_PORT:-8080}:80"
     restart: unless-stopped
-    depends_on:
-      anime-crosswalk:
-        condition: service_healthy
-      kitsunekko-subtitles:
-        condition: service_healthy
 
   anime-crosswalk:
     build:
@@ -40,6 +35,29 @@ services:
       timeout: 20s
       retries: 3
       start_period: 1m
+
+  anilist-search:
+    build:
+      context: .
+      dockerfile: envs/services/Dockerfile
+    image: ja-media/services:local
+    restart: unless-stopped
+    environment:
+      ANILIST_SEARCH_HOST: "0.0.0.0"
+      ANILIST_SEARCH_PORT: "8000"
+      ANILIST_SEARCH_ROOT_PATH: "/api/v1/anilist"
+      ANILIST_SEARCH_DATA_DIR: "/var/lib/anilist-search"
+      ANILIST_SEARCH_DB_PATH: "/var/lib/anilist-search/anime_index.db"
+      ANILIST_SEARCH_UPDATE_INTERVAL_SECONDS: "${ANILIST_SEARCH_UPDATE_INTERVAL_SECONDS:-3600}"
+    volumes:
+      - anilist-search-data:/var/lib/anilist-search
+    healthcheck:
+      test: ["CMD-SHELL", "uv run --no-sync anilist-search-smoke \"$${ANILIST_SEARCH_DB_PATH}\" >/dev/null"]
+      interval: 1m
+      timeout: 20s
+      retries: 3
+      start_period: 5m
+    command: ["uv", "run", "--no-sync", "anilist-search"]
 
   kitsunekko-subtitles:
     build:
@@ -70,9 +88,10 @@ services:
       interval: 1m
       timeout: 20s
       retries: 3
-      start_period: 1m
+      start_period: 5m
     command: ["uv", "run", "--no-sync", "kitsunekko-subtitles"]
 
 volumes:
+  anilist-search-data:
   anime-crosswalk-data:
   kitsunekko-subtitles-data:

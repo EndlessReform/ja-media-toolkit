@@ -4,8 +4,10 @@ version = "0.1.0"
 description = "LAN services for ja-media-toolkit"
 requires-python = ">=3.13"
 dependencies = [
+    "duckdb>=1.5.0",
     "fastapi>=0.124.0",
     "ja-media-core",
+    "kagglehub>=0.4.0",
     "parse-torrent-title>=2.8.2",
     "prometheus-client>=0.23.0",
     "pydantic-settings>=2.14.1",
@@ -16,6 +18,9 @@ dependencies = [
 anime-crosswalk = "ja_media_services.anime_crosswalk.app:main"
 anime-crosswalk-ingest = "ja_media_services.anime_crosswalk.ingest:main"
 anime-crosswalk-smoke = "ja_media_services.anime_crosswalk.smoke:main"
+anilist-search = "ja_media_services.anilist_search.app:main"
+anilist-search-ingest = "ja_media_services.anilist_search.ingest:main"
+anilist-search-smoke = "ja_media_services.anilist_search.smoke:main"
 kitsunekko-subtitles = "ja_media_services.kitsunekko_subtitles.app:main"
 kitsunekko-subtitles-ingest = "ja_media_services.kitsunekko_subtitles.ingest:main"
 kitsunekko-subtitles-smoke = "ja_media_services.kitsunekko_subtitles.smoke:main"

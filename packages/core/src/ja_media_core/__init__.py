@@ -1,3 +1,12 @@
+from ja_media_core.anilist_search import (
+    ANILIST_SEARCH_BASE_URL_ENV,
+    ANILIST_SEARCH_GATEWAY_PATH,
+    AnimeMetadata,
+    AniListSearchClient,
+    HttpAniListSearchClient,
+    SearchResult,
+    SearchResponse,
+)
 from ja_media_core.asr import (
     AsrBackend,
     AsyncAsrBackend,
@@ -84,6 +93,10 @@ from ja_media_core.vad import (
 
 
 __all__ = [
+    "ANILIST_SEARCH_BASE_URL_ENV",
+    "ANILIST_SEARCH_GATEWAY_PATH",
+    "AnimeMetadata",
+    "AniListSearchClient",
     "AudioChunk",
     "AudioFormat",
     "AudioSource",
@@ -106,6 +119,7 @@ __all__ = [
     "APP_CONFIG_DIR_NAME",
     "CONFIG_ENV_VAR",
     "CONFIG_FILE_NAME",
+    "HttpAniListSearchClient",
     "InMemoryAudioChunk",
     "JaMediaConfig",
     "JaMediaSettings",
@@ -114,6 +128,8 @@ __all__ = [
     "KitsunekkoStats",
     "KitsunekkoSubtitlesClient",
     "ReaderSession",
+    "SearchResult",
+    "SearchResponse",
     "SpeechSpan",
     "SubtitleCue",
     "TimelineSpan",

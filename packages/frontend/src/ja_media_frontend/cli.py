@@ -27,6 +27,40 @@ def main() -> None:
     if args.command == "transcribe":
         _load_apple_command("run_transcribe")(args)
         return
+    if args.command == "get-id":
+        from ja_media_frontend.anilist_search_cli import run_search
+
+        query = args.query
+        if args.file:
+            if query:
+                from rich.console import Console
+                Console(stderr=True).print("[bold red]Error:[/bold red] Provide either a search query OR a file path (-f), not both.")
+                return
+            import PTN
+            from pathlib import Path
+            from rich.console import Console
+            console = Console(stderr=True)
+            stem = Path(args.file).stem
+            parsed = PTN.parse(stem)
+            query = parsed.get("title")
+            if not query:
+                console.print(f"[bold red]Error:[/bold red] Could not parse a title from filename [yellow]{stem}[/yellow]")
+                return
+
+        if not query:
+            from rich.console import Console
+            Console(stderr=True).print("[bold red]Error:[/bold red] No search query provided. Use a positional argument or -f.")
+            return
+
+        run_search(
+            query=query,
+            top_k=args.top_k,
+            include_movies=args.include_movies,
+            include_ova=args.include_ova,
+            all_formats=args.all_formats,
+            output_format=args.format,
+        )
+        return
     if args.command == "subsync":
         if args.subsync_command == "reader":
             from ja_media_frontend.subsync_reader import run_subsync_reader
@@ -143,6 +177,41 @@ def build_parser() -> argparse.ArgumentParser:
         help="Initial number of subtitle timeline seconds shown on screen.",
     )
     subsync_tui_parser.set_defaults(subsync_parser=subsync_parser)
+
+    search_parser = subparsers.add_parser(
+        "get-id",
+        help="Search anime by title via the AniList fuzzy-search service",
+    )
+    search_parser.add_argument("query", nargs="?", help="Search query (title, romaji, or keywords)")
+    search_parser.add_argument("-f", "--file", help="Parse query from file path")
+    search_parser.add_argument(
+        "-n", "--top-k",
+
+        type=int,
+        default=3,
+        help="Number of results to return. Defaults to 3.",
+    )
+    search_parser.add_argument(
+        "--include-movies",
+        action="store_true",
+        help="Include movies in search results.",
+    )
+    search_parser.add_argument(
+        "--include-ova",
+        action="store_true",
+        help="Include OVA entries in search results.",
+    )
+    search_parser.add_argument(
+        "--all-formats",
+        action="store_true",
+        help="Include all anime formats (specials, music, etc.).",
+    )
+    search_parser.add_argument(
+        "--format",
+        choices=("table", "json"),
+        default="table",
+        help="Output format. Defaults to table.",
+    )
 
     vad_parser = subparsers.add_parser(
         "vad-local",
