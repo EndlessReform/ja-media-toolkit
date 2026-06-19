@@ -16,6 +16,7 @@ from ja_media_services.anilist_search.db import (
     background_refresh,
     ensure_dataset,
     fetch_anime_metadata,
+    get_index_timestamps,
     get_row_count,
     open_db,
     rebuild_from_cached_csv,
@@ -57,6 +58,7 @@ async def lifespan(app: FastAPI):
     con = open_db(db_path)
     with app_state._lock:
         row_count = rebuild_from_cached_csv(csv_path, db_path, con)
+        last_rebuild_unix, dataset_latest_update_unix = get_index_timestamps(con)
 
     app_state.con = con
     app_state.csv_path = csv_path
@@ -68,6 +70,10 @@ async def lifespan(app: FastAPI):
     app_state.refresh_status.last_failure_unix = None
     app_state.refresh_status.last_failure = None
     app_state.refresh_status.consecutive_failures = 0
+    app_state.refresh_status.last_rebuild_unix = last_rebuild_unix
+    app_state.refresh_status.dataset_latest_update_unix = (
+        dataset_latest_update_unix
+    )
     app_state.refresh_status.last_index_rows = row_count
 
     t = threading.Thread(

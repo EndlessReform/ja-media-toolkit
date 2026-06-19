@@ -41,7 +41,8 @@ class RefreshStatus:
     last_failure_unix: float | None = None
     last_failure: str | None = None
     consecutive_failures: int = 0
-    last_update_unix: float | None = None
+    last_rebuild_unix: float | None = None
+    dataset_latest_update_unix: float | None = None
     last_index_rows: int | None = None
 
     def as_dict(self, *, stale_after_seconds: int) -> dict:
@@ -56,7 +57,8 @@ class RefreshStatus:
             "last_failure_unix": self.last_failure_unix,
             "last_failure": self.last_failure,
             "consecutive_failures": self.consecutive_failures,
-            "last_update_unix": self.last_update_unix,
+            "last_rebuild_unix": self.last_rebuild_unix,
+            "dataset_latest_update_unix": self.dataset_latest_update_unix,
             "last_index_rows": self.last_index_rows,
             "stale": (
                 self.last_success_unix is None
@@ -66,13 +68,16 @@ class RefreshStatus:
 
 
 def ensure_dataset(data_dir: Path) -> Path:
-    """Download only the CSV from Kaggle if not already cached locally."""
-    csv_path = data_dir / CSV_NAME
-    if csv_path.exists():
-        return csv_path
+    """Resolve the current Kaggle dataset version and ensure its CSV is local.
 
+    KaggleHub owns the download cache.  We deliberately call it even when the
+    output CSV already exists so every process startup checks the unversioned
+    dataset handle against Kaggle instead of treating our persistent volume as
+    authoritative.
+    """
+    csv_path = data_dir / CSV_NAME
     data_dir.mkdir(parents=True, exist_ok=True)
-    logger.info("Downloading AniList dataset (first run)...")
+    logger.info("Resolving current AniList dataset version from Kaggle...")
     kagglehub.dataset_download(DATASET_HANDLE, path=CSV_NAME, output_dir=str(data_dir))
     return csv_path
 
@@ -136,6 +141,33 @@ def _set_metadata_value(con: duckdb.DuckDBPyConnection, key: str, value: str) ->
         ON CONFLICT (key) DO UPDATE SET value = excluded.value
         """,
         [key, value],
+    )
+
+
+def _delete_metadata_value(con: duckdb.DuckDBPyConnection, key: str) -> None:
+    """Remove metadata that is not available in the newly built artifact."""
+    con.execute("DELETE FROM metadata WHERE key = ?", [key])
+
+
+def _metadata_float(con: duckdb.DuckDBPyConnection, key: str) -> float | None:
+    """Read an optional floating-point value from durable index metadata."""
+    value = _metadata_value(con, key)
+    return float(value) if value is not None else None
+
+
+def get_index_timestamps(
+    con: duckdb.DuckDBPyConnection,
+) -> tuple[float | None, float | None]:
+    """Return the index build time and newest AniList row update time.
+
+    Both values are persisted when the index is built. The first describes our
+    derived artifact; the second is copied from ``MAX(updatedAt)`` in the source
+    dataset and therefore describes the newest upstream record represented by
+    that artifact.
+    """
+    return (
+        _metadata_float(con, "indexed_at_unix"),
+        _metadata_float(con, "dataset_latest_update_unix"),
     )
 
 
@@ -216,10 +248,28 @@ def build_index(csv_path: Path, con: duckdb.DuckDBPyConnection, *, force: bool =
     )
     con.commit()
     row_count = get_row_count(con)
+    latest_dataset_update = con.execute(
+        "SELECT MAX(TRY_CAST(updatedAt AS DOUBLE)) FROM anime"
+    ).fetchone()[0]
+    indexed_at_unix = time.time()
     _set_metadata_value(con, "dataset_signature", signature)
-    _set_metadata_value(con, "indexed_at_unix", str(time.time()))
+    _set_metadata_value(con, "indexed_at_unix", str(indexed_at_unix))
+    if latest_dataset_update is not None:
+        _set_metadata_value(
+            con,
+            "dataset_latest_update_unix",
+            str(float(latest_dataset_update)),
+        )
+    else:
+        _delete_metadata_value(con, "dataset_latest_update_unix")
     _set_metadata_value(con, "row_count", str(row_count))
-    logger.warning("AniList search index rebuilt successfully (rows=%d)", row_count)
+    logger.warning(
+        "AniList search index rebuilt successfully "
+        "(rows=%d indexed_at_unix=%f dataset_latest_update_unix=%s)",
+        row_count,
+        indexed_at_unix,
+        latest_dataset_update,
+    )
     return row_count
 
 
@@ -383,7 +433,10 @@ def background_refresh(
             if updated:
                 with lock:
                     row_count = rebuild_if_needed(csv_path, db_path, con)
-                status.last_update_unix = time.time()
+                    (
+                        status.last_rebuild_unix,
+                        status.dataset_latest_update_unix,
+                    ) = get_index_timestamps(con)
             else:
                 with lock:
                     row_count = get_row_count(con)

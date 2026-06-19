@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import time
 from prometheus_client import CollectorRegistry, Gauge, generate_latest
 
 from ja_media_services.anilist_search.db import RefreshStatus
@@ -12,11 +11,13 @@ def render_metrics(
 ) -> bytes:
     """Render AniList search operational state as Prometheus gauges.
 
-    Two distinct signals are exposed:
+    Three distinct timestamps are exposed:
     - **Check** (last_check_timestamp): set on every successful poll, even if
       upstream data has not changed.  Tells us the pipeline is alive.
-    - **Rebuild** (last_rebuild_timestamp): set only when Kaggle delivered new
-      data and the index was rebuilt.  Tells us the upstream project is alive.
+    - **Rebuild** (last_rebuild_timestamp): when the currently served index was
+      built, including the mandatory startup rebuild.
+    - **Dataset update** (dataset_latest_update_timestamp): the greatest AniList
+      ``updatedAt`` value represented in the current index.
     """
 
     registry = CollectorRegistry()
@@ -39,7 +40,12 @@ def render_metrics(
     )
     last_rebuild = Gauge(
         "anilist_search_last_rebuild_timestamp",
-        "Unix timestamp of the last index rebuild from new upstream data.",
+        "Unix timestamp when the currently served index was built.",
+        registry=registry,
+    )
+    dataset_latest_update = Gauge(
+        "anilist_search_dataset_latest_update_timestamp",
+        "Greatest AniList updatedAt timestamp represented in the current index.",
         registry=registry,
     )
 
@@ -52,10 +58,14 @@ def render_metrics(
     else:
         last_check.set(0.0)
 
-    # Rebuild: only set when updated=True in background_refresh
-    if status.last_update_unix is not None:
-        last_rebuild.set(float(status.last_update_unix))
+    if status.last_rebuild_unix is not None:
+        last_rebuild.set(float(status.last_rebuild_unix))
     else:
         last_rebuild.set(0.0)
+
+    if status.dataset_latest_update_unix is not None:
+        dataset_latest_update.set(float(status.dataset_latest_update_unix))
+    else:
+        dataset_latest_update.set(0.0)
 
     return generate_latest(registry)

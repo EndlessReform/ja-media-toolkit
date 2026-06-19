@@ -7,14 +7,26 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from prometheus_client.parser import text_string_to_metric_families
 
 from ja_media_services.anilist_search.app import app_state, create_app
 from ja_media_services.anilist_search import db
+from ja_media_services.anilist_search.metrics import render_metrics
 
 
 def write_dataset(path: Path, rows: list[dict[str, str]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    base_fields = ["id", "title_romaji", "title_english", "title_native", "season", "seasonYear", "format", "synonyms"]
+    base_fields = [
+        "id",
+        "title_romaji",
+        "title_english",
+        "title_native",
+        "season",
+        "seasonYear",
+        "format",
+        "synonyms",
+        "updatedAt",
+    ]
     extra_fields = [
         field
         for row in rows
@@ -27,6 +39,58 @@ def write_dataset(path: Path, rows: list[dict[str, str]]) -> None:
         writer.writeheader()
         for row in rows:
             writer.writerow({"synonyms": "[]", **row})
+
+
+def test_ensure_dataset_checks_kaggle_when_csv_is_already_cached(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    csv_path = tmp_path / db.CSV_NAME
+    csv_path.write_text("cached", encoding="utf-8")
+    calls: list[tuple[str, str, str]] = []
+
+    def download(handle: str, *, path: str, output_dir: str) -> str:
+        calls.append((handle, path, output_dir))
+        csv_path.write_text("current", encoding="utf-8")
+        return str(csv_path)
+
+    monkeypatch.setattr(db.kagglehub, "dataset_download", download)
+
+    assert db.ensure_dataset(tmp_path) == csv_path
+    assert calls == [(db.DATASET_HANDLE, db.CSV_NAME, str(tmp_path))]
+    assert csv_path.read_text(encoding="utf-8") == "current"
+
+
+def test_ensure_dataset_downloads_csv_on_first_startup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    csv_path = tmp_path / "data" / db.CSV_NAME
+
+    def download(handle: str, *, path: str, output_dir: str) -> str:
+        assert handle == db.DATASET_HANDLE
+        assert path == db.CSV_NAME
+        assert output_dir == str(csv_path.parent)
+        csv_path.write_text("current", encoding="utf-8")
+        return str(csv_path)
+
+    monkeypatch.setattr(db.kagglehub, "dataset_download", download)
+
+    assert db.ensure_dataset(csv_path.parent) == csv_path
+    assert csv_path.read_text(encoding="utf-8") == "current"
+
+
+def test_ensure_dataset_does_not_silently_accept_cache_when_kaggle_check_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    csv_path = tmp_path / db.CSV_NAME
+    csv_path.write_text("cached", encoding="utf-8")
+
+    def fail_download(*args: object, **kwargs: object) -> str:
+        raise RuntimeError("Kaggle unavailable")
+
+    monkeypatch.setattr(db.kagglehub, "dataset_download", fail_download)
+
+    with pytest.raises(RuntimeError, match="Kaggle unavailable"):
+        db.ensure_dataset(tmp_path)
 
 
 def test_build_index_rebuilds_when_dataset_signature_changes(tmp_path: Path) -> None:
@@ -75,6 +139,66 @@ def test_build_index_rebuilds_when_dataset_signature_changes(tmp_path: Path) -> 
         assert db.search(con, "Gintama")[0]["anilist_id"] == 2
     finally:
         con.close()
+
+
+def test_build_index_persists_rebuild_and_latest_dataset_update_timestamps(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    csv_path = tmp_path / db.CSV_NAME
+    db_path = tmp_path / "anime_index.db"
+    write_dataset(
+        csv_path,
+        [
+            {
+                "id": "1",
+                "title_romaji": "Aria",
+                "title_english": "Aria",
+                "title_native": "ARIA",
+                "format": "TV",
+                "updatedAt": "1700000000",
+            },
+            {
+                "id": "2",
+                "title_romaji": "Frieren",
+                "title_english": "Frieren",
+                "title_native": "葬送のフリーレン",
+                "format": "TV",
+                "updatedAt": "1800000000",
+            },
+        ],
+    )
+    monkeypatch.setattr(db.time, "time", lambda: 1900000000.0)
+
+    con = db.open_db(db_path)
+    try:
+        db.build_index(csv_path, con)
+
+        assert db.get_index_timestamps(con) == (1900000000.0, 1800000000.0)
+    finally:
+        con.close()
+
+
+def test_render_metrics_distinguishes_check_rebuild_and_dataset_update() -> None:
+    status = db.RefreshStatus(
+        last_success_unix=1900000000.0,
+        last_rebuild_unix=1890000000.0,
+        dataset_latest_update_unix=1880000000.0,
+    )
+
+    families = text_string_to_metric_families(
+        render_metrics(status, row_count=20346).decode()
+    )
+    samples = {
+        sample.name: sample.value
+        for family in families
+        for sample in family.samples
+    }
+
+    assert samples["anilist_search_last_check_timestamp"] == 1900000000.0
+    assert samples["anilist_search_last_rebuild_timestamp"] == 1890000000.0
+    assert (
+        samples["anilist_search_dataset_latest_update_timestamp"] == 1880000000.0
+    )
 
 
 def test_build_index_can_force_rebuild_existing_fts_index(tmp_path: Path) -> None:

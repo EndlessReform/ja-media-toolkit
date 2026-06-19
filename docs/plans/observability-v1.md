@@ -38,17 +38,22 @@ This tells us whether the service itself is healthy and can reach its upstream. 
 
 This catches: network partition, git remote gone down, Kaggle API outage, service crash.
 
-### Tier 1b: Upstream liveness — "is anyone still updating this?"
+### Tier 1b: Data freshness — "is anyone still updating this?"
 
-This tells us whether the upstream project is alive. Rebuilds only happen when new data arrives, which may be infrequent (Kitsunekko updates ~3–6× per day normally). The risk here isn't our pipeline breaking — it's an upstream silently dying and us sitting on months-old data.
+This tells us whether the source data itself is alive. The risk here isn't our
+pipeline breaking — it's an upstream silently dying while our checks continue
+to succeed.
 
 **Gauges needed per service:**
 
-- `service_last_rebuild_timestamp{service=...}` — Unix timestamp of the last time we actually rebuilt from new upstream data (commit changed, CSV changed, etc.)
-- `service_seconds_since_last_rebuild{service=...}` — derived in Grafana
+- `service_last_rebuild_timestamp{service=...}` — Unix timestamp when the currently served derived artifact was built
+- A source freshness timestamp whose meaning follows the source contract:
+  - AniList: `anilist_search_dataset_latest_update_timestamp` — `MAX(updatedAt)` from the indexed rows
+  - Git mirrors: the newest represented upstream commit timestamp
 - `service_total_rebuilds{service=...}` — counter, useful for spotting long plateaus
 
-**Alert rule:** `service_seconds_since_last_rebuild > expected_staleness_days * 86400` → notify (not page, until we know what "normal" looks like)
+**Alert rule:** age of the source freshness timestamp exceeds the expected
+staleness window → notify (not page, until we know what "normal" looks like).
 
 Expected staleness thresholds (TBD after observing real patterns):
 
@@ -102,7 +107,8 @@ The `RefreshStatus` dataclass already has everything needed. It distinguishes ch
 
 - `last_attempt_unix` — every poll attempt (check)
 - `last_success_unix` — last successful poll, regardless of whether data changed (check success)
-- `last_update_unix` — only set when `updated=True`, i.e., Kaggle actually had new data (rebuild)
+- `last_rebuild_unix` — when the currently served index was built, including the mandatory startup rebuild
+- `dataset_latest_update_unix` — `MAX(updatedAt)` from the AniList rows represented in the index
 - `consecutive_failures`, `last_failure` — pipeline health
 
 Created `anilist_search/metrics.py` with a `render_metrics()` function and added a `/metrics` route to `app.py`, following the existing pattern in `anime_crosswalk/metrics.py`.
@@ -113,10 +119,18 @@ New gauges:
 anilist_search_index_rows_total
 anilist_search_consecutive_refresh_failures
 anilist_search_last_check_timestamp         # last_success_unix (check succeeded)
-anilist_search_last_rebuild_timestamp       # last_update_unix (data actually changed)
+anilist_search_last_rebuild_timestamp       # last_rebuild_unix (index actually built)
+anilist_search_dataset_latest_update_timestamp  # newest AniList updatedAt in the index
 ```
 
-Smoke-tested via Docker Compose — all four gauges present and correct, existing `/health` and `/search` endpoints unaffected.
+The three timestamps deliberately describe separate clocks:
+
+- **Check:** our process successfully reached and resolved Kaggle.
+- **Rebuild:** our process successfully built the currently served DuckDB index.
+- **Dataset update:** the newest AniList record update represented by that index.
+
+An update-prompted rebuild is not a separate freshness concept; it is an event
+worth logging or counting. Startup rebuilds are still real rebuilds.
 
 ### Step 2: Expose shell-loop status via status file (~1–2 hours)
 
@@ -139,7 +153,9 @@ Have each shell loop write a small JSON status file on every iteration — both 
 Fields:
 
 - `last_check_success_unix` — set on every successful poll (git fetch succeeded, even if commit unchanged). This is the **pipeline health** signal.
-- `last_rebuild_unix` — set only when a rebuild actually occurred (commit changed → new DB built). This is the **upstream liveness** signal.
+- `last_rebuild_unix` — set whenever the currently served artifact is built,
+  including startup rebuilds. This is an artifact provenance signal, not
+  upstream liveness by itself.
 - `consecutive_failures` — incremented on any poll failure, reset to 0 on success.
 
 Paths:
@@ -225,7 +241,8 @@ scrape_configs:
 Minimal dashboard layout:
 
 - **One "last check" gauge per service** — seconds since last successful poll. Red threshold at 1.5× expected interval. This is your pipeline health.
-- **One "last rebuild" gauge per service** — seconds since upstream data actually changed. Threshold TBD after observing real patterns. This is your upstream liveness.
+- **One "last rebuild" gauge per service** — seconds since the served artifact was built.
+- **One source freshness gauge per service** — age of the newest upstream timestamp represented in the artifact. Threshold TBD after observing real patterns.
 - **One "consecutive failures" gauge per service** — 0 = green, >0 = yellow/red
 - **One node panel** — available memory and disk space for the Docker partition
 
@@ -239,9 +256,9 @@ Alert rules in Prometheus (exported to Grafana or Alertmanager as desired):
   labels:
     severity: critical
 
-# Upstream liveness: no new data from upstream (threshold TBD)
+# Upstream liveness: represented source data is old (threshold TBD)
 - alert: ServiceUpstreamStale
-  expr: time() - service_last_rebuild_timestamp > on(service) expected_staleness_seconds
+  expr: time() - service_source_latest_update_timestamp > on(service) expected_staleness_seconds
   for: 30m
   labels:
     severity: warning
