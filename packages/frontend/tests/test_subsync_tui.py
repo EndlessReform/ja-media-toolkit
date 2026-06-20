@@ -23,6 +23,11 @@ from ja_media_frontend.subsync_tui import (
     resolve_srt_inputs,
     runtime_episode_number,
 )
+from ja_media_core.subtitle_lid import (
+    SubtitleLanguage,
+    SubtitleLanguageIdConfig,
+    analyze_subtitle_language,
+)
 from ja_media_core.transcripts import read_srt
 
 
@@ -342,6 +347,96 @@ class SubsyncTuiTest(unittest.TestCase):
             table = app.render_candidates()
 
         self.assertEqual(len(table.rows), 2)
+        self.assertEqual([column.header for column in table.columns][2], "LID")
+
+    def test_opt_in_language_sort_places_japanese_before_bilingual_and_foreign(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            media = tmp / "episode.mp3"
+            media.write_bytes(b"fake")
+            config = SubtitleLanguageIdConfig(
+                minimum_lines=1,
+                minimum_characters=1,
+                obvious_japanese_script_ratio=0.95,
+            )
+
+            japanese_cues = read_srt_from_text(
+                "1\n00:00:01,000 --> 00:00:02,000\n今日は学校へ行きます。\n"
+            )
+            bilingual_cues = read_srt_from_text(
+                "1\n00:00:01,000 --> 00:00:02,000\n"
+                "今日は学校へ行きます。\nI am going to school today.\n"
+            )
+            foreign_cues = read_srt_from_text(
+                "1\n00:00:01,000 --> 00:00:02,000\n"
+                "This is an English subtitle candidate.\n"
+            )
+
+            japanese = SubtitleTrack(
+                tmp / "japanese.srt",
+                japanese_cues,
+                language_analysis=analyze_subtitle_language(
+                    japanese_cues,
+                    config=config,
+                    detector=lambda _: "ja",
+                ),
+            )
+            bilingual = SubtitleTrack(
+                tmp / "bilingual.srt",
+                bilingual_cues,
+                language_analysis=analyze_subtitle_language(
+                    bilingual_cues,
+                    config=config,
+                    detector=lambda line: "ja" if "。" in line else "en",
+                ),
+            )
+            foreign = SubtitleTrack(
+                tmp / "foreign.srt",
+                foreign_cues,
+                language_analysis=analyze_subtitle_language(
+                    foreign_cues,
+                    config=config,
+                    detector=lambda _: "en",
+                ),
+            )
+            app = SubsyncTuiApp(
+                audio_source=make_audio_source(media),
+                tracks=[foreign, bilingual, japanese],
+                initial_window_s=10.0,
+                sort_by_language=True,
+            )
+
+            app.track_index = 1
+            app.sort_tracks_by_language()
+
+        self.assertEqual(
+            [track.language_analysis.language for track in app.tracks],
+            [
+                SubtitleLanguage.JAPANESE,
+                SubtitleLanguage.BILINGUAL,
+                SubtitleLanguage.NON_JAPANESE,
+            ],
+        )
+        self.assertIs(app.track, bilingual)
+
+    def test_language_sort_is_disabled_by_default(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            media = tmp / "episode.mp3"
+            media.write_bytes(b"fake")
+            first = SubtitleTrack(tmp / "first.srt", [])
+            second = SubtitleTrack(tmp / "second.srt", [])
+            app = SubsyncTuiApp(
+                audio_source=make_audio_source(media),
+                tracks=[first, second],
+                initial_window_s=10.0,
+            )
+
+            app.sort_tracks_by_language()
+
+        self.assertEqual(app.tracks, [first, second])
 
     def test_empty_tui_state_renders_without_tracks(self) -> None:
         with TemporaryDirectory() as tmpdir:

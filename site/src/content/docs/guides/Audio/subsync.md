@@ -37,8 +37,15 @@ To fetch candidates from the Kitsunekko service without local files:
 ```sh
 uv run ja-media subsync tui ../../media/GANTZ.S01E16.mkv \
   --anilist 395 \
-  --fetch-subs
+  --fetch-subs \
+  --sort-by-language
 ```
+
+Every candidate is assigned a compact language label in the `LID` column:
+`ja`, `?`, `bi`, `non-ja`, or `short`. Candidate order remains unchanged by
+default. Pass `--sort-by-language` to place Japanese candidates first, followed
+by unknown, bilingual, non-Japanese, and insufficient-text candidates. The
+thresholds come from the global `[subtitles.language_id]` configuration.
 
 The TUI attempts to parse the episode number from the filename using `parse-torrent-title`. If the filename is ambiguous, you can override it:
 
@@ -55,7 +62,7 @@ While the TUI is running, you can press `F6` to open a modal and change the AniL
 
 The TUI is divided into four main regions:
 - **Source Media Path**: The file currently being reviewed.
-- **Candidate Table**: A list of `.srt` files showing cue counts, the current cue, active subtitle time, and total span.
+- **Candidate Table**: A list of `.srt` files showing language classification, cue counts, the current cue, active subtitle time, and total span.
 - **Activity Timeline**: A visual representation of subtitle spans for the selected candidate.
 - **Cue Text**: The text of the currently selected cue.
 

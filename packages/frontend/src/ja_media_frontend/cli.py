@@ -85,6 +85,7 @@ def main() -> None:
                 episode_number=args.episode,
                 fetch_subs=args.fetch_subs,
                 tvdb_media_kind=args.tvdb_kind,
+                sort_by_language=args.sort_by_language,
             )
             return
         args.subsync_parser.print_help()
@@ -169,6 +170,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--fetch-subs",
         action="store_true",
         help="Fetch matching Kitsunekko SRT candidates before opening the TUI.",
+    )
+    subsync_tui_parser.add_argument(
+        "--sort-by-language",
+        action="store_true",
+        help=(
+            "Sort candidates by subtitle language: Japanese first, then "
+            "unknown, bilingual, non-Japanese, and insufficient text."
+        ),
     )
     subsync_tui_parser.add_argument(
         "--window-s",

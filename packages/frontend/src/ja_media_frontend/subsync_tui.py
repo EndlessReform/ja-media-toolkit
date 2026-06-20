@@ -39,6 +39,13 @@ from ja_media_core.kitsunekko import (
     HttpKitsunekkoSubtitlesClient,
     KitsunekkoFileListResponse,
 )
+from ja_media_core.config import load_config
+from ja_media_core.subtitle_lid import (
+    SubtitleLanguage,
+    SubtitleLanguageAnalysis,
+    SubtitleLanguageIdConfig,
+    analyze_subtitle_language,
+)
 from ja_media_core.transcripts import SubtitleCue, format_srt, read_srt
 
 
@@ -116,6 +123,8 @@ class SubtitleTrack:
     cues: list[SubtitleCue]
     repo_path: str | None = None
     subtitle_id: str | None = None
+    language_analysis: SubtitleLanguageAnalysis | None = None
+    language_error: str | None = None
 
     @property
     def label(self) -> str:
@@ -126,6 +135,28 @@ class SubtitleTrack:
     @property
     def end_s(self) -> float:
         return max((cue.end_s for cue in self.cues), default=0.0)
+
+    @property
+    def language_label(self) -> str:
+        """Compact language bucket shown in the candidate table."""
+
+        if self.language_analysis is None:
+            return "error" if self.language_error else "?"
+        return {
+            SubtitleLanguage.JAPANESE: "ja",
+            SubtitleLanguage.UNKNOWN: "?",
+            SubtitleLanguage.BILINGUAL: "bi",
+            SubtitleLanguage.NON_JAPANESE: "non-ja",
+            SubtitleLanguage.INSUFFICIENT_TEXT: "short",
+        }[self.language_analysis.language]
+
+    @property
+    def language_sort_key(self) -> tuple[int, float, float]:
+        """Best-first language key, with analysis failures kept at the end."""
+
+        if self.language_analysis is None:
+            return (SubtitleLanguage.INSUFFICIENT_TEXT.rank + 1, 0.0, 0.0)
+        return self.language_analysis.sort_key
 
     @property
     def active_s(self) -> float:
@@ -282,6 +313,7 @@ def run_subsync_tui(
     episode_number: int | None = None,
     fetch_subs: bool = False,
     tvdb_media_kind: str | None = "tv",
+    sort_by_language: bool = False,
 ) -> None:
     """Load subtitle candidates and run the Textual subsync shell."""
 
@@ -307,13 +339,20 @@ def run_subsync_tui(
         episode_number=episode_number or runtime_episode_number(source.stem),
         media_kind=tvdb_media_kind,
     )
+    language_id_config = load_config().subtitles.language_id
 
     # (a) Explicit SRT inputs — always first, in CLI order.
     srt_paths = resolve_srt_inputs(srt_inputs, allow_empty=True)
     tracks = []
     for path in srt_paths:
         try:
-            tracks.append(SubtitleTrack(path=path, cues=read_srt(path)))
+            tracks.append(
+                subtitle_track_with_language(
+                    path=path,
+                    cues=read_srt(path),
+                    config=language_id_config,
+                )
+            )
         except ValueError as exc:
             raise SystemExit(f"Could not parse {path}: {exc}") from exc
 
@@ -326,6 +365,8 @@ def run_subsync_tui(
             initial_window_s=window_s,
             remote_state=remote_state,
             download_dir=session_dir,
+            language_id_config=language_id_config,
+            sort_by_language=sort_by_language,
         )
 
         # (c) Remote tracks — inserted between explicit and sidecar.
@@ -339,12 +380,48 @@ def run_subsync_tui(
         _sidecar = source.with_suffix(".srt")
         if _sidecar.is_file() and _sidecar not in _loaded_paths:
             try:
-                app.tracks.append(SubtitleTrack(path=_sidecar, cues=read_srt(_sidecar)))
+                app.tracks.append(
+                    subtitle_track_with_language(
+                        path=_sidecar,
+                        cues=read_srt(_sidecar),
+                        config=language_id_config,
+                    )
+                )
                 app.cue_indices.append(0)
             except ValueError as exc:
                 raise SystemExit(f"Could not parse sidecar {_sidecar}: {exc}") from exc
 
+        app.sort_tracks_by_language()
         app.run()
+
+
+def subtitle_track_with_language(
+    *,
+    path: Path,
+    cues: list[SubtitleCue],
+    config: SubtitleLanguageIdConfig,
+    repo_path: str | None = None,
+    subtitle_id: str | None = None,
+) -> SubtitleTrack:
+    """Build a track and cache its language analysis for display and sorting."""
+
+    try:
+        analysis = analyze_subtitle_language(cues, config=config)
+    except Exception as exc:
+        return SubtitleTrack(
+            path=path,
+            cues=cues,
+            repo_path=repo_path,
+            subtitle_id=subtitle_id,
+            language_error=f"{type(exc).__name__}: {exc}",
+        )
+    return SubtitleTrack(
+        path=path,
+        cues=cues,
+        repo_path=repo_path,
+        subtitle_id=subtitle_id,
+        language_analysis=analysis,
+    )
 
 
 def resolve_srt_inputs(inputs: list[str], *, allow_empty: bool = False) -> list[Path]:
@@ -786,6 +863,8 @@ class SubsyncTuiApp(App[None]):
         initial_window_s: float,
         remote_state: RemoteLookupState | None = None,
         download_dir: Path | None = None,
+        language_id_config: SubtitleLanguageIdConfig | None = None,
+        sort_by_language: bool = False,
     ) -> None:
         super().__init__()
         self.audio_source = audio_source
@@ -798,6 +877,10 @@ class SubsyncTuiApp(App[None]):
         self.download_dir = download_dir or Path(
             tempfile.mkdtemp(prefix="ja-media-subsync-")
         )
+        self.language_id_config = (
+            language_id_config or SubtitleLanguageIdConfig()
+        )
+        self.sort_by_language = sort_by_language
         self._pending_remote_file_picker_message = ""
         self._pending_g = False
         self._player = PcmSlicePlayer(audio_source)
@@ -1019,6 +1102,7 @@ class SubsyncTuiApp(App[None]):
         )
         table.add_column("", width=1, no_wrap=True)
         table.add_column("candidate", ratio=1, overflow="ellipsis", no_wrap=True)
+        table.add_column("LID", justify="right", no_wrap=True)
         table.add_column("cue", justify="right", no_wrap=True)
         table.add_column("total", justify="right", no_wrap=True)
         table.add_column("active", justify="right", no_wrap=True)
@@ -1030,6 +1114,7 @@ class SubsyncTuiApp(App[None]):
                     "No subtitles loaded. Press F6 or launch with --fetch-subs.",
                     style="dim",
                 ),
+                Text("-"),
                 Text("-"),
                 Text("0"),
                 Text("0.0s"),
@@ -1046,12 +1131,31 @@ class SubsyncTuiApp(App[None]):
             table.add_row(
                 Text(">" if selected else " ", style=marker_style),
                 Text(track.label, style=candidate_style),
+                Text(track.language_label),
                 Text(cue_label, style="bold" if selected else ""),
                 Text(str(len(track.cues))),
                 Text(format_duration(track.active_s)),
                 Text(format_duration(track.end_s)),
             )
         return table
+
+    def sort_tracks_by_language(self) -> None:
+        """Apply opt-in stable LID ordering while retaining track cue state."""
+
+        if not self.sort_by_language or len(self.tracks) < 2:
+            return
+
+        selected_track = self.track if self.tracks else None
+        cue_by_identity = {
+            id(track): self.cue_indices[index]
+            for index, track in enumerate(self.tracks)
+        }
+        self.tracks.sort(key=lambda track: track.language_sort_key)
+        self.cue_indices = [
+            cue_by_identity.get(id(track), 0) for track in self.tracks
+        ]
+        if selected_track is not None:
+            self.track_index = self.tracks.index(selected_track)
 
     def render_timeline(self) -> Panel:
         if not self.tracks:
@@ -1282,6 +1386,10 @@ class SubsyncTuiApp(App[None]):
             insertion_idx += 1
             added += 1
 
+        added_tracks = self.tracks[first_idx:insertion_idx]
+        self.sort_tracks_by_language()
+        if added_tracks:
+            first_idx = min(self.tracks.index(track) for track in added_tracks)
         if self.track_index >= len(self.tracks):
             self.track_index = max(0, len(self.tracks) - 1)
         return added, first_idx
@@ -1327,6 +1435,8 @@ class SubsyncTuiApp(App[None]):
         self.tracks.insert(insertion_idx, track)
         self.cue_indices.insert(insertion_idx, 0)
         self.track_index = insertion_idx
+        self.sort_tracks_by_language()
+        self.track_index = self.tracks.index(track)
         self.select_cue_near_time(self.window_start_s + self.window_s / 2)
         self.remote_state.status = "picked 1 track"
         self.notify(f"Loaded {track.path.name}")
@@ -1395,11 +1505,12 @@ class SubsyncTuiApp(App[None]):
             local_path = self.download_dir / f"{subtitle_id}-{filename}"
             local_path.write_bytes(content)
             cues = read_srt(local_path)
-        return SubtitleTrack(
+        return subtitle_track_with_language(
             path=local_path,
             cues=cues,
             repo_path=repo_path,
             subtitle_id=subtitle_id,
+            config=self.language_id_config,
         )
 
     def toggle_playback(self) -> None:
