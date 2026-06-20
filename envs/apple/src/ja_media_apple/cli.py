@@ -22,6 +22,7 @@ from ja_media_core.audio import (
     resolve_audio_source,
     write_audio_chunk,
 )
+from ja_media_core.transcripts import SubtitleCue, format_srt
 from ja_media_core.vad import (
     VadOptions,
     plan_vad_splits,
@@ -533,59 +534,48 @@ def _ensure_unique_srt_input_stems(paths: list[Path]) -> None:
 
 
 def _payload_to_srt(payload: dict[str, Any]) -> str:
-    cues = _srt_cues_from_payload(payload)
-    return "\n\n".join(
-        "\n".join(
-            [
-                str(index),
-                f"{_srt_timestamp(cue['start_s'])} --> {_srt_timestamp(cue['end_s'])}",
-                cue["text"],
-            ]
-        )
-        for index, cue in enumerate(cues, start=1)
-    ) + ("\n" if cues else "")
+    return format_srt(_srt_cues_from_payload(payload))
 
 
-def _srt_cues_from_payload(payload: dict[str, Any]) -> list[dict[str, Any]]:
+def _srt_cues_from_payload(payload: dict[str, Any]) -> list[SubtitleCue]:
+    source_path = str(payload["source"]["locator"])
     rejoined = payload.get("rejoined") or {}
     segments = rejoined.get("segments") or []
     if segments:
-        return [
-            {
-                "start_s": segment["start_s"],
-                "end_s": segment["end_s"],
-                "text": _clean_srt_text(segment.get("text", "")),
-            }
-            for segment in segments
-            if segment.get("text", "").strip()
-            and segment.get("end_s", 0.0) > segment.get("start_s", 0.0)
-        ]
+        cues: list[SubtitleCue] = []
+        for segment in segments:
+            text = _clean_srt_text(segment.get("text", ""))
+            if text and segment.get("end_s", 0.0) > segment.get("start_s", 0.0):
+                cues.append(
+                    SubtitleCue(
+                        source_path=source_path,
+                        index=len(cues) + 1,
+                        start_s=segment["start_s"],
+                        end_s=segment["end_s"],
+                        text=text,
+                    )
+                )
+        return cues
 
-    cues = []
+    cues: list[SubtitleCue] = []
     for transcript in payload.get("transcripts", []):
         text = _clean_srt_text(transcript.get("text", ""))
         chunk = transcript.get("chunk") or {}
         if text and chunk.get("end_s", 0.0) > chunk.get("start_s", 0.0):
             cues.append(
-                {
-                    "start_s": chunk["start_s"],
-                    "end_s": chunk["end_s"],
-                    "text": text,
-                }
+                SubtitleCue(
+                    source_path=source_path,
+                    index=len(cues) + 1,
+                    start_s=chunk["start_s"],
+                    end_s=chunk["end_s"],
+                    text=text,
+                )
             )
     return cues
 
 
 def _clean_srt_text(text: str) -> str:
     return "\n".join(line.strip() for line in text.strip().splitlines() if line.strip())
-
-
-def _srt_timestamp(seconds: float) -> str:
-    milliseconds_total = max(0, round(seconds * 1000))
-    hours, remainder = divmod(milliseconds_total, 3_600_000)
-    minutes, remainder = divmod(remainder, 60_000)
-    whole_seconds, milliseconds = divmod(remainder, 1000)
-    return f"{hours:02d}:{minutes:02d}:{whole_seconds:02d},{milliseconds:03d}"
 
 
 def _asr_transcript_text(payload: dict[str, Any]) -> str:

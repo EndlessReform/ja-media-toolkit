@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from ja_media_core.reader import reader_session_from_cues
-from ja_media_core.srt import parse_srt
+from ja_media_core.transcripts import parse_srt
 
 
 class ReaderSessionTest(unittest.TestCase):

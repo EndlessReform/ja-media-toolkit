@@ -56,9 +56,8 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the durable ASR/config/back
 ├── site/                  # User-facing documentation site (Astro/Starlight)
 │   └── Caddyfile          # Unified API Gateway & Static site config
 ├── packages/              # Shared libraries (workspace members)
-│   ├── core/              # Shared types, config discovery, and contracts
-│   ├── frontend/          # CLI entrypoints and TUI surfaces
-│   └── transcripts/       # SRT/ASS parsing, normalization, alignment
+│   ├── core/              # Shared contracts, config, and transcript formats
+│   └── frontend/          # CLI entrypoints and TUI surfaces
 ├── envs/                  # Platform-specific runtimes & dependencies
 │   ├── apple/             # MacBook workflows (MLX, Metal, local ASR/VAD)
 │   ├── cuda/              # Nvidia workstation workflows (CUDA ASR)
@@ -104,10 +103,9 @@ uv run --isolated --with-editable '.[apple]' ja-media transcribe --startup-only 
 #### 4. Running Tests
 `pytest` is a declared dev dependency. Do not use ad hoc `uv run --with pytest ...` invocations unless you are intentionally testing outside the repo environments.
 
-For workspace packages (`packages/core`, `packages/media`, `packages/transcripts`), run tests from the repo root:
+For workspace packages (`packages/core`, `packages/media`), run tests from the repo root:
 ```sh
 uv run pytest packages/core/tests
-uv run pytest packages/transcripts/tests
 ```
 
 For standalone environments that are not root workspace members, run from that environment:

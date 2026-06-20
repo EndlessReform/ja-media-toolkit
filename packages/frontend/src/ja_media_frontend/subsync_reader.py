@@ -13,7 +13,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingRes
 
 from ja_media_core.audio import probe_audio_source, resolve_audio_source
 from ja_media_core.reader import ReaderSession, reader_session_from_cues
-from ja_media_core.srt import read_srt
+from ja_media_core.transcripts import read_srt
 
 
 DEFAULT_HOST = "127.0.0.1"

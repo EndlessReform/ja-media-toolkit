@@ -70,7 +70,7 @@ from ja_media_core.reader import (
     TimelineTrack,
     reader_session_from_cues,
 )
-from ja_media_core.srt import (
+from ja_media_core.transcripts import (
     SubtitleCue,
     format_srt,
     format_srt_timestamp,

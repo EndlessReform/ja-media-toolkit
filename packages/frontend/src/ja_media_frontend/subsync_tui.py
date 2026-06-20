@@ -39,7 +39,7 @@ from ja_media_core.kitsunekko import (
     HttpKitsunekkoSubtitlesClient,
     KitsunekkoFileListResponse,
 )
-from ja_media_core.srt import SubtitleCue, format_srt, read_srt
+from ja_media_core.transcripts import SubtitleCue, format_srt, read_srt
 
 
 SPAN_STYLES = [

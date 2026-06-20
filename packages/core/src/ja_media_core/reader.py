@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-from ja_media_core.srt import SubtitleCue
+from ja_media_core.transcripts import SubtitleCue
 
 
 TimelineTrackKind = Literal["media", "subtitle"]

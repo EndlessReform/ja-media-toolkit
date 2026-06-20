@@ -23,7 +23,7 @@ from ja_media_frontend.subsync_tui import (
     resolve_srt_inputs,
     runtime_episode_number,
 )
-from ja_media_core.srt import read_srt
+from ja_media_core.transcripts import read_srt
 
 
 SRT_TEXT = (
@@ -614,7 +614,7 @@ class SubsyncTuiTest(unittest.TestCase):
 
 
 def read_srt_from_text(text: str):
-    from ja_media_core.srt import parse_srt
+    from ja_media_core.transcripts import parse_srt
 
     return parse_srt(text)
 
