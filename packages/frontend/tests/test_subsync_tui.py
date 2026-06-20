@@ -347,7 +347,7 @@ class SubsyncTuiTest(unittest.TestCase):
             table = app.render_candidates()
 
         self.assertEqual(len(table.rows), 2)
-        self.assertEqual([column.header for column in table.columns][2], "LID")
+        self.assertNotIn("LID", [column.header for column in table.columns])
 
     def test_opt_in_language_sort_places_japanese_before_bilingual_and_foreign(
         self,
@@ -458,6 +458,32 @@ class SubsyncTuiTest(unittest.TestCase):
 
         self.assertIn("anilist:395 ep:16", source)
         self.assertEqual(len(candidates.rows), 1)
+
+    def test_title_promotes_anilist_label_once_tracks_loaded(self) -> None:
+        async def run_app() -> tuple[str, str]:
+            with TemporaryDirectory() as tmpdir:
+                tmp = Path(tmpdir)
+                media = tmp / "episode.mp3"
+                srt = tmp / "episode.srt"
+                media.write_bytes(b"fake")
+                srt.write_text(SRT_TEXT, encoding="utf-8")
+                app = SubsyncTuiApp(
+                    audio_source=make_audio_source(media),
+                    tracks=[SubtitleTrack(srt, read_srt(srt))],
+                    initial_window_s=10.0,
+                    remote_state=RemoteLookupState(
+                        source="anilist",
+                        external_id=395,
+                        episode_number=16,
+                    ),
+                )
+                async with app.run_test() as pilot:
+                    await pilot.pause()
+                    return app.title, app.render_source().plain
+
+        title, source = asyncio.run(run_app())
+        self.assertEqual(title, "anilist:395 ep:16")
+        self.assertNotIn("anilist:395 ep:16", source)
 
     def test_fetch_remote_tracks_appends_srt_candidates(self) -> None:
         with TemporaryDirectory() as tmpdir:

@@ -128,9 +128,25 @@ class SubtitleTrack:
 
     @property
     def label(self) -> str:
-        """Human-readable candidate label for local and fetched tracks."""
+        """Human-readable candidate label for local and fetched tracks.
 
-        return self.repo_path or self.path.name
+        Remote Kitsunekko tracks carry a long ``repo_path`` (e.g.
+        ``subtitles/anime_tv/GANTZ/[Group] GANTZ - 16.srt``); showing the whole
+        thing wastes candidate-column real estate on a stable directory prefix,
+        so we collapse to just the stem. Local tracks keep their on-disk name.
+        """
+
+        if self.repo_path:
+            return Path(self.repo_path).stem
+        return self.path.name
+
+    @property
+    def stem_label(self) -> str:
+        """Collision-detection key: the stem shown to the user, no UUID prefix."""
+
+        if self.repo_path:
+            return Path(self.repo_path).stem
+        return self.path.stem
 
     @property
     def end_s(self) -> float:
@@ -809,10 +825,82 @@ class RemoteFilePickModal(ModalScreen[ManualSubtitlePickRequest | None]):
         self.dismiss(ManualSubtitlePickRequest(self.filtered_files[index]))
 
 
+class HelpModal(ModalScreen[None]):
+    """F1 cheatsheet documenting every keybinding the subsync TUI accepts.
+
+    The bottom status bar is now intentionally sparse (only the bindings that
+    are easy to forget, like page commands); the vim-style movement keys and
+    ``q``/``space`` are obvious enough to live here rather than occupy a row of
+    real estate at all times.
+    """
+
+    CSS = """
+    HelpModal {
+        align: center middle;
+    }
+
+    #help-dialog {
+        width: 72;
+        height: auto;
+        padding: 1 2;
+        background: $surface;
+        border: tall $accent;
+    }
+
+    #help-dialog Static {
+        margin-top: 0;
+    }
+
+    #help-dialog .help-section {
+        margin-top: 1;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        yield Vertical(
+            Static("[b]Subsync keybindings[/]  [dim](F1 / Esc / q to close)[/]"),
+            Static(
+                "[b]Playback[/]\n"
+                "  space        play / stop current cue\n"
+                "  h / l        previous / next cue\n"
+                "  j / k        next / previous SRT candidate\n"
+                "  gg / G       jump to first / last cue\n"
+                "  q            quit",
+                markup=True,
+                classes="help-section",
+            ),
+            Static(
+                "[b]Window[/]\n"
+                "  Ctrl-f / b    page forward / back\n"
+                "  Ctrl-d / u    half-page forward / back\n"
+                "  + / -         zoom in / out",
+                markup=True,
+                classes="help-section",
+            ),
+            Static(
+                "[b]Actions[/]\n"
+                "  Ctrl-c        copy current subtitle to clipboard\n"
+                "  p             promote selected SRT next to media\n"
+                "  F6            Kitsunekko lookup\n"
+                "  F7            pick subtitle from series inventory\n"
+                "  F1            this help",
+                markup=True,
+                classes="help-section",
+            ),
+            id="help-dialog",
+        )
+
+    def on_key(self, event) -> None:  # type: ignore[no-untyped-def]
+        if event.key in {"escape", "f1", "q"}:
+            event.stop()
+            self.dismiss(None)
+
+
 class SubsyncTuiApp(App[None]):
     """A first-pass Textual shell for inspecting subtitle timing activity."""
 
     BINDINGS = [
+        ("f1", "open_help", "Help"),
         ("f6", "open_remote_lookup", "Kitsunekko"),
         ("f7", "open_remote_file_picker", "Pick subtitle"),
     ]
@@ -832,6 +920,7 @@ class SubsyncTuiApp(App[None]):
         height: auto;
         max-height: 10;
         padding: 0 1;
+        margin-bottom: 1;
     }
 
     #timeline {
@@ -885,6 +974,7 @@ class SubsyncTuiApp(App[None]):
         self._pending_g = False
         self._player = PcmSlicePlayer(audio_source)
         self._playback_status = ""
+        self._playback_poll = None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -1063,6 +1153,11 @@ class SubsyncTuiApp(App[None]):
         return max(self.track.end_s, self.window_s)
 
     def refresh_view(self) -> None:
+        # Promote the anilist/tvdb selector to the app title once we actually
+        # have fetched tracks; before that the generic "ja-media subsync" title
+        # is more honest since the lookup may still fail or be redirected.
+        remote_label = self.remote_label()
+        self.title = remote_label if (remote_label and self.tracks) else "ja-media subsync"
         self.query_one("#source", Static).update(self.render_source())
         self.query_one("#candidates", Static).update(self.render_candidates())
         self.query_one("#timeline", Static).update(self.render_timeline())
@@ -1082,8 +1177,12 @@ class SubsyncTuiApp(App[None]):
             ),
             style="dim",
         )
+        # The anilist/tvdb selector lives in the app title once tracks are
+        # fetched (see refresh_view). Before that -- lookup configured but not
+        # yet resolved -- keep it here so the user can see what is queued, and
+        # surface transient fetch status alongside it.
         remote_label = self.remote_label()
-        if remote_label:
+        if remote_label and not self.tracks:
             text.append("  ")
             text.append(remote_label, style="bold cyan")
         if self.remote_state.status:
@@ -1102,7 +1201,6 @@ class SubsyncTuiApp(App[None]):
         )
         table.add_column("", width=1, no_wrap=True)
         table.add_column("candidate", ratio=1, overflow="ellipsis", no_wrap=True)
-        table.add_column("LID", justify="right", no_wrap=True)
         table.add_column("cue", justify="right", no_wrap=True)
         table.add_column("total", justify="right", no_wrap=True)
         table.add_column("active", justify="right", no_wrap=True)
@@ -1114,7 +1212,6 @@ class SubsyncTuiApp(App[None]):
                     "No subtitles loaded. Press F6 or launch with --fetch-subs.",
                     style="dim",
                 ),
-                Text("-"),
                 Text("-"),
                 Text("0"),
                 Text("0.0s"),
@@ -1128,10 +1225,20 @@ class SubsyncTuiApp(App[None]):
             selected = index == self.track_index
             marker_style = "bold yellow" if selected else "dim"
             candidate_style = "bold cyan" if selected else ""
+            # The LID column was removed to save horizontal real estate; the
+            # only language signal we surface inline is a red NON-JA tag, so
+            # foreign subs are still obvious at a glance without dedicating a
+            # column to the full bucket taxonomy.
+            candidate_cell = Text()
+            if (
+                track.language_analysis is not None
+                and track.language_analysis.language is SubtitleLanguage.NON_JAPANESE
+            ):
+                candidate_cell.append("NON-JA ", style="bold red")
+            candidate_cell.append(track.label, style=candidate_style)
             table.add_row(
                 Text(">" if selected else " ", style=marker_style),
-                Text(track.label, style=candidate_style),
-                Text(track.language_label),
+                candidate_cell,
                 Text(cue_label, style="bold" if selected else ""),
                 Text(str(len(track.cues))),
                 Text(format_duration(track.active_s)),
@@ -1182,7 +1289,21 @@ class SubsyncTuiApp(App[None]):
             ),
             self._tick_bar(width=bar_width, start_s=start_s, end_s=end_s),
         ]
-        return Panel(Group(*lines), title=self.track.path.name, expand=True)
+        return Panel(Group(*lines), title=self._timeline_title(), expand=True)
+
+    def _timeline_title(self) -> str:
+        """Play-window header: stem only, with the SRT UUID prefixed only when
+        multiple loaded tracks share the same stem (so the user can tell the
+        colliding downloads apart). The on-disk ``{uuid}-{stem}.srt`` name is
+        kept on disk to avoid clobbering; we just hide it in the UI otherwise.
+        """
+
+        track = self.track
+        stem = track.stem_label
+        collisions = sum(1 for other in self.tracks if other.stem_label == stem)
+        if collisions > 1 and track.subtitle_id:
+            return f"{track.subtitle_id}-{stem}"
+        return stem
 
     def timeline_bar_width(self) -> int:
         """Return the usable cell width for the rendered timeline signal."""
@@ -1204,21 +1325,30 @@ class SubsyncTuiApp(App[None]):
 
         text = Text()
         text.append(
-            f"{cue.index}  {format_clock(cue.start_s)} -> {format_clock(cue.end_s)}\n",
+            f"{cue.index}  {format_clock(cue.start_s)} -> {format_clock(cue.end_s)}",
             style="bold cyan",
         )
+        # Playback state used to live in the bottom status bar, where it was
+        # redundant with the cue timespan already shown here. Surface it as an
+        # orange ▶ right after the timespan so the eye lands on the cue that is
+        # currently making sound.
+        if self.is_playing():
+            text.append(" \u25b6", style="bold orange3")
+        text.append("\n")
         text.append(cue.text or "<empty cue>")
         return Panel(text, title="Current subtitle", expand=True)
 
     def render_help(self) -> str:
         pending = "  g..." if self._pending_g else ""
-        playback_status = self.playback_status()
-        playback = f"  {playback_status}" if playback_status else ""
+        # The bottom bar only lists the bindings that are easy to forget.
+        # Vim-style movement (hjkl/gg/G), space, and q are obvious enough to
+        # live in the F1 help modal, and the F-key bindings (F1/F6/F7) are
+        # already auto-rendered by Textual's Footer from BINDINGS, so listing
+        # them here would just duplicate that row. Playback state lives next
+        # to the current cue's timespan (see render_active_cue), not here.
         return (
-            "space play/stop  h/l cue  j/k SRT  gg/G start/end  Ctrl-f/b page  "
-            "Ctrl-d/u half-page  +/- zoom  Ctrl-c copy  p promote  "
-            "F6 kitsunekko  F7 pick  q quit"
-            f"{pending}{playback}"
+            "Ctrl-f/b page  Ctrl-d/u half-page  +/- zoom  Ctrl-c copy  p promote"
+            f"{pending}"
         )
 
     def copy_current_subtitle(self) -> None:
@@ -1300,6 +1430,9 @@ class SubsyncTuiApp(App[None]):
 
     def action_open_remote_lookup(self) -> None:
         self.push_screen(RemoteLookupModal(self.remote_state), self.apply_remote_lookup)
+
+    def action_open_help(self) -> None:
+        self.push_screen(HelpModal())
 
     def action_open_remote_file_picker(self) -> None:
         self._open_remote_file_picker("Select one subtitle from the full series list.")
@@ -1517,6 +1650,7 @@ class SubsyncTuiApp(App[None]):
         if self.is_playing():
             self.stop_playback()
             self._playback_status = "stopped"
+            self._stop_playback_poll()
             self.refresh_view()
             return
 
@@ -1537,10 +1671,30 @@ class SubsyncTuiApp(App[None]):
             self._playback_status = (
                 f"playing {format_clock(start_s)} -> {format_clock(end_s)}"
             )
+            # The ▶ indicator in render_active_cue is driven by is_playing().
+            # sounddevice's stream.write can block past the nominal cue
+            # duration (audio device buffers a tail of samples), so a single
+            # shot at duration_s is unreliable. Poll until the worker thread
+            # actually exits, then refresh to drop the arrow.
+            self._stop_playback_poll()
+            self._playback_poll = self.set_interval(
+                0.1, self._on_playback_tick
+            )
         self.refresh_view()
+
+    def _on_playback_tick(self) -> None:
+        if not self.is_playing():
+            self._stop_playback_poll()
+            self.refresh_view()
+
+    def _stop_playback_poll(self) -> None:
+        if self._playback_poll is not None:
+            self._playback_poll.stop()
+            self._playback_poll = None
 
     def stop_playback(self) -> None:
         self._player.stop()
+        self._stop_playback_poll()
 
     def is_playing(self) -> bool:
         return self._player.is_playing()
