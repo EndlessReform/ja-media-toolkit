@@ -9,10 +9,11 @@ from pathlib import Path
 from typing import Any
 
 import duckdb
-import kagglehub
 
-DATASET_HANDLE = "calebmwelsh/anilist-anime-dataset"
-CSV_NAME = "anilist_anime_data_complete.csv"
+from ja_media_services.anilist_search.dataset import (
+    CSV_NAME,
+    try_refresh_dataset,
+)
 
 DEFAULT_FORMATS = ("TV", "ONA", "TV_SHORT")
 ALL_FORMATS = DEFAULT_FORMATS + ("MOVIE", "OVA", "SPECIAL", "MUSIC")
@@ -63,44 +64,6 @@ class RefreshStatus:
                 or (now - self.last_success_unix) > stale_after_seconds
             ),
         }
-
-
-def ensure_dataset(data_dir: Path) -> Path:
-    """Download only the CSV from Kaggle if not already cached locally."""
-    csv_path = data_dir / CSV_NAME
-    if csv_path.exists():
-        return csv_path
-
-    data_dir.mkdir(parents=True, exist_ok=True)
-    logger.info("Downloading AniList dataset (first run)...")
-    kagglehub.dataset_download(DATASET_HANDLE, path=CSV_NAME, output_dir=str(data_dir))
-    return csv_path
-
-
-def try_refresh_dataset(data_dir: Path) -> bool:
-    """Check Kaggle for a newer dataset version and return True if CSV changed.
-
-    KaggleHub resolves the unversioned dataset handle to the current upstream
-    version before consulting its output_dir cache. That gives this service the
-    desired behavior: poll hourly, but download only when Kaggle publishes a
-    new version.
-    """
-    csv_path = data_dir / CSV_NAME
-    old_signature = dataset_signature(csv_path) if csv_path.exists() else None
-
-    kagglehub.dataset_download(
-        DATASET_HANDLE, path=CSV_NAME, output_dir=str(data_dir)
-    )
-
-    new_signature = dataset_signature(csv_path)
-    updated = new_signature != old_signature
-    if updated:
-        logger.warning(
-            "AniList dataset changed; index will be rebuilt (old_signature=%s new_signature=%s)",
-            old_signature,
-            new_signature,
-        )
-    return updated
 
 
 def open_db(db_path: Path) -> duckdb.DuckDBPyConnection:
@@ -242,7 +205,14 @@ def rebuild_from_cached_csv(
     users to manually clear the volume.
     """
     del db_path
-    return build_index(csv_path, con, force=True)
+    try:
+        return build_index(csv_path, con, force=True)
+    except duckdb.TransactionException:
+        logger.exception(
+            "DuckDB FTS rebuild transaction failed; rolling back and retrying once"
+        )
+        con.rollback()
+        return build_index(csv_path, con, force=True)
 
 
 def search(

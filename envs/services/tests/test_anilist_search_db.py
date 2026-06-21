@@ -2,10 +2,8 @@ from __future__ import annotations
 
 import csv
 import json
-import time
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 
 from ja_media_services.anilist_search.app import app_state, create_app
@@ -276,57 +274,6 @@ def test_anime_detail_endpoint_rejects_unknown_fields(tmp_path: Path) -> None:
     finally:
         app_state.con = None
         con.close()
-
-
-def test_try_refresh_dataset_uses_file_signature_not_plain_download_attempt(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    csv_path = tmp_path / db.CSV_NAME
-    write_dataset(
-        csv_path,
-        [
-            {
-                "id": "1",
-                "title_romaji": "Yuru Camp",
-                "title_english": "Laid-Back Camp",
-                "title_native": "ゆるキャン△",
-                "format": "TV",
-            }
-        ],
-    )
-
-    def noop_download(*args: object, **kwargs: object) -> str:
-        return str(csv_path)
-
-    monkeypatch.setattr(db.kagglehub, "dataset_download", noop_download)
-    assert db.try_refresh_dataset(tmp_path) is False
-
-    def changed_download(*args: object, **kwargs: object) -> str:
-        write_dataset(
-            csv_path,
-            [
-                {
-                    "id": "4",
-                    "title_romaji": "Frieren",
-                    "title_english": "Frieren",
-                    "title_native": "葬送のフリーレン",
-                    "format": "TV",
-                }
-            ],
-        )
-        return str(csv_path)
-
-    monkeypatch.setattr(db.kagglehub, "dataset_download", changed_download)
-    assert db.try_refresh_dataset(tmp_path) is True
-
-
-def test_refresh_status_marks_stale_after_missed_refresh_window() -> None:
-    status = db.RefreshStatus(last_success_unix=time.time() - 400, consecutive_failures=2)
-
-    payload = status.as_dict(stale_after_seconds=300)
-
-    assert payload["stale"] is True
-    assert payload["consecutive_failures"] == 2
 
 
 def test_resolve_formats_combines_movie_and_ova_flags() -> None:

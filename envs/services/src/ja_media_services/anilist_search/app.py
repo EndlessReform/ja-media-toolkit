@@ -13,7 +13,6 @@ from fastapi import FastAPI, HTTPException, Query
 from ja_media_services.anilist_search.db import (
     RefreshStatus,
     background_refresh,
-    ensure_dataset,
     fetch_anime_metadata,
     get_row_count,
     open_db,
@@ -21,6 +20,7 @@ from ja_media_services.anilist_search.db import (
     resolve_formats,
     search,
 )
+from ja_media_services.anilist_search.dataset import ensure_dataset
 
 logger = logging.getLogger("ja_media_services.anilist_search")
 

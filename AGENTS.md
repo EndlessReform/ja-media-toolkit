@@ -56,6 +56,17 @@ failure, not a harmless style nit.**
 
 The services are typically deployed as a suite of containers coordinated by `compose.yaml` in the root.
 
+- **Remote operations are user-owned.** Under no circumstances should an agent
+  proactively SSH into any machine, connect to a hypervisor or guest, inspect
+  remote containers, alter remote infrastructure, or deploy/restart services.
+  Do not interpret requests to investigate, fix, remediate, or verify a service
+  as authorization for remote access or deployment. Prepare and validate the
+  repository changes locally, then give the user the commands or handoff needed
+  to perform remote operations themselves. This remains in force until these
+  repository instructions explicitly say otherwise.
+- **Local Docker is allowed.** Agents may build, run, restart, inspect, and test
+  containers on the current development machine when useful for validation.
+  Keep local validation clearly distinguished from remote deployment.
 - **Local Stack**: When running via Docker Compose, the primary entry point is `http://localhost:8080`.
 - **macOS Note**: If using OrbStack or Docker Desktop on Mac, verify active containers with `docker ps` to confirm port mapping.
 - **Gateway**: The `site/Caddyfile` defines the unified routing. It serves the static docsite and reverse-proxies `/api/v1/*` requests to the backend services (e.g., `anime-crosswalk` and `kitsunekko-subtitles`).
