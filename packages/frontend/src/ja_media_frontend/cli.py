@@ -63,7 +63,7 @@ def main() -> None:
         return
     if args.command == "subsync":
         if args.subsync_command == "reader":
-            from ja_media_frontend.subsync_reader import run_subsync_reader
+            from ja_media_frontend.subsync.reader import run_subsync_reader
 
             run_subsync_reader(
                 media_file=args.media,
@@ -74,7 +74,7 @@ def main() -> None:
             )
             return
         if args.subsync_command == "tui":
-            from ja_media_frontend.subsync_tui import run_subsync_tui
+            from ja_media_frontend.subsync.tui import run_subsync_tui
 
             run_subsync_tui(
                 source_path=args.source,
@@ -108,7 +108,7 @@ def build_parser() -> argparse.ArgumentParser:
     subsync_subparsers = subsync_parser.add_subparsers(dest="subsync_command")
     subsync_reader_parser = subsync_subparsers.add_parser(
         "reader",
-        help="Open a browser reader for one media file and SRT sidecar",
+        help="Open a browser reader for one media file and subtitle sidecar",
     )
     subsync_reader_parser.add_argument("media", help="Source media file path")
     subsync_reader_parser.add_argument(
@@ -142,7 +142,7 @@ def build_parser() -> argparse.ArgumentParser:
         "srt",
         nargs="*",
         help=(
-            "SRT file path(s) or quoted glob pattern(s), for example "
+            "SRT/ASS path(s) or quoted glob pattern(s), for example "
             "'../../subs/*.srt'. Optional when using --fetch-subs or F6 lookup."
         ),
     )
@@ -169,7 +169,7 @@ def build_parser() -> argparse.ArgumentParser:
     subsync_tui_parser.add_argument(
         "--fetch-subs",
         action="store_true",
-        help="Fetch matching Kitsunekko SRT candidates before opening the TUI.",
+        help="Fetch matching Kitsunekko subtitle candidates before opening the TUI.",
     )
     subsync_tui_parser.add_argument(
         "--sort-by-language",

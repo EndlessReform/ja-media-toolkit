@@ -6,29 +6,31 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
-from ja_media_frontend.subsync_tui import (
-    ConfirmOverwriteModal,
-    GAP_BLOCK,
-    PCM_CHANNELS,
-    PCM_SAMPLE_RATE,
-    PCM_SAMPLE_WIDTH_BYTES,
-    PcmAudioSource,
-    RemoteLookupState,
-    SPAN_BLOCK,
+import numpy as np
+from ja_media_frontend.audio import (
+    DEFAULT_PLAYBACK_SAMPLE_RATE,
+    MaterializedAudio,
+)
+from ja_media_frontend.subsync.dialogs import ConfirmOverwriteModal
+from ja_media_frontend.subsync.models import RemoteLookupState
+from ja_media_frontend.subsync.tui import (
     SubtitleTrack,
     SubsyncTuiApp,
-    load_pcm_audio_source,
-    parse_ass,
     playback_range,
     resolve_srt_inputs,
-    runtime_episode_number,
+)
+from ja_media_frontend.widgets.timeline import (
+    GAP_BLOCK,
+    SPAN_BLOCK,
+    TimelineWidget,
 )
 from ja_media_core.subtitle_lid import (
     SubtitleLanguage,
     SubtitleLanguageIdConfig,
     analyze_subtitle_language,
 )
-from ja_media_core.transcripts import read_srt
+from ja_media_core.subsync import infer_episode_number
+from ja_media_core.transcripts import parse_ass, read_srt
 
 
 SRT_TEXT = (
@@ -49,14 +51,12 @@ ASS_TEXT = (
 )
 
 
-def make_audio_source(path: Path, *, seconds: float = 10.0) -> PcmAudioSource:
-    frame_count = round(seconds * PCM_SAMPLE_RATE)
-    return PcmAudioSource(
+def make_audio_source(path: Path, *, seconds: float = 10.0) -> MaterializedAudio:
+    frame_count = round(seconds * DEFAULT_PLAYBACK_SAMPLE_RATE)
+    return MaterializedAudio(
         source_path=path,
-        sample_rate=PCM_SAMPLE_RATE,
-        channels=PCM_CHANNELS,
-        sample_width_bytes=PCM_SAMPLE_WIDTH_BYTES,
-        pcm=b"\x00\x00" * frame_count,
+        sample_rate=DEFAULT_PLAYBACK_SAMPLE_RATE,
+        samples=np.zeros((frame_count, 1), dtype=np.int16),
     )
 
 
@@ -97,67 +97,8 @@ class SubsyncTuiTest(unittest.TestCase):
     def test_resolve_srt_inputs_can_be_empty_for_remote_lookup(self) -> None:
         self.assertEqual(resolve_srt_inputs([], allow_empty=True), [])
 
-    def test_runtime_episode_number_parses_media_filename_stem(self) -> None:
-        self.assertEqual(runtime_episode_number("[Group] GANTZ.S01E16.1080p"), 16)
-
-    def test_load_pcm_audio_source_decodes_first_audio_stream(self) -> None:
-        with TemporaryDirectory() as tmpdir:
-            source = Path(tmpdir) / "episode.mkv"
-            source.write_bytes(b"fake")
-            pcm = b"\x00\x00\x01\x00"
-
-            with (
-                patch(
-                    "ja_media_frontend.subsync_tui.shutil.which", return_value="ffmpeg"
-                ),
-                patch(
-                    "ja_media_frontend.subsync_tui.subprocess.run",
-                    return_value=Mock(returncode=0, stdout=pcm, stderr=b""),
-                ) as run,
-            ):
-                audio = load_pcm_audio_source(source)
-
-            command = run.call_args.args[0]
-            self.assertEqual(audio.source_path, source)
-            self.assertEqual(audio.pcm, pcm)
-            self.assertEqual(audio.sample_rate, PCM_SAMPLE_RATE)
-            self.assertEqual(audio.channels, PCM_CHANNELS)
-            self.assertEqual(
-                command[:6],
-                ["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", str(source)],
-            )
-            self.assertIn("-map", command)
-            self.assertIn("0:a:0", command)
-            self.assertIn("pcm_s16le", command)
-            self.assertEqual(command[-2:], ["s16le", "pipe:1"])
-
-    def test_load_pcm_audio_source_bails_loudly_when_ffmpeg_is_missing(self) -> None:
-        with TemporaryDirectory() as tmpdir:
-            source = Path(tmpdir) / "episode.mkv"
-            source.write_bytes(b"fake")
-
-            with patch("ja_media_frontend.subsync_tui.shutil.which", return_value=None):
-                with self.assertRaisesRegex(SystemExit, "ffmpeg not found"):
-                    load_pcm_audio_source(source)
-
-    def test_load_pcm_audio_source_includes_ffmpeg_stderr_on_failure(self) -> None:
-        with TemporaryDirectory() as tmpdir:
-            source = Path(tmpdir) / "episode.mkv"
-            source.write_bytes(b"fake")
-
-            with (
-                patch(
-                    "ja_media_frontend.subsync_tui.shutil.which", return_value="ffmpeg"
-                ),
-                patch(
-                    "ja_media_frontend.subsync_tui.subprocess.run",
-                    return_value=Mock(
-                        returncode=1, stdout=b"", stderr=b"Stream map failed"
-                    ),
-                ),
-            ):
-                with self.assertRaisesRegex(SystemExit, "Stream map failed"):
-                    load_pcm_audio_source(source)
+    def test_infer_episode_number_parses_media_filename_stem(self) -> None:
+        self.assertEqual(infer_episode_number("[Group] GANTZ.S01E16.1080p"), 16)
 
     def test_key_navigation_moves_current_cue(self) -> None:
         async def run_app() -> tuple[int, str]:
@@ -200,7 +141,7 @@ class SubsyncTuiTest(unittest.TestCase):
                     initial_window_s=10.0,
                 )
                 async with app.run_test(size=(180, 40)):
-                    return app.timeline_bar_width()
+                    return app.query_one("#timeline", TimelineWidget).bar_width()
 
         self.assertGreaterEqual(asyncio.run(run_app()), 160)
 
@@ -227,11 +168,11 @@ class SubsyncTuiTest(unittest.TestCase):
                     initial_window_s=4.0,
                 )
                 async with app.run_test():
-                    return app._activity_bar(
+                    timeline = app.query_one("#timeline", TimelineWidget)
+                    return timeline.activity_bar(
                         width=8,
                         start_s=0.0,
                         end_s=4.0,
-                        active_cue=None,
                     ).plain
 
         self.assertEqual(
@@ -314,7 +255,7 @@ class SubsyncTuiTest(unittest.TestCase):
                     tracks=[SubtitleTrack(srt, read_srt(srt))],
                     initial_window_s=10.0,
                 )
-                with patch("ja_media_frontend.subsync_tui.write_clipboard") as copy:
+                with patch("ja_media_frontend.subsync.tui.write_clipboard") as copy:
                     async with app.run_test() as pilot:
                         await pilot.press("ctrl+c")
                         await pilot.press("l")
@@ -514,7 +455,7 @@ class SubsyncTuiTest(unittest.TestCase):
             fake_client.file_content.return_value = SRT_TEXT.encode("utf-8")
 
             with patch(
-                "ja_media_frontend.subsync_tui.HttpKitsunekkoSubtitlesClient",
+                "ja_media_frontend.subsync.tui.HttpKitsunekkoSubtitlesClient",
                 return_value=fake_client,
             ):
                 added, first_idx = app.fetch_remote_tracks()
@@ -554,7 +495,7 @@ class SubsyncTuiTest(unittest.TestCase):
             fake_client.file_content.return_value = ASS_TEXT.encode("utf-8")
 
             with patch(
-                "ja_media_frontend.subsync_tui.HttpKitsunekkoSubtitlesClient",
+                "ja_media_frontend.subsync.tui.HttpKitsunekkoSubtitlesClient",
                 return_value=fake_client,
             ):
                 added, first_idx = app.fetch_remote_tracks()
@@ -597,7 +538,7 @@ class SubsyncTuiTest(unittest.TestCase):
             )
 
             with patch(
-                "ja_media_frontend.subsync_tui.HttpKitsunekkoSubtitlesClient",
+                "ja_media_frontend.subsync.tui.HttpKitsunekkoSubtitlesClient",
                 return_value=fake_client,
             ):
                 app.fetch_remote_tracks_or_exit()
@@ -653,7 +594,7 @@ class SubsyncTuiTest(unittest.TestCase):
                 )
                 async with app.run_test() as pilot:
                     with patch(
-                        "ja_media_frontend.subsync_tui.shutil.copy2",
+                        "ja_media_frontend.subsync.tui.shutil.copy2",
                         side_effect=PermissionError("metadata denied"),
                     ) as copy2:
                         app.action_promote()

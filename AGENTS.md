@@ -29,6 +29,29 @@ Infrastructure and APIs that facilitate the tools and coordinate data:
     - Explain _why_ key decisions were made
     - Ensure config has nontrivial examples
 
+## File Size Limits — This Must Never Be Allowed to Happen Again™
+
+Large files conceal missing boundaries and make review, testing, and reuse
+needlessly difficult. Treat line count as an architectural smoke alarm.
+
+- **300 lines is the soft limit.** When a source file crosses 300 lines, stop
+  and actively look for a coherent extraction: a reusable widget, domain
+  module, application service, adapter, parser, or focused test module.
+- **500 lines is the hard limit.** Do not create or enlarge a source file past
+  500 lines. Stop the work and refactor before adding more behavior.
+- If an existing file is already over 500 lines, any task touching it must
+  leave it smaller unless the user explicitly scopes the work otherwise.
+- Generated files, lockfiles, vendored code, fixtures, and machine-produced
+  migrations are exempt. Hand-written application code, tests, scripts, and
+  configuration are not.
+- Do not game the limit with compressed formatting, giant functions, or
+  meaningless file splits. Extract by responsibility and keep the resulting
+  interfaces explicit.
+
+**Agents: call out limit violations loudly in progress updates and final
+handoffs. A >500-line hand-written file is a stop-the-line architectural
+failure, not a harmless style nit.**
+
 ## Deployment & Infrastructure
 
 The services are typically deployed as a suite of containers coordinated by `compose.yaml` in the root.

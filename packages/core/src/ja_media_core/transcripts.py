@@ -157,3 +157,121 @@ def format_srt_timestamp(seconds: float) -> str:
 
     milliseconds_total = max(0, round(seconds * 1000))
     return str(pysrt.SubRipTime.from_ordinal(milliseconds_total))
+
+
+def read_ass(path: str | Path) -> list[SubtitleCue]:
+    """Read and parse a UTF-8 ASS file."""
+
+    source_path = Path(path).expanduser().resolve()
+    return parse_ass(
+        source_path.read_text(encoding="utf-8-sig"),
+        source_path=source_path,
+    )
+
+
+def parse_ass(text: str, *, source_path: str | Path | None = None) -> list[SubtitleCue]:
+    """Parse ASS dialogue events into plain subtitle cues.
+
+    Only the ``[Events]`` section is processed; style definitions and script info
+    are ignored.  Override tags (``{\\...}``) are stripped, and common ASS escape
+    sequences (``\\N``, ``\\n``, ``\\h``) are converted to their plain-text
+    equivalents.
+
+    Raises ``ValueError`` when no dialogue cues are found.
+    """
+
+    source = None if source_path is None else str(Path(source_path).expanduser().resolve())
+
+    events = False
+    fields: list[str] = []
+    cues: list[SubtitleCue] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith(";"):
+            continue
+        if stripped.startswith("[") and stripped.endswith("]"):
+            events = stripped.lower() == "[events]"
+            continue
+        if not events:
+            continue
+        if stripped.lower().startswith("format:"):
+            fields = [
+                field.strip().lower() for field in stripped.split(":", 1)[1].split(",")
+            ]
+            continue
+        if not stripped.lower().startswith("dialogue:") or not fields:
+            continue
+
+        values = stripped.split(":", 1)[1].split(",", max(0, len(fields) - 1))
+        if len(values) != len(fields):
+            continue
+        row = dict(zip(fields, values, strict=True))
+        try:
+            start_s = parse_ass_timestamp(row["start"])
+            end_s = parse_ass_timestamp(row["end"])
+        except (KeyError, ValueError):
+            continue
+        cue_text = clean_ass_text(row.get("text", ""))
+        cues.append(
+            SubtitleCue(
+                source_path=source,
+                index=len(cues) + 1,
+                start_s=start_s,
+                end_s=end_s,
+                text=cue_text,
+            )
+        )
+
+    if not cues:
+        label = f" from {source_path}" if source_path else ""
+        raise ValueError(f"No ASS dialogue cues found{label}")
+    return cues
+
+
+def parse_ass_timestamp(value: str) -> float:
+    """Parse an ASS timestamp (``H:MM:SS.cc``) into seconds."""
+
+    parts = value.strip().split(":")
+    if len(parts) != 3:
+        raise ValueError(f"Invalid ASS timestamp: {value!r}")
+    hours = int(parts[0])
+    minutes = int(parts[1])
+    seconds = float(parts[2])
+    return hours * 3600 + minutes * 60 + seconds
+
+
+def clean_ass_text(value: str) -> str:
+    """Strip ASS override tags and normalize escape sequences.
+
+    Converts ``\\N`` / ``\\n`` to newlines, ``\\h`` to spaces, and removes
+    any text enclosed in ``{}`` (formatting overrides).
+    """
+
+    text = value.replace(r"\N", "\n").replace(r"\n", "\n").replace(r"\h", " ")
+    cleaned: list[str] = []
+    in_override = False
+    for char in text:
+        if char == "{":
+            in_override = True
+            continue
+        if char == "}":
+            in_override = False
+            continue
+        if not in_override:
+            cleaned.append(char)
+    return "".join(cleaned).strip()
+
+
+def read_subtitle(path: str | Path) -> list[SubtitleCue]:
+    """Read a subtitle file, auto-detecting SRT or ASS format.
+
+    The format is determined by the file extension (case-insensitive).
+    Raises ``ValueError`` for unsupported extensions.
+    """
+
+    ext = Path(path).suffix.lower().lstrip(".")
+    if ext == "srt":
+        return read_srt(path)
+    if ext == "ass":
+        return read_ass(path)
+    raise ValueError(f"Unsupported subtitle extension: .{ext}")
