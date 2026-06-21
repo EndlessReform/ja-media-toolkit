@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import time
+import threading
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from ja_media_services.anilist_search import dataset, db
+from ja_media_services.anilist_search import dataset, db, refresh
 
 
 def cached_dataset(tmp_path: Path, revision: str, content: str) -> Path:
@@ -89,7 +91,10 @@ def test_refresh_does_not_pass_durable_output_directory_to_kagglehub(
 
 
 def test_refresh_status_marks_stale_after_missed_refresh_window() -> None:
-    status = db.RefreshStatus(last_success_unix=time.time() - 400, consecutive_failures=2)
+    status = refresh.RefreshStatus(
+        last_success_unix=time.time() - 400,
+        consecutive_failures=2,
+    )
 
     payload = status.as_dict(stale_after_seconds=300)
 
@@ -101,6 +106,7 @@ def test_startup_retries_transient_duckdb_fts_transaction_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     attempts = 0
+    reopened_connection = object()
 
     def build_index(*args: object, **kwargs: object) -> int:
         nonlocal attempts
@@ -110,15 +116,16 @@ def test_startup_retries_transient_duckdb_fts_transaction_failure(
         return 20_346
 
     class Connection:
-        rollbacks = 0
+        closed = False
 
-        def rollback(self) -> None:
-            self.rollbacks += 1
+        def close(self) -> None:
+            self.closed = True
 
     connection = Connection()
     monkeypatch.setattr(db, "build_index", build_index)
+    monkeypatch.setattr(db, "open_db", lambda path: reopened_connection)
 
-    rows = db.rebuild_from_cached_csv(
+    rows, active_connection = db.rebuild_from_cached_csv(
         tmp_path / dataset.CSV_NAME,
         tmp_path / "anime_index.db",
         connection,  # type: ignore[arg-type]
@@ -126,4 +133,41 @@ def test_startup_retries_transient_duckdb_fts_transaction_failure(
 
     assert rows == 20_346
     assert attempts == 2
-    assert connection.rollbacks == 1
+    assert connection.closed is True
+    assert active_connection is reopened_connection
+
+
+def test_background_refresh_publishes_reopened_connection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    old_connection = object()
+    new_connection = object()
+    state = SimpleNamespace(
+        con=old_connection,
+        data_dir=tmp_path,
+        db_path=tmp_path / "anime_index.db",
+        _lock=threading.Lock(),
+    )
+    status = refresh.RefreshStatus()
+    sleeps = 0
+
+    def sleep_once(seconds: int) -> None:
+        nonlocal sleeps
+        sleeps += 1
+        if sleeps > 1:
+            raise StopIteration
+
+    monkeypatch.setattr(refresh.time, "sleep", sleep_once)
+    monkeypatch.setattr(refresh, "try_refresh_dataset", lambda path: True)
+    monkeypatch.setattr(
+        refresh,
+        "rebuild_from_cached_csv",
+        lambda csv_path, db_path, con: (20_346, new_connection),
+    )
+
+    with pytest.raises(StopIteration):
+        refresh.background_refresh(state, status, interval_seconds=1)
+
+    assert state.con is new_connection
+    assert status.last_index_rows == 20_346
+    assert status.consecutive_failures == 0

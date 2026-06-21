@@ -71,9 +71,10 @@ for character in metadata.get("characters", []):
 ```
 
 ### Health Check
-`GET /health`
+`GET /healthz`
 
 Returns the current health status of the service and the index size.
+`GET /health` remains available as a compatibility alias.
 
 **Response Body:**
 ```json

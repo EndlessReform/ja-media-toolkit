@@ -200,7 +200,8 @@ def test_startup_rebuild_zeroes_stale_table_even_when_csv_signature_matches(
         """)
         con.commit()
 
-        assert db.rebuild_from_cached_csv(csv_path, db_path, con) == 1
+        row_count, con = db.rebuild_from_cached_csv(csv_path, db_path, con)
+        assert row_count == 1
         payload = db.fetch_anime_metadata(con, 1535, fields=("description",))
 
         assert payload == {

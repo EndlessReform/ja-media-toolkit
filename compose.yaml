@@ -52,7 +52,7 @@ services:
     volumes:
       - anilist-search-data:/var/lib/anilist-search
     healthcheck:
-      test: ["CMD-SHELL", "uv run --no-sync anilist-search-smoke \"$${ANILIST_SEARCH_DB_PATH}\" >/dev/null"]
+      test: ["CMD-SHELL", "uv run --no-sync anilist-search-smoke --url http://127.0.0.1:8000/healthz >/dev/null"]
       interval: 1m
       timeout: 20s
       retries: 3

@@ -1,19 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
 import logging
 import time
-import threading
 from pathlib import Path
 from typing import Any
 
 import duckdb
-
-from ja_media_services.anilist_search.dataset import (
-    CSV_NAME,
-    try_refresh_dataset,
-)
 
 DEFAULT_FORMATS = ("TV", "ONA", "TV_SHORT")
 ALL_FORMATS = DEFAULT_FORMATS + ("MOVIE", "OVA", "SPECIAL", "MUSIC")
@@ -31,39 +24,6 @@ def _safe_int(value: Any) -> int | str | None:
         return int(value)
     except (ValueError, TypeError):
         return value
-
-
-@dataclass
-class RefreshStatus:
-    """Mutable operational state for the background dataset refresh loop."""
-
-    last_attempt_unix: float | None = None
-    last_success_unix: float | None = None
-    last_failure_unix: float | None = None
-    last_failure: str | None = None
-    consecutive_failures: int = 0
-    last_update_unix: float | None = None
-    last_index_rows: int | None = None
-
-    def as_dict(self, *, stale_after_seconds: int) -> dict:
-        now = time.time()
-        last_success_age_seconds = None
-        if self.last_success_unix is not None:
-            last_success_age_seconds = round(now - self.last_success_unix, 3)
-        return {
-            "last_attempt_unix": self.last_attempt_unix,
-            "last_success_unix": self.last_success_unix,
-            "last_success_age_seconds": last_success_age_seconds,
-            "last_failure_unix": self.last_failure_unix,
-            "last_failure": self.last_failure,
-            "consecutive_failures": self.consecutive_failures,
-            "last_update_unix": self.last_update_unix,
-            "last_index_rows": self.last_index_rows,
-            "stale": (
-                self.last_success_unix is None
-                or (now - self.last_success_unix) > stale_after_seconds
-            ),
-        }
 
 
 def open_db(db_path: Path) -> duckdb.DuckDBPyConnection:
@@ -196,7 +156,7 @@ def rebuild_if_needed(
 
 def rebuild_from_cached_csv(
     csv_path: Path, db_path: Path, con: duckdb.DuckDBPyConnection
-) -> int:
+) -> tuple[int, duckdb.DuckDBPyConnection]:
     """Rebuild derived DuckDB tables from the cached AniList CSV.
 
     The Kaggle CSV cache is durable across container restarts, but the DuckDB
@@ -204,15 +164,15 @@ def rebuild_from_cached_csv(
     deploys can widen or otherwise change the materialized table without asking
     users to manually clear the volume.
     """
-    del db_path
     try:
-        return build_index(csv_path, con, force=True)
+        return build_index(csv_path, con, force=True), con
     except duckdb.TransactionException:
         logger.exception(
-            "DuckDB FTS rebuild transaction failed; rolling back and retrying once"
+            "DuckDB FTS rebuild transaction failed; reopening the DB and retrying once"
         )
-        con.rollback()
-        return build_index(csv_path, con, force=True)
+        con.close()
+        con = open_db(db_path)
+        return build_index(csv_path, con, force=True), con
 
 
 def search(
@@ -332,45 +292,3 @@ def resolve_formats(
 def get_row_count(con: duckdb.DuckDBPyConnection) -> int:
     """Return the number of indexed anime rows."""
     return con.execute("SELECT COUNT(*) FROM anime").fetchone()[0]
-
-
-def background_refresh(
-    data_dir: Path,
-    db_path: Path,
-    con: duckdb.DuckDBPyConnection,
-    lock: threading.Lock,
-    status: RefreshStatus,
-    interval_seconds: int = 3600,
-) -> None:
-    """Run in a daemon thread; polls Kaggle for updates and rebuilds if needed."""
-    csv_path = data_dir / CSV_NAME
-    while True:
-        time.sleep(interval_seconds)
-        status.last_attempt_unix = time.time()
-        try:
-            updated = try_refresh_dataset(data_dir)
-            row_count = None
-            if updated:
-                with lock:
-                    row_count = rebuild_if_needed(csv_path, db_path, con)
-                status.last_update_unix = time.time()
-            else:
-                with lock:
-                    row_count = get_row_count(con)
-            status.last_success_unix = time.time()
-            status.last_failure = None
-            status.consecutive_failures = 0
-            status.last_index_rows = row_count
-            logger.info(
-                "AniList dataset refresh completed (updated=%s rows=%s)",
-                updated,
-                row_count,
-            )
-        except Exception as exc:
-            status.last_failure_unix = time.time()
-            status.last_failure = f"{type(exc).__name__}: {exc}"
-            status.consecutive_failures += 1
-            logger.exception(
-                "AniList background dataset refresh failed (consecutive_failures=%d)",
-                status.consecutive_failures,
-            )

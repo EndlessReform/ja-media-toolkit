@@ -11,8 +11,6 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Query
 
 from ja_media_services.anilist_search.db import (
-    RefreshStatus,
-    background_refresh,
     fetch_anime_metadata,
     get_row_count,
     open_db,
@@ -21,6 +19,7 @@ from ja_media_services.anilist_search.db import (
     search,
 )
 from ja_media_services.anilist_search.dataset import ensure_dataset
+from ja_media_services.anilist_search.refresh import RefreshStatus, background_refresh
 
 logger = logging.getLogger("ja_media_services.anilist_search")
 
@@ -55,7 +54,7 @@ async def lifespan(app: FastAPI):
 
     con = open_db(db_path)
     with app_state._lock:
-        row_count = rebuild_from_cached_csv(csv_path, db_path, con)
+        row_count, con = rebuild_from_cached_csv(csv_path, db_path, con)
 
     app_state.con = con
     app_state.csv_path = csv_path
@@ -72,10 +71,7 @@ async def lifespan(app: FastAPI):
     t = threading.Thread(
         target=background_refresh,
         args=(
-            data_dir,
-            db_path,
-            con,
-            app_state._lock,
+            app_state,
             app_state.refresh_status,
             settings.update_interval_seconds,
         ),
@@ -90,8 +86,11 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    con.close()
-    app_state.con = None
+    with app_state._lock:
+        active_connection = app_state.con
+        app_state.con = None
+        if active_connection is not None:
+            active_connection.close()
 
 
 def create_app() -> FastAPI:
@@ -151,7 +150,8 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=404, detail="AniList anime not found")
         return result
 
-    @app.get("/health")
+    @app.get("/health", include_in_schema=False)
+    @app.get("/healthz")
     def health() -> dict:
         con = app_state.con
         if con is None:
