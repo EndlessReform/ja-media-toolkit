@@ -163,9 +163,9 @@ Assume you have (at a minimum):
 
 ## Secrets
 
-Secrets and local service URLs are in `.env` in repo root. NEVER read this file
-directly with `cat`, `sed`, `rg`, editors, or any other content-printing tool.
-If you need to check that it exists, `stat .env`.
+Secrets are in `.env` in repo root. NEVER read this file directly with `cat`,
+`sed`, `rg`, editors, or any other content-printing tool. If you need to check
+that it exists, `stat .env`.
 
 When a command needs project environment variables, it is the agent's job to
 load them. Source `.env` inside the shell command or use idiomatic tooling
@@ -176,3 +176,21 @@ belong in repo `.env`.
 If an env handoff file is needed for a subprocess, put it in `/tmp` or another
 gitignored location, avoid echoing secret values into logs, and clean it up
 afterward.
+
+## Services
+
+First-party LAN APIs live in `envs/services`, are assembled by the owning
+Compose deployment, and are exposed through stable `/api/v1/*` routes in
+`site/Caddyfile`. Lightweight client contracts and HTTP SDKs live in
+`packages/core`; tools should use those clients rather than construct service
+URLs themselves.
+
+Service URLs are **not** secrets and do not belong in `.env`. Clients resolve a
+service-specific override first, then fall back to `[services].root_url` in
+`~/.config/ja-media-toolkit/config.toml`. See
+[site/src/content/docs/setup/config.md](site/src/content/docs/setup/config.md).
+
+When adding or substantially changing a service, use
+[the add-service skill](.agents/skills/add-service/SKILL.md). It covers the
+complete vertical slice: runtime, core SDK, tests, Compose/Caddy integration,
+`/healthz`, `/metrics`, Prometheus discovery, and docsite updates.

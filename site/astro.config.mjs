@@ -16,6 +16,7 @@ export default defineConfig({
 						{ label: 'CLI Tools', link: '/setup/tools/' },
 						{ label: 'Services', link: '/setup/services/' },
 						{ label: 'Configuration', link: '/setup/config/' },
+						{ label: 'Monitoring', link: '/setup/monitoring/' },
 					],
 				},
 				{
