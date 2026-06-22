@@ -18,7 +18,8 @@ You need:
   `/mnt/magi06/media/derived-audio`.
 
 The command discovers `.mkv`, `.mp4`, `.m4v`, and `.webm` files in the
-immediate source directory. It does not recurse.
+immediate source directory. macOS AppleDouble metadata files named `._*` are
+ignored even when they retain a media extension. Discovery does not recurse.
 
 ## Preview an ingest
 

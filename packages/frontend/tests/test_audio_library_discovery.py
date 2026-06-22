@@ -29,6 +29,7 @@ def _stream(ordinal: int, language: str | None, *, default: bool = False) -> Aud
 def test_discovery_is_immediate_supported_and_sorted(tmp_path: Path) -> None:
     (tmp_path / "B - 02.mkv").touch()
     (tmp_path / "a - 01.MP4").touch()
+    (tmp_path / "._a - 01.MP4").touch()
     (tmp_path / "notes.txt").touch()
     nested = tmp_path / "nested"
     nested.mkdir()
@@ -38,6 +39,12 @@ def test_discovery_is_immediate_supported_and_sorted(tmp_path: Path) -> None:
         "a - 01.MP4",
         "B - 02.mkv",
     ]
+
+
+def test_discovery_keeps_non_appledouble_hidden_media(tmp_path: Path) -> None:
+    (tmp_path / ".preview.mkv").touch()
+
+    assert [path.name for path in discover_media(tmp_path)] == [".preview.mkv"]
 
 
 def test_episode_suggestion_rejects_multi_episode_values() -> None:

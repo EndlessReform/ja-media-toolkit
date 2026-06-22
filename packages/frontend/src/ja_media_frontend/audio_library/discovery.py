@@ -16,17 +16,33 @@ SUPPORTED_MEDIA_EXTENSIONS = frozenset({".mkv", ".mp4", ".m4v", ".webm"})
 
 
 def discover_media(source_dir: Path) -> tuple[Path, ...]:
-    """Return supported immediate children in deterministic filename order."""
+    """Return real supported media children in deterministic filename order.
+
+    macOS writes AppleDouble ``._*`` sidecars when copying files to filesystems
+    that cannot store resource forks natively. A sidecar retains the original
+    filename suffix but is metadata, not playable media, so it must never reach
+    ffprobe.
+    """
 
     return tuple(
         sorted(
             (
                 path
                 for path in source_dir.iterdir()
-                if path.is_file() and path.suffix.lower() in SUPPORTED_MEDIA_EXTENSIONS
+                if _is_discoverable_media(path)
             ),
             key=lambda path: path.name.casefold(),
         )
+    )
+
+
+def _is_discoverable_media(path: Path) -> bool:
+    """Reject filesystem metadata that merely borrows a media suffix."""
+
+    return (
+        path.is_file()
+        and not path.name.startswith("._")
+        and path.suffix.lower() in SUPPORTED_MEDIA_EXTENSIONS
     )
 
 
