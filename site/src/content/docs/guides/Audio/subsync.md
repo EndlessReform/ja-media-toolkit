@@ -41,6 +41,19 @@ uv run ja-media subsync tui ../../media/GANTZ.S01E16.mkv \
   --sort-by-language
 ```
 
+For media produced by `audio-library ingest`, the series ID is inferred from
+the nearest `anilist-<id>` parent directory. For example, this needs no
+`--anilist` argument:
+
+```sh
+uv run ja-media subsync tui \
+  ../../media/derived-audio/anilist-101573/S01E001.m4a \
+  --fetch-subs
+```
+
+An explicit `--anilist` or `--tvdb` value always takes precedence over path
+inference.
+
 Every candidate is assigned a compact language label in the `LID` column:
 `ja`, `?`, `bi`, `non-ja`, or `short`. Candidate order remains unchanged by
 default. Pass `--sort-by-language` to place Japanese candidates first, followed

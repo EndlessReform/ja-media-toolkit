@@ -12,13 +12,12 @@ Use this when the target project is Python and does not already depend on
 ```python
 from __future__ import annotations
 
-import json
 import os
 from dataclasses import dataclass
 from typing import Any
-from urllib.error import HTTPError
 from urllib.parse import quote
-from urllib.request import Request, urlopen
+
+import httpx
 
 
 @dataclass(frozen=True)
@@ -45,13 +44,20 @@ class AnimeCrosswalkClient:
         self.timeout = timeout
 
     def _get_json(self, path: str) -> dict[str, Any]:
-        request = Request(f"{self.base_url}{path}", headers={"Accept": "application/json"})
-        try:
-            with urlopen(request, timeout=self.timeout) as response:
-                return json.loads(response.read().decode("utf-8"))
-        except HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"anime crosswalk HTTP {exc.code}: {detail}") from exc
+        with httpx.Client(
+            timeout=self.timeout,
+            trust_env=False,
+            follow_redirects=True,
+        ) as client:
+            response = client.get(
+                f"{self.base_url}{path}",
+                headers={"Accept": "application/json"},
+            )
+        if response.is_error:
+            raise RuntimeError(
+                f"anime crosswalk HTTP {response.status_code}: {response.text}"
+            )
+        return response.json()
 
     def resolve(
         self,
@@ -75,19 +81,21 @@ class AnimeCrosswalkClient:
         )
 
     def resolve_many(self, lookups: list[dict[str, Any]]) -> CrosswalkBulkLookup:
-        payload = json.dumps({"lookups": lookups}).encode("utf-8")
-        request = Request(
-            f"{self.base_url}/resolve/bulk",
-            data=payload,
-            headers={"Accept": "application/json", "Content-Type": "application/json"},
-            method="POST",
-        )
-        try:
-            with urlopen(request, timeout=self.timeout) as response:
-                data = json.loads(response.read().decode("utf-8"))
-        except HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"anime crosswalk HTTP {exc.code}: {detail}") from exc
+        with httpx.Client(
+            timeout=self.timeout,
+            trust_env=False,
+            follow_redirects=True,
+        ) as client:
+            response = client.post(
+                f"{self.base_url}/resolve/bulk",
+                headers={"Accept": "application/json"},
+                json={"lookups": lookups},
+            )
+        if response.is_error:
+            raise RuntimeError(
+                f"anime crosswalk HTTP {response.status_code}: {response.text}"
+            )
+        data = response.json()
         return CrosswalkBulkLookup(
             count=int(data["count"]),
             results=[

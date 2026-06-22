@@ -5,6 +5,7 @@ description = "Shared command-line frontend for ja-media-toolkit"
 requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.136.3",
+    "httpx>=0.28,<1",
     "ja-media-core>=0.1.0",
     "numpy",
     "parse-torrent-title>=2.8.2",

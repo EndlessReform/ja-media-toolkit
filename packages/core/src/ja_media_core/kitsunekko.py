@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-import json
 import os
-import urllib.error
 import urllib.parse
-import urllib.request
 from dataclasses import dataclass
 from typing import Any, Protocol
 
 from ja_media_core.crosswalk import normalize_media_kind
+from ja_media_core.http import ServiceHttpClient
 from ja_media_core.services import service_base_url
 
 
@@ -260,12 +258,10 @@ def file_content_path(file_ref: str) -> str:
 
 
 class HttpKitsunekkoSubtitlesClient:
-    """Small standard-library HTTP client for the LAN Kitsunekko subtitle service.
+    """Small HTTPX client for the LAN Kitsunekko subtitle service.
 
-    Core keeps this client dependency-light so scripts and package code can
-    retrieve subtitle inventories without depending on FastAPI or service
-    internals. Episode helpers mirror the service contract: episode numbers are
-    local numbers parsed from subtitle filenames at request time.
+    Episode helpers mirror the service contract: episode numbers are local
+    numbers parsed from subtitle filenames at request time.
     """
 
     def __init__(self, base_url: str | None = None, *, timeout_s: float = 5.0) -> None:
@@ -285,6 +281,12 @@ class HttpKitsunekkoSubtitlesClient:
             )
         self.base_url = configured_url.rstrip("/")
         self.timeout_s = timeout_s
+        self._http = ServiceHttpClient(
+            self.base_url,
+            timeout_s=timeout_s,
+            error_label="Kitsunekko subtitles request failed",
+            include_url_in_errors=True,
+        )
 
     def anilist_files(self, anilist_id: int) -> KitsunekkoFileListResponse:
         return KitsunekkoFileListResponse.from_mapping(self._get_json(anilist_files_path(anilist_id)))
@@ -420,25 +422,13 @@ class HttpKitsunekkoSubtitlesClient:
         return self._get_json("/healthz")
 
     def _url(self, path: str) -> str:
-        return urllib.parse.urljoin(f"{self.base_url}/", path.lstrip("/"))
+        return self._http.url(path)
 
     def _get_json(self, path: str) -> dict[str, Any]:
-        url = self._url(path)
-        request = urllib.request.Request(url, headers={"Accept": "application/json"})
-        try:
-            with urllib.request.urlopen(request, timeout=self.timeout_s) as response:
-                charset = response.headers.get_content_charset() or "utf-8"
-                return json.loads(response.read().decode(charset))
-        except urllib.error.HTTPError as error:
-            body = error.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"Kitsunekko subtitles request failed for {url}: {error.code} {body}") from error
+        payload = self._http.get_json(path)
+        if not isinstance(payload, dict):
+            raise RuntimeError("Kitsunekko subtitles request returned non-object JSON")
+        return payload
 
     def _get_bytes(self, path: str) -> bytes:
-        url = self._url(path)
-        request = urllib.request.Request(url, headers={"Accept": "*/*"})
-        try:
-            with urllib.request.urlopen(request, timeout=self.timeout_s) as response:
-                return response.read()
-        except urllib.error.HTTPError as error:
-            body = error.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"Kitsunekko subtitles request failed for {url}: {error.code} {body}") from error
+        return self._http.get_bytes(path)

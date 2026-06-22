@@ -33,6 +33,7 @@ from ja_media_frontend.subsync.models import (
     ManualSubtitlePickRequest,
     RemoteLookupRequest,
     RemoteLookupState,
+    initial_remote_lookup_state,
 )
 from ja_media_frontend.widgets.timeline import TimelineWidget, format_clock
 from ja_media_core.kitsunekko import (
@@ -44,7 +45,6 @@ from ja_media_core.subtitle_lid import (
     SubtitleLanguage,
     SubtitleLanguageIdConfig,
 )
-from ja_media_core.subsync import infer_episode_number
 from ja_media_core.transcripts import SubtitleCue
 from ja_media_frontend.subsync.service import (
     SubtitleLookup,
@@ -82,21 +82,16 @@ def run_subsync_tui(
         raise SystemExit(f"subsync source is not a file: {source}")
     if window_s <= 0:
         raise SystemExit("--window-s must be positive")
-    if anilist_id is not None and tvdb_id is not None:
-        raise SystemExit("Pass only one of --anilist or --tvdb")
-
-    remote_state = RemoteLookupState(
-        source=(
-            "anilist"
-            if anilist_id is not None
-            else "tvdb"
-            if tvdb_id is not None
-            else None
-        ),
-        external_id=anilist_id if anilist_id is not None else tvdb_id,
-        episode_number=episode_number or infer_episode_number(source.stem),
-        media_kind=tvdb_media_kind,
-    )
+    try:
+        remote_state = initial_remote_lookup_state(
+            source,
+            anilist_id=anilist_id,
+            tvdb_id=tvdb_id,
+            episode_number=episode_number,
+            tvdb_media_kind=tvdb_media_kind,
+        )
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
     language_id_config = load_config().subtitles.language_id
 
     # (a) Explicit subtitle inputs — always first, in CLI order.

@@ -2,9 +2,8 @@
 
 ## Status
 
-Proposed phased design. Phase 1 is intentionally manual and filesystem-first.
-Later phases add an index and automation without invalidating the Phase 1
-artifacts or manifests.
+Phase 1 is implemented as a manual, filesystem-first CLI. Later phases add an
+index and automation without invalidating the Phase 1 artifacts or manifests.
 
 ## Problem
 

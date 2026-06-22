@@ -3,11 +3,11 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
-import PTN
-
+from ja_media_core.media_filename import first_positive_episode
 from ja_media_core.transcripts import SubtitleCue
+
+ANILIST_DIRECTORY_PATTERN = re.compile(r"^anilist-([1-9]\d*)$", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -34,39 +34,21 @@ def is_supported_subtitle_file(path: str | Path) -> bool:
 def infer_episode_number(filename_stem: str) -> int | None:
     """Extract an episode number from a media filename stem using PTN."""
 
-    parsed = PTN.parse(filename_stem)
-    return _first_positive_int(parsed.get("episode"))
+    return first_positive_episode(filename_stem)
 
 
-def _first_positive_int(value: Any) -> int | None:
-    """Recursively extract the first positive integer from a PTN-parse result.
+def infer_anilist_id(media_path: str | Path) -> int | None:
+    """Read an AniList ID from the nearest ``anilist-<id>`` ancestor.
 
-    PTN may return episode data as an int, float, string (with separators like
-    ``-``, ``~``, ``_``), or nested collections.  This unwraps the first
-    positive integer it encounters.
+    Derived-audio libraries use the stable AniList identifier as their series
+    directory name. Walking from the media file upward keeps the convention
+    useful if later layouts add season or disc subdirectories.
     """
 
-    if value is None:
-        return None
-    if isinstance(value, int):
-        return value if value > 0 else None
-    if isinstance(value, float):
-        return int(value) if value.is_integer() and value > 0 else None
-    if isinstance(value, str):
-        cleaned = value.strip()
-        if cleaned.isdecimal():
-            parsed = int(cleaned)
-            return parsed if parsed > 0 else None
-        for separator in ("-", "~", "_", " "):
-            if separator in cleaned:
-                for part in cleaned.split(separator):
-                    result = _first_positive_int(part)
-                    if result is not None:
-                        return result
-        return None
-    if isinstance(value, (list, tuple, set)):
-        for item in value:
-            result = _first_positive_int(item)
-            if result is not None:
-                return result
+    path = Path(media_path).expanduser()
+    directories = path.parents if path.suffix else (path, *path.parents)
+    for directory in directories:
+        match = ANILIST_DIRECTORY_PATTERN.fullmatch(directory.name)
+        if match:
+            return int(match.group(1))
     return None

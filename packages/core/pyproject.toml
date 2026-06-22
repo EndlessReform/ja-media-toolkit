@@ -4,9 +4,10 @@ version = "0.1.0"
 description = "Shared types, config, manifests, job/result contracts"
 requires-python = ">=3.13"
 dependencies = [
-    "ptn>=0.6.0",
     "fasttext-langdetect>=1.0.5",
+    "httpx>=0.28,<1",
     "numpy",
+    "parse-torrent-title>=2.8.2",
     "pydantic>=2.13.4",
     "pydantic-settings>=2.14.1",
     "pysrt>=1.1.2",

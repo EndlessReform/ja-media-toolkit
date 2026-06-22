@@ -82,7 +82,8 @@ Compute metadata coverage:
 Add client code:
 
 1. Inspect the target project language and style.
-2. Prefer a small sync HTTP client unless the project already uses async.
+2. Prefer a small sync HTTPX client with `trust_env=False` unless the project
+   already has another explicit HTTP convention.
 3. Read `ANIME_CROSSWALK_BASE_URL` from config/env.
 4. Preserve the response contract: `source`, `id`, `media_kind`, `count`, `results`.
 5. Treat `count: 0` as a successful no-match response, not an exception.

@@ -91,8 +91,9 @@ The module should normally contain:
 
 - A `Protocol` describing the client operations used by repo workflows.
 - Frozen dataclasses for durable request and response contracts.
-- A small synchronous standard-library HTTP implementation unless an existing
-  project convention requires async.
+- A small synchronous client built on the shared HTTPX transport in
+  `ja_media_core.http`. First-party LAN clients must use `trust_env=False` so
+  they bypass ambient proxy configuration and macOS system-proxy machinery.
 - `<SERVICE>_BASE_URL_ENV` for a direct machine-local override.
 - `<SERVICE>_GATEWAY_PATH` for the stable gateway route.
 

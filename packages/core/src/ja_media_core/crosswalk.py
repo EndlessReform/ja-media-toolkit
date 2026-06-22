@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import json
 import os
-import urllib.error
 import urllib.parse
-import urllib.request
 from dataclasses import dataclass
 from typing import Any, Iterable, Literal, Protocol
 
+from ja_media_core.http import ServiceHttpClient
 from ja_media_core.services import service_base_url
 
 
@@ -242,12 +240,10 @@ def resolve_path(source: str, external_id: str | int, media_kind: str | None = N
 
 
 class HttpAnimeCrosswalkClient:
-    """Small standard-library HTTP client for the LAN anime crosswalk service.
+    """Small HTTPX client for the LAN anime crosswalk service.
 
-    Core avoids service-only dependencies so lightweight tools can use the
-    contract without pulling in FastAPI or httpx. The client keeps ambiguity
-    visible: if the service returns multiple matching rows, callers receive all
-    of them.
+    The client keeps ambiguity visible: if the service returns multiple
+    matching rows, callers receive all of them.
     """
 
     def __init__(self, base_url: str | None = None, *, timeout_s: float = 5.0) -> None:
@@ -266,6 +262,11 @@ class HttpAnimeCrosswalkClient:
             )
         self.base_url = configured_url.rstrip("/")
         self.timeout_s = timeout_s
+        self._http = ServiceHttpClient(
+            self.base_url,
+            timeout_s=timeout_s,
+            error_label="Anime crosswalk request failed",
+        )
 
     def resolve(
         self,
@@ -329,34 +330,13 @@ class HttpAnimeCrosswalkClient:
         return self._get_json("/healthz")
 
     def _url(self, path: str) -> str:
-        return urllib.parse.urljoin(f"{self.base_url}/", path.lstrip("/"))
+        return self._http.url(path)
 
     def _get_json(self, path: str) -> dict[str, Any]:
-        url = self._url(path)
-        request = urllib.request.Request(url, headers={"Accept": "application/json"})
-        try:
-            with urllib.request.urlopen(request, timeout=self.timeout_s) as response:
-                charset = response.headers.get_content_charset() or "utf-8"
-                return json.loads(response.read().decode(charset))
-        except urllib.error.HTTPError as error:
-            body = error.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"Anime crosswalk request failed: {error.code} {body}") from error
+        payload = self._http.get_json(path)
+        if not isinstance(payload, dict):
+            raise RuntimeError("Anime crosswalk request returned non-object JSON")
+        return payload
 
     def _post_json(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
-        url = self._url(path)
-        request = urllib.request.Request(
-            url,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Accept": "application/json",
-                "Content-Type": "application/json",
-            },
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=self.timeout_s) as response:
-                charset = response.headers.get_content_charset() or "utf-8"
-                return json.loads(response.read().decode(charset))
-        except urllib.error.HTTPError as error:
-            body = error.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"Anime crosswalk request failed: {error.code} {body}") from error
+        return self._http.post_json(path, payload)
