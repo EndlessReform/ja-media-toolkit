@@ -1,0 +1,22 @@
+name: audiobookshelf
+
+services:
+  audiobookshelf:
+    image: ghcr.io/advplyr/audiobookshelf:${AUDIOBOOKSHELF_VERSION:-2.35.1}
+    restart: unless-stopped
+    ports:
+      - "${AUDIOBOOKSHELF_PORT:-13378}:80"
+    volumes:
+      # Keep Audiobookshelf's database and metadata on local VM storage.
+      - type: bind
+        source: ${AUDIOBOOKSHELF_CONFIG_DIR:-./config}
+        target: /config
+      - type: bind
+        source: ${AUDIOBOOKSHELF_METADATA_DIR:-./metadata}
+        target: /metadata
+
+      # Generated anime audio lives on the magi06 storage mount.
+      - type: bind
+        source: ${ANIME_AUDIO_LIBRARY_DIR:-/mnt/magi06/media/derived-audio}
+        target: /audio
+        read_only: true
