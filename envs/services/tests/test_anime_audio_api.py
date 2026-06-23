@@ -1,88 +1,22 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from ja_media_services.anime_audio.app import create_app
 from ja_media_services.anime_audio.settings import AnimeAudioSettings
-
-
-def _manifest(*, artifact_path: str = "S01E001.m4a") -> dict[str, object]:
-    return {
-        "schema_version": 1,
-        "kind": "anime-audio-series",
-        "series": {
-            "anilist_id": 1,
-            "title_english": "Example",
-            "title_native": "例",
-            "title_romaji": "Example",
-            "title_preferred": "Example",
-            "description_html": None,
-            "description_text": None,
-            "format": "TV",
-            "status": "FINISHED",
-            "season": "SPRING",
-            "season_year": 2026,
-            "episode_count": 1,
-            "typical_duration_minutes": 24,
-            "start_date": "2026-04-01",
-            "end_date": None,
-            "genres": ["Drama"],
-            "source": "ORIGINAL",
-            "country_of_origin": "JP",
-            "banner_url": None,
-            "mal_id": 2,
-            "site_url": "https://anilist.co/anime/1",
-            "upstream_updated_at": 1,
-            "metadata_snapshot": {"title_english": "Example"},
-            "cover": None,
-        },
-        "profile": {
-            "name": "portable-aac-v1",
-            "container": "m4a",
-            "codec": "aac",
-            "bitrate_bps": 128000,
-            "max_channels": 2,
-            "sample_rate_hz": 48000,
-        },
-        "episodes": [
-            {
-                "episode_key": "1",
-                "source": {
-                    "relative_path": "Episode 01.mkv",
-                    "size_bytes": 100,
-                    "mtime_ns": 1,
-                    "global_stream_index": 1,
-                    "audio_stream_ordinal": 0,
-                    "audio_codec": "flac",
-                    "audio_language": "jpn",
-                },
-                "artifact": {
-                    "relative_path": artifact_path,
-                    "size_bytes": 10,
-                    "duration_ms": 1000,
-                    "codec": "aac",
-                    "bitrate_bps": 128000,
-                    "channels": 2,
-                    "sample_rate_hz": 48000,
-                    "sha256": "abc",
-                },
-                "created_at": "2026-06-01T00:00:00+00:00",
-            }
-        ],
-    }
+from anime_audio_support import manifest, write_series
 
 
 def _client(tmp_path: Path, *, manifest: dict[str, object] | None = None) -> TestClient:
     library = tmp_path / "library"
-    series = library / "anilist-1"
-    series.mkdir(parents=True)
-    (series / ".ja-media.json").write_text(
-        json.dumps(manifest or _manifest()), encoding="utf-8"
+    write_series(
+        library,
+        payload=manifest,
+        write_artifact=manifest is None
+        or manifest["episodes"][0]["artifact"]["relative_path"] == "S01E001.m4a",  # type: ignore[index]
     )
-    (series / "S01E001.m4a").write_bytes(b"audio-bytes")
     settings = AnimeAudioSettings(
         library_root=library,
         db_path=tmp_path / "index.sqlite",
@@ -130,7 +64,7 @@ def test_reconcile_removes_stale_rows_after_complete_scan(tmp_path: Path) -> Non
 
 
 def test_missing_artifact_is_degraded_and_not_indexed(tmp_path: Path) -> None:
-    client = _client(tmp_path, manifest=_manifest(artifact_path="missing.m4a"))
+    client = _client(tmp_path, manifest=manifest(artifact_path="missing.m4a"))
 
     health = client.get("/healthz")
 
@@ -141,7 +75,7 @@ def test_missing_artifact_is_degraded_and_not_indexed(tmp_path: Path) -> None:
 
 
 def test_path_escape_is_rejected_during_reconciliation(tmp_path: Path) -> None:
-    client = _client(tmp_path, manifest=_manifest(artifact_path="../outside.m4a"))
+    client = _client(tmp_path, manifest=manifest(artifact_path="../outside.m4a"))
 
     health = client.get("/healthz")
 
@@ -171,3 +105,6 @@ def test_metrics_expose_index_state(tmp_path: Path) -> None:
     assert response.status_code == 200
     assert "anime_audio_index_ready 1.0" in response.text
     assert "anime_audio_artifacts_total 1.0" in response.text
+    assert "anime_audio_watcher_running 0.0" in response.text
+    assert "anime_audio_last_incremental_scan_timestamp_seconds 0.0" in response.text
+    assert "anime_audio_manifest_refresh_failures_total 0.0" in response.text

@@ -29,6 +29,9 @@ The indexed anime-audio service can:
   profile;
 - serve artifact content with range support without exposing host paths;
 - perform an explicit full reconciliation through `POST /reconcile`;
+- refresh changed or deleted manifests from debounced filesystem events;
+- repair missed events through metadata-only incremental scans that survive
+  service restarts without reparsing unchanged manifests;
 - report readiness, reconciliation failures, and indexed counts through
   `/healthz` and `/metrics`;
 - run behind `/api/v1/audio` with a typed client in `packages/core`.
@@ -51,19 +54,18 @@ GET  /metrics
 
 ## Remaining work
 
-The next work is deliberately consumer-driven:
+The remaining work is deliberately consumer-driven:
 
-1. Keep the service index current as manifests change.
-2. Audit the durable manifest schema and service SDK before adding consumers.
-3. Make subsync prefer already-derived audio and support an identity-only
+1. Audit the durable manifest schema and service SDK before adding consumers.
+2. Make subsync prefer already-derived audio and support an identity-only
    invocation.
-4. Expose the complete indexed inventory through the service and core SDK.
+3. Expose the complete indexed inventory through the service and core SDK.
 
 Service-owned ingestion, persisted jobs, workers, and REST-triggered ffmpeg
 are not part of this plan. They should be introduced only if a concrete
 workflow needs the service to own asynchronous conversion.
 
-## Phase 2a: keep the index current
+## Phase 2a: keep the index current (implemented)
 
 ### Consistency model
 

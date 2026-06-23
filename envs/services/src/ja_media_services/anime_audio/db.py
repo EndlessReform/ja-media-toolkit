@@ -6,7 +6,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = "1"
+SCHEMA_VERSION = "2"
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
@@ -36,7 +36,9 @@ def initialize(db_path: Path) -> sqlite3.Connection:
           title_native TEXT,
           title_romaji TEXT,
           profile TEXT NOT NULL,
-          manifest_path TEXT NOT NULL UNIQUE
+          manifest_path TEXT NOT NULL UNIQUE,
+          manifest_mtime_ns INTEGER,
+          manifest_size INTEGER
         );
         CREATE TABLE IF NOT EXISTS artifact (
           anilist_id INTEGER NOT NULL REFERENCES series(anilist_id) ON DELETE CASCADE,
@@ -56,10 +58,16 @@ def initialize(db_path: Path) -> sqlite3.Connection:
         CREATE TABLE IF NOT EXISTS reconciliation_error (
           manifest_path TEXT NOT NULL,
           error_code TEXT NOT NULL,
-          detail TEXT NOT NULL
+          detail TEXT NOT NULL,
+          manifest_mtime_ns INTEGER,
+          manifest_size INTEGER
         );
         """
     )
+    _add_column(connection, "series", "manifest_mtime_ns", "INTEGER")
+    _add_column(connection, "series", "manifest_size", "INTEGER")
+    _add_column(connection, "reconciliation_error", "manifest_mtime_ns", "INTEGER")
+    _add_column(connection, "reconciliation_error", "manifest_size", "INTEGER")
     set_metadata(connection, "schema_version", SCHEMA_VERSION)
     connection.commit()
     return connection
@@ -80,6 +88,14 @@ def stats(connection: sqlite3.Connection) -> dict[str, Any]:
         "last_attempt": metadata.get("last_attempt"),
         "last_success": metadata.get("last_success"),
         "last_failure_code": metadata.get("last_failure_code") or None,
+        "watcher_enabled": metadata.get("watcher_enabled") == "1",
+        "watcher_running": metadata.get("watcher_running") == "1",
+        "fallback_scan_running": metadata.get("fallback_scan_running") == "1",
+        "last_incremental_scan": metadata.get("last_incremental_scan"),
+        "incremental_scan_failures": int(
+            metadata.get("incremental_scan_failures", "0")
+        ),
+        "refresh_failures": int(metadata.get("refresh_failures", "0")),
     }
 
 
@@ -178,6 +194,26 @@ def count_rows(connection: sqlite3.Connection, table: str) -> int:
     """Count a table selected only by trusted service code."""
 
     return int(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+
+
+def increment_metadata(connection: sqlite3.Connection, key: str) -> None:
+    """Increment one integer operational counter."""
+
+    row = connection.execute(
+        "SELECT value FROM metadata WHERE key = ?", (key,)
+    ).fetchone()
+    value = int(row["value"]) + 1 if row else 1
+    set_metadata(connection, key, str(value))
+
+
+def _add_column(
+    connection: sqlite3.Connection, table: str, column: str, definition: str
+) -> None:
+    columns = {
+        str(row["name"]) for row in connection.execute(f"PRAGMA table_info({table})")
+    }
+    if column not in columns:
+        connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
 def _artifact_mapping(row: sqlite3.Row) -> dict[str, Any]:

@@ -21,6 +21,19 @@ ANIME_AUDIO_LIBRARY_PATH=/path/to/derived-anime-audio docker compose up -d --bui
 The directory is mounted read-only. The service stores only its rebuildable
 SQLite index in the `anime-audio-data` volume.
 
+Index maintenance defaults to native filesystem events with a one-second
+debounce and a metadata-only fallback scan every five minutes:
+
+```text
+ANIME_AUDIO_WATCHER_ENABLED=true
+ANIME_AUDIO_WATCHER_DEBOUNCE_SECONDS=1
+ANIME_AUDIO_FALLBACK_SCAN_INTERVAL_SECONDS=300
+```
+
+Disable the watcher only when filesystem events are known to be unusable. Keep
+the fallback scan enabled for NFS libraries because changes made by another
+client may not produce events on the service host.
+
 ## API
 
 ```text
@@ -70,6 +83,13 @@ atomically replaces the index, so deleted manifests remove stale rows.
 Malformed manifests, path escapes, and missing artifacts are omitted and
 reported as reconciliation errors.
 
+During normal operation, creation, replacement, movement, and deletion of an
+immediate-child `.ja-media.json` refreshes only that series. Event bursts from
+atomic publication are debounced. The fallback scan compares each manifest's
+relative identity, modification time, and size with SQLite; it parses only new
+or changed manifests and removes rows only after a complete directory scan.
+It does not read, hash, or probe unchanged audio artifacts.
+
 `GET /healthz` returns:
 
 - `ok` when the index is ready and the last scan had no errors;
@@ -77,8 +97,9 @@ reported as reconciliation errors.
   library later became unavailable;
 - HTTP 503 with `unavailable` when no usable index can be served.
 
-The response includes bounded counts and reconciliation timestamps but no
-configured paths.
+The response includes bounded watcher state, the last successful incremental
+scan, scan and refresh failure counters, index counts, and reconciliation
+timestamps, but no configured paths.
 
 ## Metrics
 
@@ -90,6 +111,11 @@ anime_audio_series_total
 anime_audio_artifacts_total
 anime_audio_reconciliation_errors
 anime_audio_last_reconciliation_timestamp_seconds
+anime_audio_watcher_running
+anime_audio_fallback_scan_worker_running
+anime_audio_last_incremental_scan_timestamp_seconds
+anime_audio_incremental_scan_failures_total
+anime_audio_manifest_refresh_failures_total
 ```
 
 The endpoint is registered in the deployment's Prometheus HTTP-SD document.

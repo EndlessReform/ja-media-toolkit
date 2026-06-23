@@ -6,6 +6,7 @@ import argparse
 import logging
 import sqlite3
 import threading
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -25,27 +26,49 @@ from ja_media_services.anime_audio.db import (
 from ja_media_services.anime_audio.index import reconcile
 from ja_media_services.anime_audio.metrics import render_metrics
 from ja_media_services.anime_audio.settings import AnimeAudioSettings
+from ja_media_services.anime_audio.watcher import IndexWatcher, ObserverLike
 
 logger = logging.getLogger(__name__)
 
 
-def create_app(settings: AnimeAudioSettings | None = None) -> FastAPI:
+def create_app(
+    settings: AnimeAudioSettings | None = None,
+    *,
+    observer_factory: Callable[[], ObserverLike] | None = None,
+) -> FastAPI:
     """Build an app with one process-local SQLite connection and scan lock."""
 
     active = settings or AnimeAudioSettings()
     connection = initialize(active.db_path)
     lock = threading.RLock()
+    watcher_options = {}
+    if observer_factory is not None:
+        watcher_options["observer_factory"] = observer_factory
+    watcher = IndexWatcher(
+        connection,
+        lock,
+        active.library_root,
+        watcher_enabled=active.watcher_enabled,
+        debounce_seconds=active.watcher_debounce_seconds,
+        fallback_interval_seconds=active.fallback_scan_interval_seconds,
+        **watcher_options,
+    )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
-        yield
-        connection.close()
+        watcher.start()
+        try:
+            yield
+        finally:
+            watcher.stop()
+            connection.close()
 
     app = FastAPI(
         title="ja-media indexed anime audio",
         root_path=active.root_path,
         lifespan=lifespan,
     )
+    app.state.index_watcher = watcher
 
     try:
         with lock:
@@ -123,10 +146,12 @@ def create_app(settings: AnimeAudioSettings | None = None) -> FastAPI:
             state = stats(connection)
         if not state["ready"]:
             raise HTTPException(status_code=503, detail={"status": "unavailable", **state})
-        return {
-            "status": "degraded" if state["error_count"] or state["last_failure_code"] else "ok",
-            **state,
-        }
+        degraded = (
+            state["error_count"]
+            or state["last_failure_code"]
+            or (state["watcher_enabled"] and not state["watcher_running"])
+        )
+        return {"status": "degraded" if degraded else "ok", **state}
 
     @app.get("/metrics", response_class=Response)
     def metrics_endpoint() -> Response:

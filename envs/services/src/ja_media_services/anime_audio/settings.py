@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -18,3 +19,6 @@ class AnimeAudioSettings(BaseSettings):
     port: int = 8000
     root_path: str | None = None
     log_level: str = "INFO"
+    watcher_enabled: bool = True
+    watcher_debounce_seconds: float = Field(default=1.0, ge=0)
+    fallback_scan_interval_seconds: float = Field(default=300.0, ge=0)

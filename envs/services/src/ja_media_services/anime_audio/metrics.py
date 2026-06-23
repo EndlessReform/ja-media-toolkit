@@ -26,6 +26,31 @@ def render_metrics(state: dict[str, Any]) -> bytes:
             "Unix timestamp of the last successful reconciliation.",
             _timestamp(state["last_success"]),
         ),
+        (
+            "anime_audio_watcher_running",
+            "Whether native filesystem event observation is running.",
+            int(state["watcher_running"]),
+        ),
+        (
+            "anime_audio_fallback_scan_worker_running",
+            "Whether the debounced refresh and fallback scan worker is running.",
+            int(state["fallback_scan_running"]),
+        ),
+        (
+            "anime_audio_last_incremental_scan_timestamp_seconds",
+            "Unix timestamp of the last successful metadata-only scan.",
+            _timestamp(state["last_incremental_scan"]),
+        ),
+        (
+            "anime_audio_incremental_scan_failures_total",
+            "Fallback scans that could not complete.",
+            state["incremental_scan_failures"],
+        ),
+        (
+            "anime_audio_manifest_refresh_failures_total",
+            "Event or scan refreshes rejected since index creation.",
+            state["refresh_failures"],
+        ),
     )
     for name, help_text, value in values:
         Gauge(name, help_text, registry=registry).set(float(value))
