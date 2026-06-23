@@ -7,7 +7,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from ja_media_services.anilist_search.app import app_state, create_app
-from ja_media_services.anilist_search import db
+from ja_media_services.anilist_search import dataset, db, metadata
 
 
 def write_dataset(path: Path, rows: list[dict[str, str]]) -> None:
@@ -28,7 +28,7 @@ def write_dataset(path: Path, rows: list[dict[str, str]]) -> None:
 
 
 def test_build_index_rebuilds_when_dataset_signature_changes(tmp_path: Path) -> None:
-    csv_path = tmp_path / db.CSV_NAME
+    csv_path = tmp_path / dataset.CSV_NAME
     db_path = tmp_path / "anime_index.db"
     write_dataset(
         csv_path,
@@ -76,7 +76,7 @@ def test_build_index_rebuilds_when_dataset_signature_changes(tmp_path: Path) -> 
 
 
 def test_build_index_can_force_rebuild_existing_fts_index(tmp_path: Path) -> None:
-    csv_path = tmp_path / db.CSV_NAME
+    csv_path = tmp_path / dataset.CSV_NAME
     db_path = tmp_path / "anime_index.db"
     write_dataset(
         csv_path,
@@ -101,7 +101,7 @@ def test_build_index_can_force_rebuild_existing_fts_index(tmp_path: Path) -> Non
 
 
 def test_build_index_keeps_full_csv_metadata_for_detail_lookup(tmp_path: Path) -> None:
-    csv_path = tmp_path / db.CSV_NAME
+    csv_path = tmp_path / dataset.CSV_NAME
     db_path = tmp_path / "anime_index.db"
     write_dataset(
         csv_path,
@@ -135,7 +135,7 @@ def test_build_index_keeps_full_csv_metadata_for_detail_lookup(tmp_path: Path) -
     try:
         assert db.build_index(csv_path, con) == 1
 
-        payload = db.fetch_anime_metadata(
+        payload = metadata.fetch_anime_metadata(
             con, 395, fields=("title_romaji", "description", "idMal", "characters")
         )
 
@@ -163,7 +163,7 @@ def test_build_index_keeps_full_csv_metadata_for_detail_lookup(tmp_path: Path) -
 def test_startup_rebuild_zeroes_stale_table_even_when_csv_signature_matches(
     tmp_path: Path,
 ) -> None:
-    csv_path = tmp_path / db.CSV_NAME
+    csv_path = tmp_path / dataset.CSV_NAME
     db_path = tmp_path / "anime_index.db"
     write_dataset(
         csv_path,
@@ -202,7 +202,7 @@ def test_startup_rebuild_zeroes_stale_table_even_when_csv_signature_matches(
 
         row_count, con = db.rebuild_from_cached_csv(csv_path, db_path, con)
         assert row_count == 1
-        payload = db.fetch_anime_metadata(con, 1535, fields=("description",))
+        payload = metadata.fetch_anime_metadata(con, 1535, fields=("description",))
 
         assert payload == {
             "description": "A notebook with consequences.",
@@ -213,7 +213,7 @@ def test_startup_rebuild_zeroes_stale_table_even_when_csv_signature_matches(
 
 
 def test_anime_detail_endpoint_supports_field_filtering(tmp_path: Path) -> None:
-    csv_path = tmp_path / db.CSV_NAME
+    csv_path = tmp_path / dataset.CSV_NAME
     db_path = tmp_path / "anime_index.db"
     write_dataset(
         csv_path,
@@ -248,7 +248,7 @@ def test_anime_detail_endpoint_supports_field_filtering(tmp_path: Path) -> None:
 
 
 def test_anime_detail_endpoint_rejects_unknown_fields(tmp_path: Path) -> None:
-    csv_path = tmp_path / db.CSV_NAME
+    csv_path = tmp_path / dataset.CSV_NAME
     db_path = tmp_path / "anime_index.db"
     write_dataset(
         csv_path,

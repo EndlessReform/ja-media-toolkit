@@ -11,7 +11,6 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Query
 
 from ja_media_services.anilist_search.db import (
-    fetch_anime_metadata,
     get_row_count,
     open_db,
     rebuild_from_cached_csv,
@@ -19,6 +18,7 @@ from ja_media_services.anilist_search.db import (
     search,
 )
 from ja_media_services.anilist_search.dataset import ensure_dataset
+from ja_media_services.anilist_search.metadata import fetch_anime_metadata
 from ja_media_services.anilist_search.refresh import RefreshStatus, background_refresh
 
 logger = logging.getLogger("ja_media_services.anilist_search")

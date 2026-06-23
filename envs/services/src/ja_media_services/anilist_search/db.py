@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 import time
 from pathlib import Path
@@ -10,8 +9,6 @@ import duckdb
 
 DEFAULT_FORMATS = ("TV", "ONA", "TV_SHORT")
 ALL_FORMATS = DEFAULT_FORMATS + ("MOVIE", "OVA", "SPECIAL", "MUSIC")
-JSON_COLUMNS = frozenset({"characters", "relations", "staff", "studios", "synonyms"})
-RESERVED_DETAIL_COLUMNS = frozenset({"aid", "search_text"})
 
 logger = logging.getLogger("ja_media_services.anilist_search.db")
 
@@ -157,22 +154,33 @@ def rebuild_if_needed(
 def rebuild_from_cached_csv(
     csv_path: Path, db_path: Path, con: duckdb.DuckDBPyConnection
 ) -> tuple[int, duckdb.DuckDBPyConnection]:
-    """Rebuild derived DuckDB tables from the cached AniList CSV.
+    """Build a fresh derived database and atomically publish it.
 
-    The Kaggle CSV cache is durable across container restarts, but the DuckDB
-    schema is code-owned derived state. Startup rebuilds it unconditionally so
-    deploys can widen or otherwise change the materialized table without asking
-    users to manually clear the volume.
+    Repeated in-place FTS rebuilds can leave deleted catalog dependencies.
+    Building a sibling database preserves the active index until its complete
+    replacement, including the new FTS catalog, is known to be valid.
     """
+    rebuild_path = db_path.with_name(f".{db_path.name}.rebuild")
+    rebuild_artifacts = (rebuild_path, Path(f"{rebuild_path}.wal"))
+    rebuild_con: duckdb.DuckDBPyConnection | None = None
+
+    for artifact in rebuild_artifacts:
+        artifact.unlink(missing_ok=True)
     try:
-        return build_index(csv_path, con, force=True), con
-    except duckdb.TransactionException:
-        logger.exception(
-            "DuckDB FTS rebuild transaction failed; reopening the DB and retrying once"
-        )
+        rebuild_con = open_db(rebuild_path)
+        row_count = build_index(csv_path, rebuild_con, force=True)
+        rebuild_con.close()
+        rebuild_con = None
+
         con.close()
-        con = open_db(db_path)
-        return build_index(csv_path, con, force=True), con
+        rebuild_path.replace(db_path)
+        return row_count, open_db(db_path)
+    except Exception:
+        if rebuild_con is not None:
+            rebuild_con.close()
+        for artifact in rebuild_artifacts:
+            artifact.unlink(missing_ok=True)
+        raise
 
 
 def search(
@@ -209,69 +217,6 @@ def search(
         }
         for row in rows
     ]
-
-
-def _available_detail_columns(con: duckdb.DuckDBPyConnection) -> tuple[str, ...]:
-    rows = con.execute("PRAGMA table_info('anime')").fetchall()
-    return tuple(str(row[1]) for row in rows)
-
-
-def _detail_columns(
-    con: duckdb.DuckDBPyConnection, requested_fields: tuple[str, ...] | None
-) -> tuple[str, ...]:
-    available = _available_detail_columns(con)
-    available_set = set(available)
-    public_columns = tuple(
-        column for column in available if column not in RESERVED_DETAIL_COLUMNS
-    )
-    if requested_fields is None:
-        return public_columns
-
-    unknown = sorted(set(requested_fields) - available_set)
-    forbidden = sorted(set(requested_fields) & RESERVED_DETAIL_COLUMNS)
-    if unknown or forbidden:
-        bad = ", ".join([*unknown, *forbidden])
-        raise ValueError(f"Unknown AniList metadata field(s): {bad}")
-    return tuple(requested_fields)
-
-
-def _parse_detail_value(column: str, value: Any) -> Any:
-    if value is None or column not in JSON_COLUMNS or not isinstance(value, str):
-        return value
-    try:
-        return json.loads(value)
-    except json.JSONDecodeError:
-        logger.warning("AniList metadata column %s did not contain valid JSON", column)
-        return value
-
-
-def fetch_anime_metadata(
-    con: duckdb.DuckDBPyConnection,
-    anilist_id: int | str,
-    *,
-    fields: tuple[str, ...] | None = None,
-) -> dict[str, Any] | None:
-    """Return one AniList metadata row by ID, optionally narrowed to fields.
-
-    The endpoint using this helper is intentionally a broad escape hatch while
-    downstream workflows shake out which specialized projections are worth
-    owning. Column names are validated against DuckDB metadata before SQL is
-    assembled so callers can request fields without opening an injection path.
-    """
-    columns = _detail_columns(con, fields)
-    select_columns = ["aid", *columns]
-    quoted_columns = ", ".join(f'"{column}"' for column in select_columns)
-    row = con.execute(
-        f"SELECT {quoted_columns} FROM anime WHERE aid = ?", [str(anilist_id)]
-    ).fetchone()
-    if row is None:
-        return None
-    payload = dict(zip(select_columns, row, strict=True))
-    payload["anilist_id"] = int(payload.pop("aid"))
-    return {
-        column: _parse_detail_value(column, value)
-        for column, value in payload.items()
-    }
 
 
 def resolve_formats(

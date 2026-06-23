@@ -102,17 +102,26 @@ def test_refresh_status_marks_stale_after_missed_refresh_window() -> None:
     assert payload["consecutive_failures"] == 2
 
 
-def test_startup_retries_transient_duckdb_fts_transaction_failure(
+def test_rebuild_publishes_fresh_database_and_closes_old_connection(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    attempts = 0
-    reopened_connection = object()
+    db_path = tmp_path / "anime_index.db"
+    rebuild_path = tmp_path / ".anime_index.db.rebuild"
+    built_connection = SimpleNamespace(close=lambda: None)
+    published_connection = object()
+    opened_paths: list[Path] = []
+
+    def open_db(path: Path) -> object:
+        opened_paths.append(path)
+        if path == rebuild_path:
+            path.touch()
+            return built_connection
+        assert path == db_path
+        return published_connection
 
     def build_index(*args: object, **kwargs: object) -> int:
-        nonlocal attempts
-        attempts += 1
-        if attempts == 1:
-            raise db.duckdb.TransactionException("transient FTS catalog failure")
+        assert args[1] is built_connection
+        assert kwargs == {"force": True}
         return 20_346
 
     class Connection:
@@ -123,18 +132,60 @@ def test_startup_retries_transient_duckdb_fts_transaction_failure(
 
     connection = Connection()
     monkeypatch.setattr(db, "build_index", build_index)
-    monkeypatch.setattr(db, "open_db", lambda path: reopened_connection)
+    monkeypatch.setattr(db, "open_db", open_db)
 
     rows, active_connection = db.rebuild_from_cached_csv(
         tmp_path / dataset.CSV_NAME,
-        tmp_path / "anime_index.db",
+        db_path,
         connection,  # type: ignore[arg-type]
     )
 
     assert rows == 20_346
-    assert attempts == 2
     assert connection.closed is True
-    assert active_connection is reopened_connection
+    assert active_connection is published_connection
+    assert opened_paths == [rebuild_path, db_path]
+    assert db_path.exists()
+    assert not rebuild_path.exists()
+
+
+def test_failed_rebuild_preserves_active_database_connection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path = tmp_path / "anime_index.db"
+    db_path.write_text("active", encoding="utf-8")
+    rebuild_path = tmp_path / ".anime_index.db.rebuild"
+
+    class Connection:
+        closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    active_connection = Connection()
+    rebuild_connection = Connection()
+
+    def open_db(path: Path) -> Connection:
+        assert path == rebuild_path
+        path.write_text("incomplete", encoding="utf-8")
+        return rebuild_connection
+
+    def fail_build(*args: object, **kwargs: object) -> int:
+        raise db.duckdb.TransactionException("broken FTS catalog")
+
+    monkeypatch.setattr(db, "open_db", open_db)
+    monkeypatch.setattr(db, "build_index", fail_build)
+
+    with pytest.raises(db.duckdb.TransactionException, match="broken FTS catalog"):
+        db.rebuild_from_cached_csv(
+            tmp_path / dataset.CSV_NAME,
+            db_path,
+            active_connection,  # type: ignore[arg-type]
+        )
+
+    assert active_connection.closed is False
+    assert rebuild_connection.closed is True
+    assert db_path.read_text(encoding="utf-8") == "active"
+    assert not rebuild_path.exists()
 
 
 def test_background_refresh_publishes_reopened_connection(
