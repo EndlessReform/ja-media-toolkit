@@ -20,6 +20,7 @@ The services are coordinated via `compose.yaml`. While most configuration is bak
 | Variable | Description | Default |
 | :--- | :--- | :--- |
 | `DOCS_PORT` | The port on which the documentation and API gateway are exposed. | `8080` |
+| `ANIME_AUDIO_LIBRARY_PATH` | Host directory containing derived anime-audio series directories. | `./data/anime-audio` |
 
 *Note: Set `DOCS_PORT=80` in production for standard HTTP access.*
 
@@ -39,6 +40,7 @@ Once the containers are healthy, you can verify the services are running:
 2. **API Gateway**: The backend services are available via the following API paths:
     - **Anime Crosswalk**: `http://localhost:${DOCS_PORT:-8080}/api/v1/crosswalk`
     - **Kitsunekko Subtitles**: `http://localhost:${DOCS_PORT:-8080}/api/v1/subtitles`
+    - **Anime Audio**: `http://localhost:${DOCS_PORT:-8080}/api/v1/audio`
 
 ## Management
 

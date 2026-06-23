@@ -20,4 +20,8 @@
 	handle_path /api/v1/anilist* {
 		reverse_proxy anilist-search:8000
 	}
+
+	handle_path /api/v1/audio* {
+		reverse_proxy anime-audio:8000
+	}
 }

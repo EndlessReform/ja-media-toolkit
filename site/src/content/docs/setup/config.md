@@ -34,6 +34,9 @@ If a specific service is hosted on a different machine or port, you can still ov
 export KITSUNEKKO_SUBTITLES_BASE_URL="http://192.168.1.50:8000"
 ```
 
+The indexed anime-audio client uses the same gateway root plus
+`/api/v1/audio`. Its direct-service override is `ANIME_AUDIO_BASE_URL`.
+
 ## Backend Configuration
 
 The configuration file also supports detailed backend settings. While the `[services]` section handles discovery, the `[asr]` section (and others) allows you to tune the actual ML runtimes.

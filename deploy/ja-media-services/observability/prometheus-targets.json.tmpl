@@ -14,5 +14,13 @@
       "deployment": "ja-media-services",
       "service": "kitsunekko-subtitles"
     }
+  },
+  {
+    "targets": [{{ .Req.Host | toJson }}],
+    "labels": {
+      "__metrics_path__": "/api/v1/audio/metrics",
+      "deployment": "ja-media-services",
+      "service": "anime-audio"
+    }
   }
 ]

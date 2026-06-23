@@ -21,3 +21,10 @@ The Kitsunekko Subtitles service provides a local mirror and REST API for access
 The AniList Search service provides BM25 fuzzy search over a local cache of the AniList anime dataset, resolving titles to AniList IDs.
 
 - **API Documentation:** [/api/v1/anilist/docs](/services/anilist-search)
+
+### Anime Audio
+The Anime Audio service indexes authoritative derived-audio manifests and
+retrieves episode artifacts by AniList ID, episode key, and conversion profile.
+
+- **Service Guide:** [Anime Audio](/services/anime-audio)
+- **API Documentation:** [/api/v1/audio/docs](/api/v1/audio/docs)

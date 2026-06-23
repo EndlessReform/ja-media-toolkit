@@ -45,6 +45,21 @@ from ja_media_core.audio_library import (
     MaterializationPlan,
     SourceMediaProbe,
 )
+from ja_media_core.audio_manifest import (
+    MANIFEST_KIND,
+    SCHEMA_VERSION,
+    manifest_from_mapping,
+    manifest_to_mapping,
+)
+from ja_media_core.anime_audio import (
+    ANIME_AUDIO_BASE_URL_ENV,
+    ANIME_AUDIO_GATEWAY_PATH,
+    AnimeAudioArtifact,
+    AnimeAudioClient,
+    AnimeAudioEpisode,
+    AnimeAudioSeries,
+    HttpAnimeAudioClient,
+)
 from ja_media_core.config import (
     APP_CONFIG_DIR_NAME,
     CONFIG_ENV_VAR,
@@ -137,10 +152,16 @@ from ja_media_core.vad import (
 
 
 __all__ = [
+    "ANIME_AUDIO_BASE_URL_ENV",
+    "ANIME_AUDIO_GATEWAY_PATH",
     "ANILIST_SEARCH_BASE_URL_ENV",
     "ANILIST_SEARCH_GATEWAY_PATH",
     "AnimeMetadata",
     "AnimeAudioManifest",
+    "AnimeAudioArtifact",
+    "AnimeAudioClient",
+    "AnimeAudioEpisode",
+    "AnimeAudioSeries",
     "AnimeAudioSeriesMetadata",
     "AniListSearchClient",
     "AudioChunk",
@@ -169,6 +190,7 @@ __all__ = [
     "CONFIG_ENV_VAR",
     "CONFIG_FILE_NAME",
     "HttpAniListSearchClient",
+    "HttpAnimeAudioClient",
     "InMemoryAudioChunk",
     "JaMediaConfig",
     "JaMediaSettings",
@@ -180,11 +202,13 @@ __all__ = [
     "EpisodeMapping",
     "ManifestEpisode",
     "MaterializationPlan",
+    "MANIFEST_KIND",
     "PORTABLE_AAC_V1",
     "ParsedMediaFilename",
     "ReaderSession",
     "SearchResult",
     "SearchResponse",
+    "SCHEMA_VERSION",
     "SpeechSpan",
     "SourceMediaProbe",
     "SubtitleCandidate",
@@ -221,6 +245,8 @@ __all__ = [
     "infer_episode_number",
     "is_supported_subtitle_file",
     "load_config",
+    "manifest_from_mapping",
+    "manifest_to_mapping",
     "materialize_audio_chunk",
     "normalize_speech_spans",
     "plan_vad_splits",

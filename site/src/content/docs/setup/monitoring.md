@@ -62,11 +62,12 @@ Then verify every advertised metrics path directly:
 ```sh
 curl -fsS "$ROOT_URL/api/v1/crosswalk/metrics" | head
 curl -fsS "$ROOT_URL/api/v1/subtitles/metrics" | head
+curl -fsS "$ROOT_URL/api/v1/audio/metrics" | head
 ```
 
 In Prometheus, open **Status → Service Discovery** and find
-`ja-media-services`. Then open **Status → Targets** and confirm that both
-targets are `UP`.
+`ja-media-services`. Then open **Status → Targets** and confirm that every
+advertised target is `UP`.
 
 ## What is currently monitored
 
@@ -74,6 +75,7 @@ The discovery document currently includes:
 
 - Anime Crosswalk at `/api/v1/crosswalk/metrics`
 - Kitsunekko Subtitles at `/api/v1/subtitles/metrics`
+- Anime Audio at `/api/v1/audio/metrics`
 
 AniList Search is intentionally omitted because it does not yet expose a
 Prometheus metrics endpoint. Its operational state remains available at
