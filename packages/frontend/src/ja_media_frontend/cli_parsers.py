@@ -44,7 +44,11 @@ def register_subsync_parser(subparsers: argparse._SubParsersAction) -> None:
         "tui",
         help="Open the first-pass subtitle timing review TUI",
     )
-    tui.add_argument("source", help="Source media file path")
+    tui.add_argument(
+        "source",
+        nargs="?",
+        help="Source media file path. Optional with --anilist and --episode.",
+    )
     tui.add_argument(
         "srt",
         nargs="*",
@@ -71,6 +75,11 @@ def register_subsync_parser(subparsers: argparse._SubParsersAction) -> None:
         "--episode",
         type=int,
         help="Episode override. Defaults to parsing the media filename stem.",
+    )
+    tui.add_argument(
+        "--audio-profile",
+        default="portable-aac-v1",
+        help="Derived audio profile to prefer. Defaults to portable-aac-v1.",
     )
     tui.add_argument(
         "--fetch-subs",

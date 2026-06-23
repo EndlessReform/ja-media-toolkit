@@ -7,11 +7,15 @@ import urllib.parse
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from ja_media_core.http import ServiceHttpClient
+from ja_media_core.http import ServiceHttpClient, ServiceHttpError
 from ja_media_core.services import service_base_url
 
 ANIME_AUDIO_BASE_URL_ENV = "ANIME_AUDIO_BASE_URL"
 ANIME_AUDIO_GATEWAY_PATH = "/api/v1/audio"
+
+
+class AnimeAudioNotFoundError(LookupError):
+    """The requested indexed anime-audio resource does not exist."""
 
 
 @dataclass(frozen=True)
@@ -137,7 +141,12 @@ class HttpAnimeAudioClient:
         profile: str = "portable-aac-v1",
     ) -> AnimeAudioArtifact:
         path = self._artifact_path(anilist_id, episode_key, profile)
-        return AnimeAudioArtifact.from_mapping(self._object(self._http.get_json(path)))
+        try:
+            payload = self._http.get_json(path)
+        except ServiceHttpError as exc:
+            self._raise_not_found(exc, anilist_id, episode_key, profile)
+            raise
+        return AnimeAudioArtifact.from_mapping(self._object(payload))
 
     def content(
         self,
@@ -147,7 +156,11 @@ class HttpAnimeAudioClient:
         profile: str = "portable-aac-v1",
     ) -> bytes:
         path = self._artifact_path(anilist_id, episode_key, profile)
-        return self._http.get_bytes(f"{path}/content")
+        try:
+            return self._http.get_bytes(f"{path}/content")
+        except ServiceHttpError as exc:
+            self._raise_not_found(exc, anilist_id, episode_key, profile)
+            raise
 
     @staticmethod
     def _artifact_path(anilist_id: int, episode_key: str, profile: str) -> str:
@@ -160,3 +173,17 @@ class HttpAnimeAudioClient:
         if not isinstance(payload, dict):
             raise RuntimeError("Anime audio response was not an object")
         return payload
+
+    @staticmethod
+    def _raise_not_found(
+        exc: ServiceHttpError,
+        anilist_id: int,
+        episode_key: str,
+        profile: str,
+    ) -> None:
+        if exc.status_code != 404:
+            return
+        raise AnimeAudioNotFoundError(
+            "No derived anime audio artifact for "
+            f"AniList {anilist_id}, episode {episode_key!r}, profile {profile!r}"
+        ) from exc

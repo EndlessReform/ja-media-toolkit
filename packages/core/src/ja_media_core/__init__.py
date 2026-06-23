@@ -57,6 +57,7 @@ from ja_media_core.anime_audio import (
     AnimeAudioArtifact,
     AnimeAudioClient,
     AnimeAudioEpisode,
+    AnimeAudioNotFoundError,
     AnimeAudioSeries,
     HttpAnimeAudioClient,
 )
@@ -161,6 +162,7 @@ __all__ = [
     "AnimeAudioArtifact",
     "AnimeAudioClient",
     "AnimeAudioEpisode",
+    "AnimeAudioNotFoundError",
     "AnimeAudioSeries",
     "AnimeAudioSeriesMetadata",
     "AniListSearchClient",

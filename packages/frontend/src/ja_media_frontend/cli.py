@@ -83,6 +83,7 @@ def main() -> None:
                 anilist_id=args.anilist,
                 tvdb_id=args.tvdb,
                 episode_number=args.episode,
+                audio_profile=args.audio_profile,
                 fetch_subs=args.fetch_subs,
                 tvdb_media_kind=args.tvdb_kind,
                 sort_by_language=args.sort_by_language,

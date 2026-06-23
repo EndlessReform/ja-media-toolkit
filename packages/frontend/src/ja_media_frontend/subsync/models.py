@@ -24,7 +24,7 @@ class RemoteLookupState:
 
 
 def initial_remote_lookup_state(
-    media_path: Path,
+    media_path: Path | None,
     *,
     anilist_id: int | None,
     tvdb_id: int | None,
@@ -37,7 +37,7 @@ def initial_remote_lookup_state(
         raise ValueError("Pass only one of --anilist or --tvdb")
     inferred_id = (
         infer_anilist_id(media_path)
-        if anilist_id is None and tvdb_id is None
+        if media_path is not None and anilist_id is None and tvdb_id is None
         else None
     )
     selected_anilist_id = anilist_id or inferred_id
@@ -54,6 +54,8 @@ def initial_remote_lookup_state(
             episode_number
             if episode_number is not None
             else infer_episode_number(media_path.stem)
+            if media_path is not None
+            else None
         ),
         media_kind=tvdb_media_kind,
     )

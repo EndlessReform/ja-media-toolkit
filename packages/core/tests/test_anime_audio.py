@@ -3,8 +3,9 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from ja_media_core.anime_audio import HttpAnimeAudioClient
+from ja_media_core.anime_audio import AnimeAudioNotFoundError, HttpAnimeAudioClient
 from ja_media_core.config import JaMediaConfig, ServicesConfig
+from ja_media_core.http import ServiceHttpError
 
 
 class AnimeAudioClientTest(unittest.TestCase):
@@ -83,11 +84,29 @@ class AnimeAudioClientTest(unittest.TestCase):
             patch.object(
                 client._http,
                 "get_json",
-                side_effect=RuntimeError("Anime audio request failed: 404 missing"),
+                side_effect=ServiceHttpError(
+                    "Anime audio request failed: 404 missing",
+                    status_code=404,
+                ),
             ),
             self.assertRaisesRegex(RuntimeError, "404 missing"),
         ):
             client.series(999)
+
+    def test_missing_artifact_has_typed_error(self) -> None:
+        client = HttpAnimeAudioClient("http://audio")
+        with (
+            patch.object(
+                client._http,
+                "get_json",
+                side_effect=ServiceHttpError(
+                    "Anime audio request failed: 404 missing",
+                    status_code=404,
+                ),
+            ),
+            self.assertRaises(AnimeAudioNotFoundError),
+        ):
+            client.artifact(1, "SP 1")
 
 
 if __name__ == "__main__":

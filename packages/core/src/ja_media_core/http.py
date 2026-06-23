@@ -14,6 +14,14 @@ from typing import Any
 import httpx
 
 
+class ServiceHttpError(RuntimeError):
+    """A first-party service returned a non-success HTTP status."""
+
+    def __init__(self, message: str, *, status_code: int) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
 class ServiceHttpClient:
     """Small synchronous transport shared by first-party LAN service clients."""
 
@@ -75,8 +83,9 @@ class ServiceHttpClient:
             response = client.request(method, url, **kwargs)
         if response.is_error:
             location = f" for {url}" if self.include_url_in_errors else ""
-            raise RuntimeError(
+            raise ServiceHttpError(
                 f"{self.error_label}{location}: "
-                f"{response.status_code} {response.text}"
+                f"{response.status_code} {response.text}",
+                status_code=response.status_code,
             )
         return response
