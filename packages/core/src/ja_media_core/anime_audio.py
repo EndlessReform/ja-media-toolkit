@@ -78,8 +78,65 @@ class AnimeAudioSeries:
         return cls(**data)
 
 
+@dataclass(frozen=True)
+class AnimeAudioInventorySeries:
+    """One series entry in a complete inventory projection."""
+
+    anilist_id: int
+    title: str
+    title_english: str | None
+    title_native: str | None
+    title_romaji: str | None
+    profile: str
+    episode_count: int
+    artifact_count: int
+    episode_keys: tuple[str, ...]
+    artifact_profiles: tuple[str, ...]
+
+    @classmethod
+    def from_mapping(cls, data: dict[str, Any]) -> AnimeAudioInventorySeries:
+        return cls(
+            anilist_id=int(data["anilist_id"]),
+            title=str(data["title"]),
+            title_english=data.get("title_english"),
+            title_native=data.get("title_native"),
+            title_romaji=data.get("title_romaji"),
+            profile=str(data["profile"]),
+            episode_count=int(data["episode_count"]),
+            artifact_count=int(data["artifact_count"]),
+            episode_keys=tuple(str(key) for key in data.get("episode_keys", ())),
+            artifact_profiles=tuple(
+                str(profile) for profile in data.get("artifact_profiles", ())
+            ),
+        )
+
+
+@dataclass(frozen=True)
+class AnimeAudioInventory:
+    """Bounded top-level counts plus every indexed series."""
+
+    series_count: int
+    episode_count: int
+    artifact_count: int
+    series: tuple[AnimeAudioInventorySeries, ...]
+
+    @classmethod
+    def from_mapping(cls, data: dict[str, Any]) -> AnimeAudioInventory:
+        return cls(
+            series_count=int(data["series_count"]),
+            episode_count=int(data["episode_count"]),
+            artifact_count=int(data["artifact_count"]),
+            series=tuple(
+                AnimeAudioInventorySeries.from_mapping(item)
+                for item in data.get("series", ())
+            ),
+        )
+
+
 class AnimeAudioClient(Protocol):
     """Operations consumed by tools that need indexed derived anime audio."""
+
+    def inventory(self) -> AnimeAudioInventory: ...
 
     def series(self, anilist_id: int) -> AnimeAudioSeries: ...
 
@@ -122,6 +179,10 @@ class HttpAnimeAudioClient:
             timeout_s=timeout_s,
             error_label="Anime audio request failed",
         )
+
+    def inventory(self) -> AnimeAudioInventory:
+        payload = self._object(self._http.get_json("/inventory"))
+        return AnimeAudioInventory.from_mapping(payload)
 
     def series(self, anilist_id: int) -> AnimeAudioSeries:
         payload = self._object(self._http.get_json(f"/series/{anilist_id}"))

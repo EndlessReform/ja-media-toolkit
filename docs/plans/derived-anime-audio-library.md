@@ -203,7 +203,7 @@ Tests must cover cache hit before MKV access, 404 and unavailable-service
 fallback, promotion beside the original MKV after a cache hit, identity-only
 startup, and disabled promotion.
 
-## Phase 2d: expose inventory
+## Phase 2d: expose inventory (implemented)
 
 Add one complete, read-only inventory operation:
 

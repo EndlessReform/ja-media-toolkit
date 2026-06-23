@@ -1,5 +1,5 @@
 {
-  "description": "Availability, refresh validation, corpus size, and scrape health for the ja-media-services deployment.",
+  "description": "Availability, refresh validation, corpus size, watched-directory freshness, and scrape health for the ja-media-services deployment.",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -99,7 +99,7 @@
     },
     {
       "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
-      "description": "A value of 1 means the database currently being served passed its rebuild validation. These metrics do not yet expose rebuild age.",
+      "description": "A value of 1 means the database currently being served passed its rebuild validation. anime-audio additionally publishes a rebuild timestamp, shown in the Watched directory freshness panel below.",
       "fieldConfig": {
         "defaults": {
           "mappings": [
@@ -146,6 +146,13 @@
           "legendFormat": "kitsunekko-subtitles",
           "range": true,
           "refId": "B"
+        },
+        {
+          "editorMode": "code",
+          "expr": "anime_audio_index_ready{deployment=\"ja-media-services\"}",
+          "legendFormat": "anime-audio",
+          "range": true,
+          "refId": "C"
         }
       ],
       "title": "Refresh artifact validation",
@@ -279,6 +286,20 @@
           "legendFormat": "subtitle lookups",
           "range": true,
           "refId": "C"
+        },
+        {
+          "editorMode": "code",
+          "expr": "anime_audio_series_total{deployment=\"ja-media-services\"}",
+          "legendFormat": "audio series",
+          "range": true,
+          "refId": "D"
+        },
+        {
+          "editorMode": "code",
+          "expr": "anime_audio_artifacts_total{deployment=\"ja-media-services\"}",
+          "legendFormat": "audio artifacts",
+          "range": true,
+          "refId": "E"
         }
       ],
       "title": "Current corpus sizes",
@@ -361,11 +382,174 @@
       "type": "stat"
     },
     {
-      "description": "This revision intentionally uses only existing metrics. AniList Search is absent because it does not expose /metrics yet.",
-      "gridPos": {"h": 4, "w": 24, "x": 0, "y": 24},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "description": "Age of the watched anime-audio library directory as seen by the service. Last reconciliation is the most recent full manifest scan; last incremental scan is the most recent event-driven metadata refresh. Both are computed as time() minus the published timestamp, so a never-reconciled index (timestamp 0) renders as deeply stale.",
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "orange", "value": 3600},
+              {"color": "red", "value": 86400}
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 6, "w": 8, "x": 0, "y": 24},
+      "id": 10,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "time() - anime_audio_last_reconciliation_timestamp_seconds{deployment=\"ja-media-services\"}",
+          "legendFormat": "since last reconcile",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "expr": "time() - anime_audio_last_incremental_scan_timestamp_seconds{deployment=\"ja-media-services\"}",
+          "legendFormat": "since last incremental scan",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "Watched directory freshness",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "description": "Live health of the anime-audio index workers. The native watcher consumes filesystem events; the fallback scan worker performs debounced metadata refresh and repair. Either being down for sustained periods means the index can drift from the watched directory.",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "options": {
+                "0": {"color": "red", "text": "DOWN"},
+                "1": {"color": "green", "text": "UP"}
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "green", "value": 1}
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 6, "w": 8, "x": 8, "y": 24},
+      "id": 11,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "anime_audio_watcher_running{deployment=\"ja-media-services\"}",
+          "legendFormat": "fs watcher",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "expr": "anime_audio_fallback_scan_worker_running{deployment=\"ja-media-services\"}",
+          "legendFormat": "fallback scanner",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "editorMode": "code",
+          "expr": "anime_audio_index_ready{deployment=\"ja-media-services\"}",
+          "legendFormat": "index ready",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "Index workers",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "description": "Accumulated reconciliation and refresh failures for the anime-audio service. Non-zero values indicate manifest validation errors, failed incremental scans, or rejected filesystem-event refreshes since index creation.",
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "red", "value": 1}
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 6, "w": 8, "x": 16, "y": 24},
+      "id": 12,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "anime_audio_reconciliation_errors{deployment=\"ja-media-services\"}",
+          "legendFormat": "reconciliation errors",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "expr": "anime_audio_incremental_scan_failures_total{deployment=\"ja-media-services\"}",
+          "legendFormat": "incremental scan failures",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "editorMode": "code",
+          "expr": "anime_audio_manifest_refresh_failures_total{deployment=\"ja-media-services\"}",
+          "legendFormat": "manifest refresh failures",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "Reconciliation health",
+      "type": "stat"
+    },
+    {
+      "description": "Revision 2 adds anime-audio coverage: index validity, corpus size, watched-directory freshness, worker state, and failure counters. AniList Search remains absent because it does not expose /metrics yet.",
+      "gridPos": {"h": 4, "w": 24, "x": 0, "y": 30},
       "id": 9,
       "options": {
-        "content": "### Current monitoring boundary\n\nAniList Search is not represented because it does not yet expose Prometheus metrics. Refresh panels show current artifact validity, not refresh age; timestamps and failure counters can be added after the first dashboard revisions reveal what is operationally useful.",
+        "content": "### Current monitoring boundary\n\nanime-audio is now fully represented: index validity appears alongside the other refresh panels, corpus sizes are in the shared stat, and a dedicated row shows watched-directory freshness, index worker state, and accumulated failure counters.\n\nAniList Search is not represented because it does not yet expose Prometheus metrics. For crosswalk and kitsunekko-subtitles, refresh panels show current artifact validity but not refresh age; timestamps can be added once those services publish them.",
         "mode": "markdown"
       },
       "title": "Read this before trusting the dashboard",
@@ -398,6 +582,6 @@
   "timezone": "browser",
   "title": "ja-media services",
   "uid": "ja-media-services",
-  "version": 1,
+  "version": 2,
   "weekStart": ""
 }

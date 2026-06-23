@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse
 from ja_media_services.anime_audio.db import (
     fetch_artifact,
     fetch_artifacts,
+    fetch_inventory,
     fetch_series,
     initialize,
     resolve_content_path,
@@ -75,6 +76,11 @@ def create_app(
             reconcile(connection, active.library_root)
     except FileNotFoundError:
         logger.warning("Anime audio library root is unavailable at startup")
+
+    @app.get("/inventory")
+    def inventory_endpoint() -> dict[str, Any]:
+        with lock:
+            return fetch_inventory(connection)
 
     @app.get("/series/{anilist_id}")
     def series_endpoint(anilist_id: int) -> dict[str, Any]:

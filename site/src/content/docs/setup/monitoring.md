@@ -116,15 +116,19 @@ revision updates the same dashboard instead of creating another copy. Keep the
 JSON file in this repository as the source of truth; changes made only in the
 Grafana UI will be lost on the next import.
 
-The initial dashboard shows:
+The dashboard shows:
 
 - current and historical service availability from Prometheus's `up` metric;
-- current Crosswalk and Kitsunekko rebuild-validation state;
+- current Crosswalk, Kitsunekko, and anime-audio rebuild-validation state;
 - corpus and lookup sizes, which make unexpected refresh regressions visible;
+- anime-audio watched-directory freshness (age of last reconciliation and
+  last incremental scan), index worker state, and accumulated failure counters;
 - Prometheus scrape duration and sample counts.
 
-The refresh gauges currently prove that the artifact being served passed
-validation. They do not expose when the last refresh ran or how many refreshes
-have failed. AniList Search is also absent because it does not yet expose a
-Prometheus metrics endpoint. Those are deliberate limits of the current
+The Crosswalk and Kitsunekko refresh gauges prove that the artifact being
+served passed validation; they do not yet expose when the last refresh ran or
+how many refreshes have failed. anime-audio publishes both timestamps and
+failure counters, which the dedicated freshness and reconciliation-health
+panels surface. AniList Search is absent because it does not yet expose a
+Prometheus metrics endpoint. These are deliberate limits of the current
 application metrics, not dashboard omissions.

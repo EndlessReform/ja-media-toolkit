@@ -99,6 +99,67 @@ def stats(connection: sqlite3.Connection) -> dict[str, Any]:
     }
 
 
+def fetch_inventory(connection: sqlite3.Connection) -> dict[str, Any]:
+    """Project the complete index as a path-free inventory snapshot.
+
+    Series are ordered by ``anilist_id``; episode keys and artifact profiles
+    within each series preserve the same ordering used by point lookups. The
+    result reuses the same SQLite snapshot as ``fetch_series`` and
+    ``fetch_artifacts`` so consumers see a consistent projection.
+    """
+
+    series_rows = connection.execute(
+        "SELECT * FROM series ORDER BY anilist_id"
+    ).fetchall()
+    artifact_rows = connection.execute(
+        """
+        SELECT anilist_id, episode_key, profile FROM artifact
+        ORDER BY anilist_id, CAST(episode_key AS INTEGER), episode_key, profile
+        """
+    ).fetchall()
+
+    grouped: dict[int, dict[str, Any]] = {}
+    for row in artifact_rows:
+        aid = int(row["anilist_id"])
+        bucket = grouped.setdefault(aid, {"episodes": {}, "profiles": {}, "artifacts": 0})
+        bucket["artifacts"] += 1
+        bucket["episodes"][str(row["episode_key"])] = None
+        bucket["profiles"][str(row["profile"])] = None
+
+    series_list: list[dict[str, Any]] = []
+    total_episodes = 0
+    total_artifacts = 0
+    for row in series_rows:
+        aid = int(row["anilist_id"])
+        bucket = grouped.get(aid)
+        episode_keys = tuple(bucket["episodes"]) if bucket else ()
+        profiles = tuple(bucket["profiles"]) if bucket else ()
+        episode_count = len(episode_keys)
+        artifact_count = bucket["artifacts"] if bucket else 0
+        total_episodes += episode_count
+        total_artifacts += artifact_count
+        series_list.append(
+            {
+                "anilist_id": aid,
+                "title": str(row["title"]),
+                "title_english": row["title_english"],
+                "title_native": row["title_native"],
+                "title_romaji": row["title_romaji"],
+                "profile": str(row["profile"]),
+                "episode_count": episode_count,
+                "artifact_count": artifact_count,
+                "episode_keys": episode_keys,
+                "artifact_profiles": profiles,
+            }
+        )
+    return {
+        "series_count": len(series_list),
+        "episode_count": total_episodes,
+        "artifact_count": total_artifacts,
+        "series": series_list,
+    }
+
+
 def fetch_series(connection: sqlite3.Connection, anilist_id: int) -> dict[str, Any] | None:
     row = connection.execute(
         "SELECT * FROM series WHERE anilist_id = ?", (anilist_id,)

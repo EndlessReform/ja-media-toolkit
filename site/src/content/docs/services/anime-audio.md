@@ -37,6 +37,7 @@ client may not produce events on the service host.
 ## API
 
 ```text
+GET  /inventory
 GET  /series/{anilist_id}
 GET  /series/{anilist_id}/episodes
 GET  /series/{anilist_id}/episodes/{episode_key}
@@ -51,9 +52,16 @@ Responses expose stable identity and measured artifact facts, never host
 filesystem paths. The content endpoint uses Starlette's file response, which
 supports ordinary range requests for seeking.
 
+`GET /inventory` projects the complete index in one payload: bounded top-level
+counts plus every indexed series with its episode keys and available artifact
+profiles. Series are ordered by AniList ID; episode keys are sorted numerically
+and profiles alphabetically. The initial library is small enough that
+pagination is unnecessary.
+
 ```sh
 ROOT_URL=http://localhost:8080
 
+curl -fsS "$ROOT_URL/api/v1/audio/inventory" | jq .
 curl -fsS "$ROOT_URL/api/v1/audio/series/154587" | jq .
 curl -fsS "$ROOT_URL/api/v1/audio/series/154587/episodes" | jq .
 curl -fsS -X POST "$ROOT_URL/api/v1/audio/reconcile" | jq .
@@ -67,6 +75,10 @@ Configure `[services].root_url`, then use the core client:
 from ja_media_core import HttpAnimeAudioClient
 
 client = HttpAnimeAudioClient()
+inventory = client.inventory()
+for series in inventory.series:
+    print(series.anilist_id, series.episode_keys, series.artifact_profiles)
+
 artifact = client.artifact(154587, "1")
 audio = client.content(154587, "1")
 
