@@ -63,7 +63,7 @@ def main() -> None:
         return
     if args.command == "subsync":
         if args.subsync_command == "reader":
-            from ja_media_frontend.subsync_reader import run_subsync_reader
+            from ja_media_frontend.subsync.reader import run_subsync_reader
 
             run_subsync_reader(
                 media_file=args.media,
@@ -74,7 +74,7 @@ def main() -> None:
             )
             return
         if args.subsync_command == "tui":
-            from ja_media_frontend.subsync_tui import run_subsync_tui
+            from ja_media_frontend.subsync.tui import run_subsync_tui
 
             run_subsync_tui(
                 source_path=args.source,
@@ -83,11 +83,21 @@ def main() -> None:
                 anilist_id=args.anilist,
                 tvdb_id=args.tvdb,
                 episode_number=args.episode,
+                audio_profile=args.audio_profile,
                 fetch_subs=args.fetch_subs,
                 tvdb_media_kind=args.tvdb_kind,
+                sort_by_language=args.sort_by_language,
             )
             return
         args.subsync_parser.print_help()
+        return
+    if args.command == "audio-library":
+        if args.audio_library_command == "ingest":
+            from ja_media_frontend.audio_library.cli import run_audio_library_ingest
+
+            run_audio_library_ingest(args)
+            return
+        args.audio_library_parser.print_help()
         return
 
     parser.print_help()
@@ -100,83 +110,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="command")
 
-    subsync_parser = subparsers.add_parser(
-        "subsync",
-        help="Subtitle synchronization review and repair tools",
-    )
-    subsync_subparsers = subsync_parser.add_subparsers(dest="subsync_command")
-    subsync_reader_parser = subsync_subparsers.add_parser(
-        "reader",
-        help="Open a browser reader for one media file and SRT sidecar",
-    )
-    subsync_reader_parser.add_argument("media", help="Source media file path")
-    subsync_reader_parser.add_argument(
-        "--sub-file",
-        help="Subtitle file path. Defaults to media stem autodiscovery.",
-    )
-    subsync_reader_parser.add_argument(
-        "--host",
-        default="127.0.0.1",
-        help="Local interface to bind. Defaults to 127.0.0.1.",
-    )
-    subsync_reader_parser.add_argument(
-        "--port",
-        type=int,
-        default=0,
-        help="Local port to bind. Defaults to a random free port.",
-    )
-    subsync_reader_parser.add_argument(
-        "--no-open",
-        action="store_true",
-        help="Serve without opening a browser.",
-    )
-    subsync_reader_parser.set_defaults(subsync_parser=subsync_parser)
+    from ja_media_frontend.audio_library.cli import register_audio_library_parser
+    from ja_media_frontend.cli_parsers import register_subsync_parser
 
-    subsync_tui_parser = subsync_subparsers.add_parser(
-        "tui",
-        help="Open the first-pass subtitle timing review TUI",
-    )
-    subsync_tui_parser.add_argument("source", help="Source media file path")
-    subsync_tui_parser.add_argument(
-        "srt",
-        nargs="*",
-        help=(
-            "SRT file path(s) or quoted glob pattern(s), for example "
-            "'../../subs/*.srt'. Optional when using --fetch-subs or F6 lookup."
-        ),
-    )
-    subsync_tui_parser.add_argument(
-        "--anilist",
-        type=int,
-        help="AniList series ID for Kitsunekko subtitle lookup.",
-    )
-    subsync_tui_parser.add_argument(
-        "--tvdb",
-        type=int,
-        help="TVDB series ID for Kitsunekko subtitle lookup.",
-    )
-    subsync_tui_parser.add_argument(
-        "--tvdb-kind",
-        default="tv",
-        help="TVDB media kind passed to the subtitle service. Defaults to tv.",
-    )
-    subsync_tui_parser.add_argument(
-        "--episode",
-        type=int,
-        help="Episode number override. Defaults to parsing the media filename stem.",
-    )
-    subsync_tui_parser.add_argument(
-        "--fetch-subs",
-        action="store_true",
-        help="Fetch matching Kitsunekko SRT candidates before opening the TUI.",
-    )
-    subsync_tui_parser.add_argument(
-        "--window-s",
-        type=float,
-        default=120.0,
-        help="Initial number of subtitle timeline seconds shown on screen.",
-    )
-    subsync_tui_parser.set_defaults(subsync_parser=subsync_parser)
+    register_subsync_parser(subparsers)
+    register_audio_library_parser(subparsers)
 
     search_parser = subparsers.add_parser(
         "get-id",

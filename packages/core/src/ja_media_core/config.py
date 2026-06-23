@@ -10,6 +10,8 @@ from typing import Any, Generic, TypeVar
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from ja_media_core.subtitle_lid import SubtitleLanguageIdConfig
+
 
 CONFIG_ENV_VAR = "JA_MEDIA_CONFIG"
 APP_CONFIG_DIR_NAME = "ja-media-toolkit"
@@ -102,6 +104,14 @@ class ServicesConfig(BaseModel):
     root_url: str | None = None
 
 
+class SubtitleConfig(BaseModel):
+    """Global subtitle analysis and candidate-selection settings."""
+
+    language_id: SubtitleLanguageIdConfig = Field(
+        default_factory=SubtitleLanguageIdConfig
+    )
+
+
 class JaMediaConfig(BaseModel):
     """Top-level user config file.
 
@@ -113,6 +123,7 @@ class JaMediaConfig(BaseModel):
     asr: AsrConfig = Field(default_factory=AsrConfig)
     metadata: MetadataConfig = Field(default_factory=MetadataConfig)
     services: ServicesConfig = Field(default_factory=ServicesConfig)
+    subtitles: SubtitleConfig = Field(default_factory=SubtitleConfig)
 
 
 @dataclass

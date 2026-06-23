@@ -34,6 +34,9 @@ If a specific service is hosted on a different machine or port, you can still ov
 export KITSUNEKKO_SUBTITLES_BASE_URL="http://192.168.1.50:8000"
 ```
 
+The indexed anime-audio client uses the same gateway root plus
+`/api/v1/audio`. Its direct-service override is `ANIME_AUDIO_BASE_URL`.
+
 ## Backend Configuration
 
 The configuration file also supports detailed backend settings. While the `[services]` section handles discovery, the `[asr]` section (and others) allows you to tune the actual ML runtimes.
@@ -49,3 +52,36 @@ vllm_base_url = "http://gpu-server:8000"
 ```
 
 Refer to the [Transcription Guide](/guides/audio/transcribe) for a detailed breakdown of ASR configuration options.
+
+## Subtitle Language Identification
+
+Subtitle tools can share a lightweight language-identification policy through
+`[subtitles.language_id]`. The classifier first measures Unicode scripts and
+only runs sampled FastText identification for ambiguous files. Its result is a
+ranking-oriented bucket: Japanese, unknown, bilingual, non-Japanese, or
+insufficient text.
+
+The defaults favor recall: uncertain candidates remain available, while
+bilingual and non-Japanese subtitles sort later. Override only the thresholds
+that need tuning:
+
+```toml
+[subtitles.language_id]
+# Sample evenly across the complete subtitle when script evidence is ambiguous.
+sample_lines = 50
+min_line_characters = 5
+
+# Candidate selection is intentionally more permissive than corpus cleaning.
+japanese_lid_ratio = 0.60
+bilingual_lid_ratio = 0.15
+
+# Skip model LID for subtitles with a sufficiently strong Japanese profile.
+obvious_japanese_script_ratio = 0.70
+obvious_kana_ratio = 0.08
+obvious_max_foreign_script_ratio = 0.15
+```
+
+Call `analyze_srt_language(path, config=settings.subtitles.language_id)` for a
+file, or `analyze_subtitle_language(cues, ...)` when SRT cues are already
+loaded. The returned analysis includes script metrics, sampled language ratios,
+an explanation, and a `sort_key` suitable for best-first candidate ordering.

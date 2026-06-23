@@ -128,7 +128,7 @@ tried to solve this path:
 root workspace
   -> ja-media-frontend[apple]
     -> ja-media-apple
-      -> ja-media-media / ja-media-core / ja-media-transcripts
+      -> ja-media-media / ja-media-core
 ```
 
 That failed because the same shared packages were visible through two different
@@ -147,7 +147,6 @@ The fix was to make the root workspace explicit:
 members = [
   "packages/core",
   "packages/media",
-  "packages/transcripts",
 ]
 ```
 
@@ -208,7 +207,6 @@ uv built these repo packages from the same Git ref:
 - `ja-media-apple` from `envs/apple`
 - `ja-media-core` from `packages/core`
 - `ja-media-media` from `packages/media`
-- `ja-media-transcripts` from `packages/transcripts`
 
 The installed executable was:
 
@@ -233,9 +231,8 @@ The shape should be:
 packages/frontend          shared parser and user-facing command names
 envs/apple                 Apple backend implementation package
 envs/cuda                  CUDA backend implementation package
-packages/core              stable ASR/VAD/audio contracts
+packages/core              stable ASR/VAD/audio and transcript contracts
 packages/media             media helpers
-packages/transcripts       transcript helpers
 ```
 
 Then `packages/frontend` can grow:

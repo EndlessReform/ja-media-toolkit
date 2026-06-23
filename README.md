@@ -31,9 +31,8 @@ Background services that provide data or compute resources, often deployed in co
 ├── docs/               # Internal design & architectural notes (The "Why")
 ├── site/               # User-facing documentation site (The "How")
 ├── packages/           # Shared logic and shared libraries
-│   ├── core/           # Shared types, config discovery, and contracts
-│   ├── frontend/       # CLI entrypoints and TUI surfaces
-│   └── transcripts/    # SRT/ASS parsing and normalization
+│   ├── core/           # Shared contracts, transcript formats, and config
+│   └── frontend/       # CLI entrypoints and TUI surfaces
 ├── envs/               # Platform-specific runtimes & dependencies
 │   ├── apple/          # MacBook workflows (MLX, Metal, local ASR/VAD)
 │   ├── cuda/           # Nvidia workstation workflows (CUDA ASR)
@@ -78,4 +77,5 @@ uv run ja-media transcribe -c config.local.toml ../../examples/input/jfk.wav --f
 For developers, the following files are essential for understanding the system boundaries:
 - `docs/monorepo-philosophy.md`: Why we separate `packages/` from `envs/`.
 - `docs/ARCHITECTURE.md`: The durable boundaries between ASR, config, and backends.
+- `docs/audio-library/README.md`: Derived anime audio filesystem, metadata, and conversion contracts.
 - `AGENTS.md`: Guidelines for LLMs and agents operating within this codebase.

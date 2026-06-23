@@ -29,10 +29,51 @@ Infrastructure and APIs that facilitate the tools and coordinate data:
     - Explain _why_ key decisions were made
     - Ensure config has nontrivial examples
 
+## File Size Limits — This Must Never Be Allowed to Happen Again™
+
+Large files conceal missing boundaries and make review, testing, and reuse
+needlessly difficult. Treat line count as an architectural smoke alarm.
+
+- **300 lines is the soft limit.** When a source file crosses 300 lines, stop
+  and actively look for a coherent extraction: a reusable widget, domain
+  module, application service, adapter, parser, or focused test module.
+- **500 lines is the hard limit.** Do not create or enlarge a source file past
+  500 lines. Stop the work and refactor before adding more behavior.
+- If an existing file is already over 500 lines, any task touching it must
+  leave it smaller unless the user explicitly scopes the work otherwise.
+- Generated files, lockfiles, vendored code, fixtures, and machine-produced
+  migrations are exempt.
+- Declarative artifacts whose owning tool requires or conventionally exports
+  one monolithic document—such as Grafana dashboard JSON—may also exceed these
+  limits when splitting the file would make it invalid, non-importable, or
+  substantially harder to use. Keep such exceptions narrowly scoped, call
+  them out in the handoff, and prefer a composable source format if the
+  artifact becomes something humans edit frequently.
+- Hand-written application code, tests, scripts, and ordinary configuration
+  remain subject to the limits.
+- Do not game the limit with compressed formatting, giant functions, or
+  meaningless file splits. Extract by responsibility and keep the resulting
+  interfaces explicit.
+
+**Agents: call out limit violations loudly in progress updates and final
+handoffs. A >500-line hand-written file is a stop-the-line architectural
+failure, not a harmless style nit.**
+
 ## Deployment & Infrastructure
 
 The services are typically deployed as a suite of containers coordinated by `compose.yaml` in the root.
 
+- **Remote operations are user-owned.** Under no circumstances should an agent
+  proactively SSH into any machine, connect to a hypervisor or guest, inspect
+  remote containers, alter remote infrastructure, or deploy/restart services.
+  Do not interpret requests to investigate, fix, remediate, or verify a service
+  as authorization for remote access or deployment. Prepare and validate the
+  repository changes locally, then give the user the commands or handoff needed
+  to perform remote operations themselves. This remains in force until these
+  repository instructions explicitly say otherwise.
+- **Local Docker is allowed.** Agents may build, run, restart, inspect, and test
+  containers on the current development machine when useful for validation.
+  Keep local validation clearly distinguished from remote deployment.
 - **Local Stack**: When running via Docker Compose, the primary entry point is `http://localhost:8080`.
 - **macOS Note**: If using OrbStack or Docker Desktop on Mac, verify active containers with `docker ps` to confirm port mapping.
 - **Gateway**: The `site/Caddyfile` defines the unified routing. It serves the static docsite and reverse-proxies `/api/v1/*` requests to the backend services (e.g., `anime-crosswalk` and `kitsunekko-subtitles`).
@@ -56,9 +97,8 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the durable ASR/config/back
 ├── site/                  # User-facing documentation site (Astro/Starlight)
 │   └── Caddyfile          # Unified API Gateway & Static site config
 ├── packages/              # Shared libraries (workspace members)
-│   ├── core/              # Shared types, config discovery, and contracts
-│   ├── frontend/          # CLI entrypoints and TUI surfaces
-│   └── transcripts/       # SRT/ASS parsing, normalization, alignment
+│   ├── core/              # Shared contracts, config, and transcript formats
+│   └── frontend/          # CLI entrypoints and TUI surfaces
 ├── envs/                  # Platform-specific runtimes & dependencies
 │   ├── apple/             # MacBook workflows (MLX, Metal, local ASR/VAD)
 │   ├── cuda/              # Nvidia workstation workflows (CUDA ASR)
@@ -104,10 +144,9 @@ uv run --isolated --with-editable '.[apple]' ja-media transcribe --startup-only 
 #### 4. Running Tests
 `pytest` is a declared dev dependency. Do not use ad hoc `uv run --with pytest ...` invocations unless you are intentionally testing outside the repo environments.
 
-For workspace packages (`packages/core`, `packages/media`, `packages/transcripts`), run tests from the repo root:
+For workspace packages (`packages/core`, `packages/media`), run tests from the repo root:
 ```sh
 uv run pytest packages/core/tests
-uv run pytest packages/transcripts/tests
 ```
 
 For standalone environments that are not root workspace members, run from that environment:
@@ -142,9 +181,9 @@ Assume you have (at a minimum):
 
 ## Secrets
 
-Secrets and local service URLs are in `.env` in repo root. NEVER read this file
-directly with `cat`, `sed`, `rg`, editors, or any other content-printing tool.
-If you need to check that it exists, `stat .env`.
+Secrets are in `.env` in repo root. NEVER read this file directly with `cat`,
+`sed`, `rg`, editors, or any other content-printing tool. If you need to check
+that it exists, `stat .env`.
 
 When a command needs project environment variables, it is the agent's job to
 load them. Source `.env` inside the shell command or use idiomatic tooling
@@ -155,3 +194,21 @@ belong in repo `.env`.
 If an env handoff file is needed for a subprocess, put it in `/tmp` or another
 gitignored location, avoid echoing secret values into logs, and clean it up
 afterward.
+
+## Services
+
+First-party LAN APIs live in `envs/services`, are assembled by the owning
+Compose deployment, and are exposed through stable `/api/v1/*` routes in
+`site/Caddyfile`. Lightweight client contracts and HTTP SDKs live in
+`packages/core`; tools should use those clients rather than construct service
+URLs themselves.
+
+Service URLs are **not** secrets and do not belong in `.env`. Clients resolve a
+service-specific override first, then fall back to `[services].root_url` in
+`~/.config/ja-media-toolkit/config.toml`. See
+[site/src/content/docs/setup/config.md](site/src/content/docs/setup/config.md).
+
+When adding or substantially changing a service, use
+[the add-service skill](.agents/skills/add-service/SKILL.md). It covers the
+complete vertical slice: runtime, core SDK, tests, Compose/Caddy integration,
+`/healthz`, `/metrics`, Prometheus discovery, and docsite updates.

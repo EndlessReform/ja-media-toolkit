@@ -52,12 +52,38 @@ services:
     volumes:
       - anilist-search-data:/var/lib/anilist-search
     healthcheck:
-      test: ["CMD-SHELL", "uv run --no-sync anilist-search-smoke \"$${ANILIST_SEARCH_DB_PATH}\" >/dev/null"]
+      test: ["CMD-SHELL", "uv run --no-sync anilist-search-smoke --url http://127.0.0.1:8000/healthz >/dev/null"]
       interval: 1m
       timeout: 20s
       retries: 3
       start_period: 5m
     command: ["uv", "run", "--no-sync", "anilist-search"]
+
+  anime-audio:
+    build:
+      context: .
+      dockerfile: envs/services/Dockerfile
+    image: ja-media/services:local
+    restart: unless-stopped
+    environment:
+      ANIME_AUDIO_HOST: "0.0.0.0"
+      ANIME_AUDIO_PORT: "8000"
+      ANIME_AUDIO_ROOT_PATH: "/api/v1/audio"
+      ANIME_AUDIO_LIBRARY_ROOT: "/srv/derived/anime-audio"
+      ANIME_AUDIO_DB_PATH: "/var/lib/anime-audio/index.sqlite"
+      ANIME_AUDIO_WATCHER_ENABLED: "${ANIME_AUDIO_WATCHER_ENABLED:-true}"
+      ANIME_AUDIO_WATCHER_DEBOUNCE_SECONDS: "${ANIME_AUDIO_WATCHER_DEBOUNCE_SECONDS:-1}"
+      ANIME_AUDIO_FALLBACK_SCAN_INTERVAL_SECONDS: "${ANIME_AUDIO_FALLBACK_SCAN_INTERVAL_SECONDS:-300}"
+    volumes:
+      - "${ANIME_AUDIO_LIBRARY_PATH:-./data/anime-audio}:/srv/derived/anime-audio:ro"
+      - anime-audio-data:/var/lib/anime-audio
+    healthcheck:
+      test: ["CMD-SHELL", "uv run --no-sync anime-audio-smoke --url http://127.0.0.1:8000/healthz >/dev/null"]
+      interval: 1m
+      timeout: 20s
+      retries: 3
+      start_period: 30s
+    command: ["uv", "run", "--no-sync", "anime-audio"]
 
   kitsunekko-subtitles:
     build:
@@ -93,5 +119,6 @@ services:
 
 volumes:
   anilist-search-data:
+  anime-audio-data:
   anime-crosswalk-data:
   kitsunekko-subtitles-data:

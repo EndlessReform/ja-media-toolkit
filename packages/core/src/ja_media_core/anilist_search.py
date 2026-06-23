@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import json
 import os
-import urllib.error
 import urllib.parse
-import urllib.request
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from ja_media_core.http import ServiceHttpClient
 from ja_media_core.services import service_base_url
 
 ANILIST_SEARCH_BASE_URL_ENV = "ANILIST_SEARCH_BASE_URL"
@@ -96,7 +94,7 @@ class AniListSearchClient(Protocol):
 
 
 class HttpAniListSearchClient:
-    """Small standard-library HTTP client for the LAN AniList search service.
+    """Small HTTPX client for the LAN AniList search service.
 
     Searches anime by title using BM25 ranking and returns AniList IDs
     for downstream crosswalk resolution.
@@ -117,6 +115,11 @@ class HttpAniListSearchClient:
             )
         self.base_url = self._normalize_base_url(configured_url)
         self.timeout_s = timeout_s
+        self._http = ServiceHttpClient(
+            self.base_url,
+            timeout_s=timeout_s,
+            error_label="AniList search request failed",
+        )
 
     @staticmethod
     def _normalize_base_url(base_url: str) -> str:
@@ -164,17 +167,7 @@ class HttpAniListSearchClient:
         return self._get_json("/health")
 
     def _url(self, path: str) -> str:
-        return urllib.parse.urljoin(f"{self.base_url}/", path.lstrip("/"))
+        return self._http.url(path)
 
     def _get_json(self, path: str) -> dict[str, Any] | list[Any]:
-        url = self._url(path)
-        request = urllib.request.Request(url, headers={"Accept": "application/json"})
-        try:
-            with urllib.request.urlopen(request, timeout=self.timeout_s) as response:
-                charset = response.headers.get_content_charset() or "utf-8"
-                return json.loads(response.read().decode(charset))
-        except urllib.error.HTTPError as error:
-            body = error.read().decode("utf-8", errors="replace")
-            raise RuntimeError(
-                f"AniList search request failed: {error.code} {body}"
-            ) from error
+        return self._http.get_json(path)

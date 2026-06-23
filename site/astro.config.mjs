@@ -15,7 +15,9 @@ export default defineConfig({
 					items: [
 						{ label: 'CLI Tools', link: '/setup/tools/' },
 						{ label: 'Services', link: '/setup/services/' },
+						{ label: 'Audiobookshelf', link: '/setup/audiobookshelf/' },
 						{ label: 'Configuration', link: '/setup/config/' },
+						{ label: 'Monitoring', link: '/setup/monitoring/' },
 					],
 				},
 				{

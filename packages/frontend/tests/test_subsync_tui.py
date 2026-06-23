@@ -6,24 +6,31 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
-from ja_media_frontend.subsync_tui import (
-    ConfirmOverwriteModal,
-    GAP_BLOCK,
-    PCM_CHANNELS,
-    PCM_SAMPLE_RATE,
-    PCM_SAMPLE_WIDTH_BYTES,
-    PcmAudioSource,
-    RemoteLookupState,
-    SPAN_BLOCK,
+import numpy as np
+from ja_media_frontend.audio import (
+    DEFAULT_PLAYBACK_SAMPLE_RATE,
+    MaterializedAudio,
+)
+from ja_media_frontend.subsync.dialogs import ConfirmOverwriteModal
+from ja_media_frontend.subsync.models import RemoteLookupState
+from ja_media_frontend.subsync.tui import (
     SubtitleTrack,
     SubsyncTuiApp,
-    load_pcm_audio_source,
-    parse_ass,
     playback_range,
     resolve_srt_inputs,
-    runtime_episode_number,
 )
-from ja_media_core.srt import read_srt
+from ja_media_frontend.widgets.timeline import (
+    GAP_BLOCK,
+    SPAN_BLOCK,
+    TimelineWidget,
+)
+from ja_media_core.subtitle_lid import (
+    SubtitleLanguage,
+    SubtitleLanguageIdConfig,
+    analyze_subtitle_language,
+)
+from ja_media_core.subsync import infer_episode_number
+from ja_media_core.transcripts import parse_ass, read_srt
 
 
 SRT_TEXT = (
@@ -44,14 +51,12 @@ ASS_TEXT = (
 )
 
 
-def make_audio_source(path: Path, *, seconds: float = 10.0) -> PcmAudioSource:
-    frame_count = round(seconds * PCM_SAMPLE_RATE)
-    return PcmAudioSource(
+def make_audio_source(path: Path, *, seconds: float = 10.0) -> MaterializedAudio:
+    frame_count = round(seconds * DEFAULT_PLAYBACK_SAMPLE_RATE)
+    return MaterializedAudio(
         source_path=path,
-        sample_rate=PCM_SAMPLE_RATE,
-        channels=PCM_CHANNELS,
-        sample_width_bytes=PCM_SAMPLE_WIDTH_BYTES,
-        pcm=b"\x00\x00" * frame_count,
+        sample_rate=DEFAULT_PLAYBACK_SAMPLE_RATE,
+        samples=np.zeros((frame_count, 1), dtype=np.int16),
     )
 
 
@@ -92,67 +97,8 @@ class SubsyncTuiTest(unittest.TestCase):
     def test_resolve_srt_inputs_can_be_empty_for_remote_lookup(self) -> None:
         self.assertEqual(resolve_srt_inputs([], allow_empty=True), [])
 
-    def test_runtime_episode_number_parses_media_filename_stem(self) -> None:
-        self.assertEqual(runtime_episode_number("[Group] GANTZ.S01E16.1080p"), 16)
-
-    def test_load_pcm_audio_source_decodes_first_audio_stream(self) -> None:
-        with TemporaryDirectory() as tmpdir:
-            source = Path(tmpdir) / "episode.mkv"
-            source.write_bytes(b"fake")
-            pcm = b"\x00\x00\x01\x00"
-
-            with (
-                patch(
-                    "ja_media_frontend.subsync_tui.shutil.which", return_value="ffmpeg"
-                ),
-                patch(
-                    "ja_media_frontend.subsync_tui.subprocess.run",
-                    return_value=Mock(returncode=0, stdout=pcm, stderr=b""),
-                ) as run,
-            ):
-                audio = load_pcm_audio_source(source)
-
-            command = run.call_args.args[0]
-            self.assertEqual(audio.source_path, source)
-            self.assertEqual(audio.pcm, pcm)
-            self.assertEqual(audio.sample_rate, PCM_SAMPLE_RATE)
-            self.assertEqual(audio.channels, PCM_CHANNELS)
-            self.assertEqual(
-                command[:6],
-                ["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", str(source)],
-            )
-            self.assertIn("-map", command)
-            self.assertIn("0:a:0", command)
-            self.assertIn("pcm_s16le", command)
-            self.assertEqual(command[-2:], ["s16le", "pipe:1"])
-
-    def test_load_pcm_audio_source_bails_loudly_when_ffmpeg_is_missing(self) -> None:
-        with TemporaryDirectory() as tmpdir:
-            source = Path(tmpdir) / "episode.mkv"
-            source.write_bytes(b"fake")
-
-            with patch("ja_media_frontend.subsync_tui.shutil.which", return_value=None):
-                with self.assertRaisesRegex(SystemExit, "ffmpeg not found"):
-                    load_pcm_audio_source(source)
-
-    def test_load_pcm_audio_source_includes_ffmpeg_stderr_on_failure(self) -> None:
-        with TemporaryDirectory() as tmpdir:
-            source = Path(tmpdir) / "episode.mkv"
-            source.write_bytes(b"fake")
-
-            with (
-                patch(
-                    "ja_media_frontend.subsync_tui.shutil.which", return_value="ffmpeg"
-                ),
-                patch(
-                    "ja_media_frontend.subsync_tui.subprocess.run",
-                    return_value=Mock(
-                        returncode=1, stdout=b"", stderr=b"Stream map failed"
-                    ),
-                ),
-            ):
-                with self.assertRaisesRegex(SystemExit, "Stream map failed"):
-                    load_pcm_audio_source(source)
+    def test_infer_episode_number_parses_media_filename_stem(self) -> None:
+        self.assertEqual(infer_episode_number("[Group] GANTZ.S01E16.1080p"), 16)
 
     def test_key_navigation_moves_current_cue(self) -> None:
         async def run_app() -> tuple[int, str]:
@@ -195,7 +141,7 @@ class SubsyncTuiTest(unittest.TestCase):
                     initial_window_s=10.0,
                 )
                 async with app.run_test(size=(180, 40)):
-                    return app.timeline_bar_width()
+                    return app.query_one("#timeline", TimelineWidget).bar_width()
 
         self.assertGreaterEqual(asyncio.run(run_app()), 160)
 
@@ -222,11 +168,11 @@ class SubsyncTuiTest(unittest.TestCase):
                     initial_window_s=4.0,
                 )
                 async with app.run_test():
-                    return app._activity_bar(
+                    timeline = app.query_one("#timeline", TimelineWidget)
+                    return timeline.activity_bar(
                         width=8,
                         start_s=0.0,
                         end_s=4.0,
-                        active_cue=None,
                     ).plain
 
         self.assertEqual(
@@ -309,7 +255,7 @@ class SubsyncTuiTest(unittest.TestCase):
                     tracks=[SubtitleTrack(srt, read_srt(srt))],
                     initial_window_s=10.0,
                 )
-                with patch("ja_media_frontend.subsync_tui.write_clipboard") as copy:
+                with patch("ja_media_frontend.subsync.tui.write_clipboard") as copy:
                     async with app.run_test() as pilot:
                         await pilot.press("ctrl+c")
                         await pilot.press("l")
@@ -342,6 +288,96 @@ class SubsyncTuiTest(unittest.TestCase):
             table = app.render_candidates()
 
         self.assertEqual(len(table.rows), 2)
+        self.assertNotIn("LID", [column.header for column in table.columns])
+
+    def test_opt_in_language_sort_places_japanese_before_bilingual_and_foreign(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            media = tmp / "episode.mp3"
+            media.write_bytes(b"fake")
+            config = SubtitleLanguageIdConfig(
+                minimum_lines=1,
+                minimum_characters=1,
+                obvious_japanese_script_ratio=0.95,
+            )
+
+            japanese_cues = read_srt_from_text(
+                "1\n00:00:01,000 --> 00:00:02,000\n今日は学校へ行きます。\n"
+            )
+            bilingual_cues = read_srt_from_text(
+                "1\n00:00:01,000 --> 00:00:02,000\n"
+                "今日は学校へ行きます。\nI am going to school today.\n"
+            )
+            foreign_cues = read_srt_from_text(
+                "1\n00:00:01,000 --> 00:00:02,000\n"
+                "This is an English subtitle candidate.\n"
+            )
+
+            japanese = SubtitleTrack(
+                tmp / "japanese.srt",
+                japanese_cues,
+                language_analysis=analyze_subtitle_language(
+                    japanese_cues,
+                    config=config,
+                    detector=lambda _: "ja",
+                ),
+            )
+            bilingual = SubtitleTrack(
+                tmp / "bilingual.srt",
+                bilingual_cues,
+                language_analysis=analyze_subtitle_language(
+                    bilingual_cues,
+                    config=config,
+                    detector=lambda line: "ja" if "。" in line else "en",
+                ),
+            )
+            foreign = SubtitleTrack(
+                tmp / "foreign.srt",
+                foreign_cues,
+                language_analysis=analyze_subtitle_language(
+                    foreign_cues,
+                    config=config,
+                    detector=lambda _: "en",
+                ),
+            )
+            app = SubsyncTuiApp(
+                audio_source=make_audio_source(media),
+                tracks=[foreign, bilingual, japanese],
+                initial_window_s=10.0,
+                sort_by_language=True,
+            )
+
+            app.track_index = 1
+            app.sort_tracks_by_language()
+
+        self.assertEqual(
+            [track.language_analysis.language for track in app.tracks],
+            [
+                SubtitleLanguage.JAPANESE,
+                SubtitleLanguage.BILINGUAL,
+                SubtitleLanguage.NON_JAPANESE,
+            ],
+        )
+        self.assertIs(app.track, bilingual)
+
+    def test_language_sort_is_disabled_by_default(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            media = tmp / "episode.mp3"
+            media.write_bytes(b"fake")
+            first = SubtitleTrack(tmp / "first.srt", [])
+            second = SubtitleTrack(tmp / "second.srt", [])
+            app = SubsyncTuiApp(
+                audio_source=make_audio_source(media),
+                tracks=[first, second],
+                initial_window_s=10.0,
+            )
+
+            app.sort_tracks_by_language()
+
+        self.assertEqual(app.tracks, [first, second])
 
     def test_empty_tui_state_renders_without_tracks(self) -> None:
         with TemporaryDirectory() as tmpdir:
@@ -363,6 +399,32 @@ class SubsyncTuiTest(unittest.TestCase):
 
         self.assertIn("anilist:395 ep:16", source)
         self.assertEqual(len(candidates.rows), 1)
+
+    def test_title_promotes_anilist_label_once_tracks_loaded(self) -> None:
+        async def run_app() -> tuple[str, str]:
+            with TemporaryDirectory() as tmpdir:
+                tmp = Path(tmpdir)
+                media = tmp / "episode.mp3"
+                srt = tmp / "episode.srt"
+                media.write_bytes(b"fake")
+                srt.write_text(SRT_TEXT, encoding="utf-8")
+                app = SubsyncTuiApp(
+                    audio_source=make_audio_source(media),
+                    tracks=[SubtitleTrack(srt, read_srt(srt))],
+                    initial_window_s=10.0,
+                    remote_state=RemoteLookupState(
+                        source="anilist",
+                        external_id=395,
+                        episode_number=16,
+                    ),
+                )
+                async with app.run_test() as pilot:
+                    await pilot.pause()
+                    return app.title, app.render_source().plain
+
+        title, source = asyncio.run(run_app())
+        self.assertEqual(title, "anilist:395 ep:16")
+        self.assertNotIn("anilist:395 ep:16", source)
 
     def test_fetch_remote_tracks_appends_srt_candidates(self) -> None:
         with TemporaryDirectory() as tmpdir:
@@ -393,7 +455,7 @@ class SubsyncTuiTest(unittest.TestCase):
             fake_client.file_content.return_value = SRT_TEXT.encode("utf-8")
 
             with patch(
-                "ja_media_frontend.subsync_tui.HttpKitsunekkoSubtitlesClient",
+                "ja_media_frontend.subsync.tui.HttpKitsunekkoSubtitlesClient",
                 return_value=fake_client,
             ):
                 added, first_idx = app.fetch_remote_tracks()
@@ -433,7 +495,7 @@ class SubsyncTuiTest(unittest.TestCase):
             fake_client.file_content.return_value = ASS_TEXT.encode("utf-8")
 
             with patch(
-                "ja_media_frontend.subsync_tui.HttpKitsunekkoSubtitlesClient",
+                "ja_media_frontend.subsync.tui.HttpKitsunekkoSubtitlesClient",
                 return_value=fake_client,
             ):
                 added, first_idx = app.fetch_remote_tracks()
@@ -476,7 +538,7 @@ class SubsyncTuiTest(unittest.TestCase):
             )
 
             with patch(
-                "ja_media_frontend.subsync_tui.HttpKitsunekkoSubtitlesClient",
+                "ja_media_frontend.subsync.tui.HttpKitsunekkoSubtitlesClient",
                 return_value=fake_client,
             ):
                 app.fetch_remote_tracks_or_exit()
@@ -532,7 +594,7 @@ class SubsyncTuiTest(unittest.TestCase):
                 )
                 async with app.run_test() as pilot:
                     with patch(
-                        "ja_media_frontend.subsync_tui.shutil.copy2",
+                        "ja_media_frontend.subsync.tui.shutil.copy2",
                         side_effect=PermissionError("metadata denied"),
                     ) as copy2:
                         app.action_promote()
@@ -614,7 +676,7 @@ class SubsyncTuiTest(unittest.TestCase):
 
 
 def read_srt_from_text(text: str):
-    from ja_media_core.srt import parse_srt
+    from ja_media_core.transcripts import parse_srt
 
     return parse_srt(text)
 

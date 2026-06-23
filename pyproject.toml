@@ -10,7 +10,6 @@ dependencies = []
 members = [
   "packages/core",
   "packages/media",
-  "packages/transcripts",
 ]
 
 [dependency-groups]

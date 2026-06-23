@@ -8,7 +8,6 @@ dependencies = [
     "ja-media-core",
     "ja-media-frontend",
     "ja-media-media",
-    "ja-media-transcripts",
     "librosa>=0.11.0",
     "mlx-audio",
     "rich>=15.0.0",
@@ -29,7 +28,6 @@ build-backend = "hatchling.build"
 [tool.uv.sources]
 ja-media-core = { path = "../../packages/core", editable = true }
 ja-media-media = { path = "../../packages/media", editable = true }
-ja-media-transcripts = { path = "../../packages/transcripts", editable = true }
 mlx-audio = { git = "https://github.com/Blaizzy/mlx-audio.git", rev = "f7c11556eda88731be5cc75ddbdf4a4cb9eeaafc" }
 transformers = { git = "https://github.com/huggingface/transformers.git", rev = "cbb65a4815d44f1d8b8ff7f51cca24ce491fc09e" }
 ja-media-frontend = { path = "../../packages/frontend", editable = true }

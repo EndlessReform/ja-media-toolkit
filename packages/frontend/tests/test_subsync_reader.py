@@ -6,7 +6,7 @@ from tempfile import TemporaryDirectory
 
 from fastapi import HTTPException
 
-from ja_media_frontend.subsync_reader import (
+from ja_media_frontend.subsync.reader import (
     discover_subtitle_file,
     parse_range_header,
 )

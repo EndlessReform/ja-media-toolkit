@@ -96,10 +96,11 @@ It should own:
 - a small synchronous HTTP client, for example `HttpAnimeCrosswalkClient`
 - URL/path construction helpers so callers do not hand-build endpoint strings
 
-Keep this dependency-light. Prefer the Python standard library HTTP stack for
-the first client if that avoids adding `httpx` to `packages/core`. If the client
-becomes painful or needs async behavior, move concrete HTTP clients into a
-separate package later and keep only DTOs/protocols in core.
+Keep this dependency-light, but use the shared synchronous HTTPX transport in
+`packages/core`. First-party LAN clients set `trust_env=False`: they should
+reach the configured gateway directly, and macOS system-proxy discovery can
+initialize Network.framework state that is unsafe before a later fork-based
+subprocess. Keep DTOs and protocols independent of the concrete transport.
 
 The client should expose methods like:
 

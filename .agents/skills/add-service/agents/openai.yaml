@@ -1,0 +1,4 @@
+interface:
+  display_name: "Add a Service"
+  short_description: "Add a complete ja-media LAN service"
+  default_prompt: "Use $add-service to add a new ja-media LAN service end to end."

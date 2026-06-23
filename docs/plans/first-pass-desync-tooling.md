@@ -96,7 +96,7 @@ Implemented behavior:
 
 - resolves a source media file and one or more `.srt` paths or quoted globs;
 - parses `.srt` cues into runtime-free `SubtitleCue` values in
-  `packages/transcripts`;
+  `ja_media_core.transcripts`;
 - lists candidates with current cue, total cue count, active subtitle time, and
   total subtitle span;
 - renders the selected candidate's subtitle activity as a wide Textual timeline
@@ -114,16 +114,15 @@ exercises the durable SRT parsing contract and establishes the Textual layout.
 
 ## Repo Fit
 
-The repo already has the right split:
+The repo keeps the shared boundary deliberately small:
 
-- `packages/core` owns durable, runtime-free media and VAD contracts.
-- `packages/transcripts` is the right home for subtitle timing parsing,
-  interval scoring, retiming, and report models.
+- `packages/core` owns durable, runtime-free media, VAD, and transcript
+  contracts plus lightweight subtitle parsing and formatting.
 - `envs/apple` should own the first runnable command because the available VAD
   implementation is `MlxAudioVadBackend`.
 
-Do not add model dependencies to `packages/transcripts`. It should operate on
-plain timing intervals and report objects. The environment command should
+Do not add model dependencies to `packages/core`. Transcript helpers should
+operate on plain timing intervals and report objects. The environment command should
 materialize media, run VAD, call the transcript/scoring library, and write
 outputs.
 
@@ -175,7 +174,7 @@ but they should not pretend to be VAD output.
 
 Home:
 
-- pure parsing/retiming in `packages/transcripts`
+- pure parsing/retiming in `ja_media_core.transcripts`
 - Textual app and command wiring in `envs/apple`
 
 Build:
@@ -202,7 +201,7 @@ safe sidecar export remain the next Phase 1 work.
 
 Home:
 
-- pure scoring in `packages/transcripts`
+- pure scoring in `ja_media_core.transcripts`
 - VAD execution and Textual integration in `envs/apple`
 
 Workflow:

@@ -38,9 +38,8 @@ Recommended initial shape:
 ```text
 .
 ├── packages/
-│   ├── core/          # shared types, config, manifests, job/result contracts
-│   ├── media/         # filesystem/media utilities: renaming, probing, chunks
-│   └── transcripts/   # SRT/ASS parsing, normalization, alignment, scoring
+│   ├── core/          # shared contracts, config, and transcript formats
+│   └── media/         # filesystem/media utilities: renaming, probing, chunks
 ├── envs/
 │   ├── apple/         # MacBook workflows: MLX, Metal, local experiments
 │   ├── cuda/          # Nvidia workstation workflows: CUDA ASR, VAD, diarization
@@ -56,11 +55,9 @@ name exists.
 Good package boundaries:
 
 - `core`: dataclasses, protocols, path conventions, manifests, artifact records,
-  job/result schemas.
+  job/result schemas, and lightweight transcript/subtitle processing.
 - `media`: local file operations, safe renaming plans, ffmpeg/probing wrappers,
   chunk manifests.
-- `transcripts`: subtitle parsing, transcript normalization, timing comparison,
-  scoring against reference transcripts.
 
 Avoid early package explosions like:
 
@@ -96,7 +93,6 @@ The root workspace can include the shared packages:
 members = [
   "packages/core",
   "packages/media",
-  "packages/transcripts",
 ]
 ```
 
@@ -120,7 +116,6 @@ dependencies = [
   "ja-media-core",
   "ja-media-frontend",
   "ja-media-media",
-  "ja-media-transcripts",
   "mlx-audio",
 ]
 
@@ -131,7 +126,6 @@ ja-media = "ja_media_frontend.cli:main"
 ja-media-core = { path = "../../packages/core", editable = true }
 ja-media-frontend = { path = "../../packages/frontend", editable = true }
 ja-media-media = { path = "../../packages/media", editable = true }
-ja-media-transcripts = { path = "../../packages/transcripts", editable = true }
 ```
 
 Example `envs/cuda/pyproject.toml`:
@@ -144,7 +138,6 @@ dependencies = [
   "ja-media-core",
   "ja-media-frontend",
   "ja-media-media",
-  "ja-media-transcripts",
   "torch",
   "vllm",
 ]
@@ -156,7 +149,6 @@ ja-media = "ja_media_frontend.cli:main"
 ja-media-core = { path = "../../packages/core", editable = true }
 ja-media-frontend = { path = "../../packages/frontend", editable = true }
 ja-media-media = { path = "../../packages/media", editable = true }
-ja-media-transcripts = { path = "../../packages/transcripts", editable = true }
 ```
 
 Example `envs/services/pyproject.toml`:
@@ -167,7 +159,6 @@ name = "ja-media-services"
 requires-python = ">=3.13"
 dependencies = [
   "ja-media-core",
-  "ja-media-transcripts",
   "fastapi",
   "uvicorn",
 ]
@@ -177,7 +168,6 @@ kitsunekko-api = "ja_media_services.kitsunekko_api:main"
 
 [tool.uv.sources]
 ja-media-core = { path = "../../packages/core", editable = true }
-ja-media-transcripts = { path = "../../packages/transcripts", editable = true }
 ```
 
 This keeps dependency ownership obvious:
@@ -268,8 +258,7 @@ uv run ja-media benchmark-asr diet-corpus.yaml
 ```
 
 Benchmark code can live in `envs/cuda` at first. If Apple and services also need
-parts of it later, move the shared parts into `packages/transcripts` or
-`packages/core`.
+parts of it later, move the shared parts into `packages/core`.
 
 ### Run Kitsunekko service
 
@@ -334,7 +323,7 @@ Examples:
 - CUDA-only ASR adapter starts in `envs/cuda`.
 - MLX-only VAD adapter starts in `envs/apple`.
 - transcript scoring used by CUDA benchmarks and services moves to
-  `packages/transcripts`.
+  `ja_media_core.transcripts`.
 - safe rename planning used everywhere moves to `packages/media`.
 - shared job/result dataclasses move to `packages/core`.
 
@@ -371,9 +360,9 @@ Put code in `envs/services` when:
 1. Move `mlx-audio` out of the root `pyproject.toml`.
 2. Create `envs/apple` and put `mlx-audio` there.
 3. Keep only shared packages under `packages/`.
-4. Rename the current `packages/transcription` only when its role is clearer:
-   either fold it into `packages/core`, fold it into `packages/transcripts`, or
-   keep transcription-specific code inside `envs/apple` / `envs/cuda`.
+4. Keep backend-neutral transcript contracts and format helpers in
+   `ja_media_core.transcripts`; keep runtime-specific transcription code inside
+   `envs/apple` / `envs/cuda`.
 5. Add `envs/cuda` when workstation work begins.
 6. Add `envs/services` when Kitsunekko or media-server services begin.
 
