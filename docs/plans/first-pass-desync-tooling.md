@@ -83,34 +83,6 @@ rank  candidate                 verdict          score  offset    drift
 recommended: apply +0.450s to Some.Group.E07.ja.srt
 ```
 
-### Current Manual Review Shell
-
-The first landed interface is a manual timing-review TUI:
-
-```sh
-cd envs/apple
-uv run ja-media subsync tui ../../media/episode.mkv '../../subs/*.srt'
-```
-
-Implemented behavior:
-
-- resolves a source media file and one or more `.srt` paths or quoted globs;
-- parses `.srt` cues into runtime-free `SubtitleCue` values in
-  `ja_media_core.transcripts`;
-- lists candidates with current cue, total cue count, active subtitle time, and
-  total subtitle span;
-- renders the selected candidate's subtitle activity as a wide Textual timeline
-  using colored half-block cue spans and blank gaps;
-- shows the currently selected subtitle text;
-- supports `h/l` for previous/next cue, `j/k` for candidate selection,
-  `gg/G` for start/end, Vim-style page and half-page movement, and `+/-` zoom;
-- binds `space` to exact-boundary playback of the current cue from decoded
-  in-memory PCM;
-- stops active playback when moving between cues with `h/l` or quitting.
-
-The current shell intentionally does not score candidates, infer offsets, nudge
-timing, or write repaired sidecars yet. It is a listening/review surface that
-exercises the durable SRT parsing contract and establishes the Textual layout.
 
 ## Repo Fit
 
@@ -179,23 +151,10 @@ Home:
 
 Build:
 
-- [x] Add a `subsync tui` command that opens a Textual app.
-- [x] Parse `.srt` into `SubtitleCue` values.
-- [x] Write `.srt` while preserving cue text and ordering.
-- [x] Shift cue timestamps by a constant offset.
-- [x] Clamp or reject negative timestamps with explicit behavior.
-- [x] Let the TUI load media/subtitle paths and list candidates.
-- [x] Add tests for parsing, formatting, and offset application.
 - [ ] Accept a manual offset in the TUI.
-- [ ] Preview an output path and write a new sidecar file from the TUI.
-- [ ] Add overwrite-safety tests for sidecar export.
 
 This gives an immediately useful terminal workflow before automatic scoring:
 open candidates, apply a known offset, and write the corrected SRT safely.
-
-The first usable slice is slightly narrower: open candidates, inspect timing
-activity, navigate cues, and listen to exact cue boundaries. Manual offset and
-safe sidecar export remain the next Phase 1 work.
 
 ### Phase 2: VAD-Based Candidate Scoring In The TUI
 
