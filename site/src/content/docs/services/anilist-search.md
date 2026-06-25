@@ -155,7 +155,9 @@ for character in metadata.get("characters", []):
 `GET /healthz`
 
 Returns the current health status of the service and the index size.
-`GET /health` remains available as a compatibility alias.
+`GET /health` remains available as a compatibility alias. Fallback counters are
+process-local and reset when the service restarts; cache row counts are read
+from DuckDB.
 
 **Response Body:**
 ```json
@@ -169,6 +171,47 @@ Returns the current health status of the service and the index size.
     "consecutive_failures": 0,
     "last_index_rows": 12345,
     "stale": false
+  },
+  "fallback": {
+    "cached_rows": 42,
+    "expired_rows": 3,
+    "negative_rows": 2,
+    "inflight_exact_ids": 0,
+    "exact_coalesced_waits": 1,
+    "exact_hit_rate": 0.75,
+    "search_hit_rate": 0.5,
+    "exact_requests": 8,
+    "exact_cache_hits": 6,
+    "exact_cache_misses": 2,
+    "search_requests": 4,
+    "search_cache_hits": 2,
+    "search_cache_misses": 2,
+    "outbound_requests": 4,
+    "outbound_429s": 0,
+    "outbound_errors": 0
   }
 }
 ```
+
+### Metrics
+`GET /metrics`
+
+Returns Prometheus exposition text. The metrics include the local index row
+count, refresh freshness, fallback cache row counts, process-local exact/search
+request counters, cache hits and misses, coalesced exact-ID waits, outbound
+AniList requests, `429` responses, and outbound errors.
+
+Useful metric names:
+
+| Metric | Meaning |
+| :--- | :--- |
+| `anilist_search_rows_total` | Rows in the local CSV-backed search index. |
+| `anilist_search_refresh_consecutive_failures` | Consecutive failed refresh attempts. |
+| `anilist_search_fallback_cached_rows` | Direct AniList fallback rows in DuckDB. |
+| `anilist_search_fallback_requests_total{kind="exact"}` | Exact-ID fallback requests. |
+| `anilist_search_fallback_requests_total{kind="search"}` | Forced-search fallback requests. |
+| `anilist_search_fallback_cache_hits_total{kind="exact"}` | Exact-ID fallback cache hits. |
+| `anilist_search_fallback_cache_hits_total{kind="search"}` | Forced-search query cache hits. |
+| `anilist_search_fallback_outbound_requests_total` | Outbound AniList GraphQL requests. |
+| `anilist_search_fallback_outbound_429s_total` | AniList rate-limit responses. |
+| `anilist_search_fallback_outbound_errors_total` | Outbound AniList failures. |

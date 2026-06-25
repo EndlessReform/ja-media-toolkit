@@ -11,6 +11,7 @@ from ja_media_services.anilist_search import dataset, db
 from ja_media_services.anilist_search.anilist_api import AniListApiError
 from ja_media_services.anilist_search.app import app_state, create_app
 from ja_media_services.anilist_search.fallback_cache import FallbackTtlPolicy
+from ja_media_services.anilist_search.observability import FallbackObserver
 from ja_media_services.anilist_search.search_fallback import resolve_search_fallback
 
 
@@ -102,12 +103,14 @@ def configure_app_state(con: object, client: object) -> None:
     app_state.con = con  # type: ignore[assignment]
     app_state.anilist_client = client  # type: ignore[assignment]
     app_state.fallback_ttl_policy = ttl_policy()
+    app_state.fallback_observer = FallbackObserver()
 
 
 def reset_app_state() -> None:
     app_state.con = None
     app_state.anilist_client = None
     app_state.fallback_ttl_policy = None
+    app_state.fallback_observer = FallbackObserver()
 
 
 def test_search_defaults_to_local_bm25_without_anilist_call(tmp_path: Path) -> None:
@@ -150,6 +153,16 @@ def test_forced_search_fetches_anilist_and_caches_query(tmp_path: Path) -> None:
         assert second.status_code == 200
         assert second.json()[0]["anilist_id"] == 169580
         assert client.calls == 1
+        fallback = api.get("/healthz").json()["fallback"]
+        metrics = api.get("/metrics").text
+        assert fallback["cached_rows"] == 1
+        assert fallback["search_requests"] == 2
+        assert fallback["search_cache_hits"] == 1
+        assert fallback["search_cache_misses"] == 1
+        assert fallback["outbound_requests"] == 1
+        assert fallback["search_hit_rate"] == 0.5
+        assert 'anilist_search_fallback_requests_total{kind="search"} 2.0' in metrics
+        assert "anilist_search_fallback_cached_rows 1.0" in metrics
     finally:
         reset_app_state()
         con.close()

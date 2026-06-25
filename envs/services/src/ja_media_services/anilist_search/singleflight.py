@@ -20,6 +20,12 @@ class ExactIdSingleFlight:
         self._tasks: dict[int, asyncio.Task[T]] = {}
         self.coalesced_waits = 0
 
+    @property
+    def inflight_count(self) -> int:
+        """Return a low-cost snapshot for health and metrics reporting."""
+
+        return len(self._tasks)
+
     async def run(
         self,
         anilist_id: int,
@@ -43,6 +49,6 @@ class ExactIdSingleFlight:
                     if self._tasks.get(anilist_id) is task:
                         del self._tasks[anilist_id]
 
-    async def inflight_count(self) -> int:
+    async def inflight_count_async(self) -> int:
         async with self._lock:
             return len(self._tasks)

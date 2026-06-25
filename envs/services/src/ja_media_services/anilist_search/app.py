@@ -12,7 +12,6 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Query
 
 from ja_media_services.anilist_search.db import (
-    get_row_count,
     open_db,
     rebuild_from_cached_csv,
     resolve_formats,
@@ -29,6 +28,12 @@ from ja_media_services.anilist_search.fallback_cache import FallbackTtlPolicy
 from ja_media_services.anilist_search.metadata import (
     anime_metadata_exists,
     fetch_anime_metadata,
+)
+from ja_media_services.anilist_search.observability import (
+    FallbackObserver,
+)
+from ja_media_services.anilist_search.observability_routes import (
+    register_observability_routes,
 )
 from ja_media_services.anilist_search.refresh import RefreshStatus, background_refresh
 from ja_media_services.anilist_search.search_fallback import (
@@ -50,6 +55,7 @@ class AppState:
     anilist_limiter: AsyncLimiter | None = None
     anilist_client: AniListGraphQLClient | None = None
     fallback_ttl_policy: FallbackTtlPolicy | None = None
+    fallback_observer = FallbackObserver()
     exact_id_singleflight = ExactIdSingleFlight()
     _lock = threading.Lock()
     refresh_status = RefreshStatus()
@@ -95,6 +101,7 @@ async def lifespan(app: FastAPI):
         finished_seconds=settings.fallback_finished_ttl_seconds,
         negative_seconds=settings.fallback_negative_ttl_seconds,
     )
+    app_state.fallback_observer = FallbackObserver()
     app_state.exact_id_singleflight = ExactIdSingleFlight()
     app_state.refresh_status.last_attempt_unix = time.time()
     app_state.refresh_status.last_success_unix = app_state.refresh_status.last_attempt_unix
@@ -128,6 +135,7 @@ async def lifespan(app: FastAPI):
         app_state.anilist_limiter = None
         app_state.anilist_client = None
         app_state.fallback_ttl_policy = None
+        app_state.fallback_observer = FallbackObserver()
         app_state.exact_id_singleflight = ExactIdSingleFlight()
         if active_connection is not None:
             active_connection.close()
@@ -175,6 +183,7 @@ def create_app() -> FastAPI:
                     db_lock=app_state._lock,
                     client=anilist_client,
                     ttl_policy=ttl_policy,
+                    observer=app_state.fallback_observer,
                 )
             except SearchFallbackUnavailable as exc:
                 raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -231,6 +240,7 @@ def create_app() -> FastAPI:
                 client=anilist_client,
                 ttl_policy=ttl_policy,
                 singleflight=app_state.exact_id_singleflight,
+                observer=app_state.fallback_observer,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -239,26 +249,7 @@ def create_app() -> FastAPI:
         except ExactFallbackUnavailable as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    @app.get("/health", include_in_schema=False)
-    @app.get("/healthz")
-    def health() -> dict:
-        con = app_state.con
-        if con is None:
-            raise HTTPException(status_code=503, detail="Index not ready")
-        with app_state._lock:
-            rows = get_row_count(con)
-        refresh = app_state.refresh_status.as_dict(
-            stale_after_seconds=max(app_state.update_interval_seconds * 3, 1)
-        )
-        status = "degraded" if refresh["stale"] or refresh["consecutive_failures"] else "ok"
-        if status == "degraded":
-            logger.warning(
-                "AniList search health is degraded (rows=%d refresh=%s)",
-                rows,
-                refresh,
-            )
-        return {"status": status, "rows": rows, "refresh": refresh}
-
+    register_observability_routes(app, app_state, logger=logger)
     return app
 
 

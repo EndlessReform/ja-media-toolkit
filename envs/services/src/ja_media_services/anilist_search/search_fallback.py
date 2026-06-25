@@ -21,6 +21,7 @@ from ja_media_services.anilist_search.fallback_query_cache import (
     FallbackQueryRow,
     query_cache_key,
 )
+from ja_media_services.anilist_search.observability import FallbackObserver
 
 
 class AniListSearchFallbackClient(Protocol):
@@ -48,10 +49,12 @@ async def resolve_search_fallback(
     db_lock: threading.Lock,
     client: AniListSearchFallbackClient,
     ttl_policy: FallbackTtlPolicy,
+    observer: FallbackObserver | None = None,
     now: float | None = None,
 ) -> list[dict[str, Any]]:
     """Resolve a forced title search through AniList and durable DuckDB caches."""
 
+    _increment(observer, "search_requests")
     cache_key = query_cache_key(
         query=query,
         top_k=top_k,
@@ -61,7 +64,9 @@ async def resolve_search_fallback(
     )
     fresh = _read_query_cache(con, db_lock, cache_key, fresh_only=True, now=now)
     if fresh is not None:
+        _increment(observer, "search_cache_hits")
         return _rows_for_cached_ids(con, db_lock, ttl_policy, fresh.result_ids)
+    _increment(observer, "search_cache_misses")
 
     stale = _read_query_cache(con, db_lock, cache_key, fresh_only=False, now=now)
     try:
@@ -75,6 +80,7 @@ async def resolve_search_fallback(
             db_lock=db_lock,
             client=client,
             ttl_policy=ttl_policy,
+            observer=observer,
             now=now,
         )
     except AniListApiError as exc:
@@ -95,10 +101,16 @@ async def _fetch_cache_and_project(
     db_lock: threading.Lock,
     client: AniListSearchFallbackClient,
     ttl_policy: FallbackTtlPolicy,
+    observer: FallbackObserver | None,
     now: float | None,
 ) -> list[dict[str, Any]]:
     per_page = max(min(top_k * 3, 50), min(top_k, 50), 10)
-    media = await _search_honoring_retry_after(client, query, per_page=per_page)
+    media = await _search_honoring_retry_after(
+        client,
+        query,
+        per_page=per_page,
+        observer=observer,
+    )
     formats = resolve_formats(include_movies, include_ova, all_formats)
     payloads = []
     for item in media:
@@ -138,13 +150,23 @@ async def _search_honoring_retry_after(
     query: str,
     *,
     per_page: int,
+    observer: FallbackObserver | None,
 ) -> list[dict[str, Any]]:
     try:
+        _increment(observer, "outbound_requests")
         return await client.search_media(query, page=1, per_page=per_page)
     except AniListApiError as exc:
+        if exc.status_code == 429:
+            _increment(observer, "outbound_429s")
         if exc.status_code == 429 and exc.retry_after_seconds is not None:
             await sleep_for_retry_after(exc)
-            return await client.search_media(query, page=1, per_page=per_page)
+            try:
+                _increment(observer, "outbound_requests")
+                return await client.search_media(query, page=1, per_page=per_page)
+            except AniListApiError:
+                _increment(observer, "outbound_errors")
+                raise
+        _increment(observer, "outbound_errors")
         raise
 
 
@@ -221,3 +243,8 @@ def _safe_int(value: Any) -> int | str | None:
         return int(value)
     except (TypeError, ValueError):
         return value
+
+
+def _increment(observer: FallbackObserver | None, name: str) -> None:
+    if observer is not None:
+        observer.increment(name)

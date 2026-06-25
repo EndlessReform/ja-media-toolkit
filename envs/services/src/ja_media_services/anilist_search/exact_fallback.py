@@ -16,6 +16,7 @@ from ja_media_services.anilist_search.fallback_cache import (
     FallbackTtlPolicy,
 )
 from ja_media_services.anilist_search.metadata import project_metadata_payload
+from ja_media_services.anilist_search.observability import FallbackObserver
 from ja_media_services.anilist_search.singleflight import ExactIdSingleFlight
 
 
@@ -40,6 +41,7 @@ async def resolve_exact_fallback(
     client: AniListExactClient,
     ttl_policy: FallbackTtlPolicy,
     singleflight: ExactIdSingleFlight,
+    observer: FallbackObserver | None = None,
     now: float | None = None,
 ) -> dict[str, Any]:
     """Resolve an exact ID through the fallback cache and direct AniList.
@@ -49,11 +51,14 @@ async def resolve_exact_fallback(
     fails, which protects LAN clients from transient upstream outages.
     """
 
+    _increment(observer, "exact_requests")
     fresh = _read_cached(con, db_lock, ttl_policy, anilist_id, fresh_only=True, now=now)
     if fresh is not None:
+        _increment(observer, "exact_cache_hits")
         if fresh.negative:
             raise ExactFallbackNotFound
         return _project(fresh, fields)
+    _increment(observer, "exact_cache_misses")
 
     stale = _read_cached(con, db_lock, ttl_policy, anilist_id, fresh_only=False, now=now)
     if stale is not None and stale.negative:
@@ -68,6 +73,7 @@ async def resolve_exact_fallback(
                 client=client,
                 ttl_policy=ttl_policy,
                 anilist_id=anilist_id,
+                observer=observer,
                 now=now,
             ),
         )
@@ -89,9 +95,10 @@ async def _fetch_and_cache(
     client: AniListExactClient,
     ttl_policy: FallbackTtlPolicy,
     anilist_id: int,
+    observer: FallbackObserver | None,
     now: float | None,
 ) -> FallbackAnimeRow:
-    media = await _fetch_media_honoring_retry_after(client, anilist_id)
+    media = await _fetch_media_honoring_retry_after(client, anilist_id, observer)
     with db_lock:
         cache = AniListFallbackCache(con, ttl_policy=ttl_policy)
         if media is None:
@@ -112,13 +119,23 @@ async def _fetch_and_cache(
 async def _fetch_media_honoring_retry_after(
     client: AniListExactClient,
     anilist_id: int,
+    observer: FallbackObserver | None,
 ) -> dict[str, Any] | None:
     try:
+        _increment(observer, "outbound_requests")
         return await client.fetch_media_by_id(anilist_id)
     except AniListApiError as exc:
+        if exc.status_code == 429:
+            _increment(observer, "outbound_429s")
         if exc.status_code == 429 and exc.retry_after_seconds is not None:
             await sleep_for_retry_after(exc)
-            return await client.fetch_media_by_id(anilist_id)
+            try:
+                _increment(observer, "outbound_requests")
+                return await client.fetch_media_by_id(anilist_id)
+            except AniListApiError:
+                _increment(observer, "outbound_errors")
+                raise
+        _increment(observer, "outbound_errors")
         raise
 
 
@@ -160,3 +177,8 @@ def _project(row: FallbackAnimeRow, fields: tuple[str, ...] | None) -> dict[str,
 def _status(payload: dict[str, Any]) -> str | None:
     value = payload.get("status")
     return value if isinstance(value, str) else None
+
+
+def _increment(observer: FallbackObserver | None, name: str) -> None:
+    if observer is not None:
+        observer.increment(name)

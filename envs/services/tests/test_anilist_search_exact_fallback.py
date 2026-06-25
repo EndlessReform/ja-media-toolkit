@@ -16,6 +16,7 @@ from ja_media_services.anilist_search.fallback_cache import (
     AniListFallbackCache,
     FallbackTtlPolicy,
 )
+from ja_media_services.anilist_search.observability import FallbackObserver
 from ja_media_services.anilist_search.singleflight import ExactIdSingleFlight
 
 
@@ -109,6 +110,7 @@ def configure_app_state(con: object, client: object) -> None:
     app_state.con = con  # type: ignore[assignment]
     app_state.anilist_client = client  # type: ignore[assignment]
     app_state.fallback_ttl_policy = ttl_policy()
+    app_state.fallback_observer = FallbackObserver()
     app_state.exact_id_singleflight = ExactIdSingleFlight()
 
 
@@ -116,6 +118,7 @@ def reset_app_state() -> None:
     app_state.con = None
     app_state.anilist_client = None
     app_state.fallback_ttl_policy = None
+    app_state.fallback_observer = FallbackObserver()
     app_state.exact_id_singleflight = ExactIdSingleFlight()
 
 
@@ -145,6 +148,14 @@ def test_anime_detail_exact_fallback_fetches_and_caches(tmp_path: Path) -> None:
         assert cached_response.status_code == 200
         assert cached_response.json()["title_romaji"] == "Future Anime"
         assert client.calls == 1
+        fallback = api.get("/healthz").json()["fallback"]
+        metrics = api.get("/metrics").text
+        assert fallback["exact_requests"] == 2
+        assert fallback["exact_cache_hits"] == 1
+        assert fallback["exact_cache_misses"] == 1
+        assert fallback["outbound_requests"] == 1
+        assert fallback["exact_hit_rate"] == 0.5
+        assert 'anilist_search_fallback_requests_total{kind="exact"} 2.0' in metrics
     finally:
         reset_app_state()
         con.close()
