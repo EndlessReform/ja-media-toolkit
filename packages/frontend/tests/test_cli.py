@@ -61,6 +61,15 @@ class FrontendCliTest(unittest.TestCase):
         self.assertTrue(args.fetch_subs)
         self.assertTrue(args.sort_by_language)
 
+    def test_get_id_accepts_forced_anilist_search(self) -> None:
+        parser = build_parser()
+
+        args = parser.parse_args(["get-id", "Class de 2-banme", "--force-anilist"])
+
+        self.assertEqual(args.command, "get-id")
+        self.assertEqual(args.query, "Class de 2-banme")
+        self.assertTrue(args.force_anilist)
+
 
 if __name__ == "__main__":
     unittest.main()

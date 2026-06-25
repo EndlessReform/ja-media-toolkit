@@ -31,6 +31,10 @@ from ja_media_services.anilist_search.metadata import (
     fetch_anime_metadata,
 )
 from ja_media_services.anilist_search.refresh import RefreshStatus, background_refresh
+from ja_media_services.anilist_search.search_fallback import (
+    SearchFallbackUnavailable,
+    resolve_search_fallback,
+)
 from ja_media_services.anilist_search.singleflight import ExactIdSingleFlight
 
 logger = logging.getLogger("ja_media_services.anilist_search")
@@ -140,16 +144,40 @@ def create_app() -> FastAPI:
     )
 
     @app.get("/search")
-    def search_endpoint(
+    async def search_endpoint(
         query: str = Query(..., min_length=1, description="Anime name to search for"),
         k: int = Query(3, ge=1, le=50, description="Number of results (default: 3)"),
         include_movies: bool = Query(False, description="Include MOVIE format"),
         include_ova: bool = Query(False, description="Include OVA format"),
         all_formats: bool = Query(False, description="Include all formats"),
+        force_anilist: bool = Query(
+            False,
+            description="Query AniList directly instead of the local BM25 index",
+        ),
     ) -> list[dict]:
         con = app_state.con
         if con is None:
             raise HTTPException(status_code=503, detail="Index not ready")
+
+        if force_anilist:
+            anilist_client = app_state.anilist_client
+            ttl_policy = app_state.fallback_ttl_policy
+            if anilist_client is None or ttl_policy is None:
+                raise HTTPException(status_code=503, detail="AniList fallback not ready")
+            try:
+                return await resolve_search_fallback(
+                    query=query,
+                    top_k=k,
+                    include_movies=include_movies,
+                    include_ova=include_ova,
+                    all_formats=all_formats,
+                    con=con,
+                    db_lock=app_state._lock,
+                    client=anilist_client,
+                    ttl_policy=ttl_policy,
+                )
+            except SearchFallbackUnavailable as exc:
+                raise HTTPException(status_code=503, detail=str(exc)) from exc
 
         formats = resolve_formats(include_movies, include_ova, all_formats)
         with app_state._lock:

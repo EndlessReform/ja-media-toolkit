@@ -118,6 +118,17 @@ query ($id: Int!) {{
 }}
 """
 
+ANILIST_MEDIA_SEARCH_QUERY = f"""
+query ($search: String!, $page: Int!, $perPage: Int!) {{
+  Page(page: $page, perPage: $perPage) {{
+    pageInfo {{ total currentPage lastPage hasNextPage perPage }}
+    media(type: ANIME, search: $search, sort: SEARCH_MATCH) {{
+      {ANILIST_MEDIA_FIELDS}
+    }}
+  }}
+}}
+"""
+
 
 class AsyncLimiterLike(Protocol):
     """Protocol for aiolimiter.AsyncLimiter and small test doubles."""
@@ -190,6 +201,33 @@ class AniListGraphQLClient:
         media = payload.get("Media")
         if media is not None and not isinstance(media, dict):
             raise AniListApiError("AniList Media payload was not an object")
+        return media
+
+    async def search_media(
+        self,
+        query: str,
+        *,
+        page: int = 1,
+        per_page: int = 10,
+    ) -> list[dict[str, Any]]:
+        """Fetch AniList search matches ordered by AniList's SEARCH_MATCH sort."""
+
+        data = await self.execute(
+            ANILIST_MEDIA_SEARCH_QUERY,
+            {"search": query, "page": int(page), "perPage": int(per_page)},
+        )
+        payload = data.get("data")
+        if not isinstance(payload, dict):
+            raise AniListApiError("AniList response missing data object")
+        page_payload = payload.get("Page")
+        if not isinstance(page_payload, dict):
+            raise AniListApiError("AniList response missing Page object")
+        media = page_payload.get("media")
+        if not isinstance(media, list):
+            raise AniListApiError("AniList Page.media payload was not a list")
+        invalid = [item for item in media if not isinstance(item, dict)]
+        if invalid:
+            raise AniListApiError("AniList Page.media contained non-object entries")
         return media
 
     async def aclose(self) -> None:

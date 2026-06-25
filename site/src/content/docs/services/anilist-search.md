@@ -23,11 +23,24 @@ Returns a list of matching anime entries.
 | `include_movies` | `bool` | `false` | Include movies in search results. |
 | `include_ova` | `bool` | `false` | Include OVA entries in search results. |
 | `all_formats` | `bool` | `false` | Include all anime formats (specials, music, etc.). |
+| `force_anilist` | `bool` | `false` | Query AniList GraphQL directly instead of the local BM25 index. |
 
 **Example Request:**
 ```sh
 curl "http://localhost:8080/api/v1/anilist/search?query=Steins+Gate&k=5"
 ```
+
+Forced direct search is opt-in. It is meant for brand-new titles that are not
+yet present in the Kaggle-backed local mirror. Direct results are flattened
+into the same CSV-shaped contract as exact-ID fallback rows, cached by AniList
+ID, and the query result list is cached separately so repeated lookups do not
+poll AniList.
+
+```sh
+curl "http://localhost:8080/api/v1/anilist/search?query=Class+de+2-banme+ni+Kawaii+Onnanoko+to+Tomodachi+ni+Natta&k=1&force_anilist=true"
+```
+
+The current smoke-test expectation for that query is AniList ID `169580`.
 
 ### Anime Metadata
 `GET /anime/{anilist_id}`
@@ -60,10 +73,12 @@ JSON-like CSV columns such as `characters`, `relations`, `staff`, `studios`,
 `airingSchedule`, `recommendations`, `reviews`, and score/status distributions
 are returned as JSON values when they parse cleanly.
 
-### Exact-ID Fallback Cache
+### Direct AniList Fallback Cache
 
-Direct AniList fallback is used only by `GET /anime/{anilist_id}` when the ID is
-missing from the local CSV index. It is not used for default title search.
+Direct AniList fallback is used by `GET /anime/{anilist_id}` when the ID is
+missing from the local CSV index, and by `GET /search` only when
+`force_anilist=true`. Default title search remains local BM25 over the DuckDB
+mirror.
 
 Fallback rows live in the same DuckDB file as the search index, in tables that
 are preserved across CSV index rebuilds. A Kaggle refresh can replace the
@@ -81,6 +96,18 @@ When a positive fallback row has expired, the service tries to refresh it from
 AniList. If AniList is unavailable, the stale positive row is returned instead
 of failing the request. Negative cache rows are not returned as stale data.
 
+Forced search stores two cache layers:
+
+| Cache | Purpose |
+| :--- | :--- |
+| `anilist_fallback_anime` | CSV-shaped AniList media rows keyed by AniList ID. |
+| `anilist_fallback_query` | Direct-search query shapes mapped to ordered result IDs. |
+
+If a forced-search query cache has expired and AniList is unavailable, the
+service returns the stale cached ID list when the referenced fallback rows are
+still present. This keeps new-title workflows usable during brief upstream
+outages without changing normal local search behavior.
+
 ### AniList Rate Limit And Debounce
 
 Outbound AniList calls are guarded by `aiolimiter`. The service defaults to 20
@@ -96,13 +123,21 @@ GraphQL calls per 60 seconds:
 Concurrent misses for the same exact AniList ID are coalesced inside the
 process. The first request owns the upstream fetch; matching requests wait for
 that task and then read the cached result. Different IDs are allowed to fetch
-independently. AniList `429 Retry-After` responses are honored before one retry.
+independently. Forced search is rate-limited and cached, but not coalesced.
+AniList `429 Retry-After` responses are honored before one retry.
 
 **Python SDK Example:**
 ```python
 from ja_media_core.anilist_search import HttpAniListSearchClient
 
 client = HttpAniListSearchClient()
+results = client.search(
+    "Class de 2-banme ni Kawaii Onnanoko to Tomodachi ni Natta",
+    top_k=1,
+    force_anilist=True,
+)
+print(results.results[0].anilist_id)
+
 metadata = client.anime(
     395,
     fields=("title_romaji", "description", "characters", "relations"),
