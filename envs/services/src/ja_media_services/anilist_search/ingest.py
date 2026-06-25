@@ -5,11 +5,8 @@ import json
 import logging
 from pathlib import Path
 
-from ja_media_services.anilist_search.db import (
-    build_index,
-    ensure_dataset,
-    open_db,
-)
+from ja_media_services.anilist_search.dataset import ensure_dataset
+from ja_media_services.anilist_search.db import build_index, open_db
 
 logger = logging.getLogger("ja_media_services.anilist_search.ingest")
 

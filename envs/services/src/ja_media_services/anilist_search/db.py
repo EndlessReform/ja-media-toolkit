@@ -7,6 +7,11 @@ from typing import Any
 
 import duckdb
 
+from ja_media_services.anilist_search.fallback_schema import (
+    copy_fallback_tables,
+    ensure_fallback_schema,
+)
+
 DEFAULT_FORMATS = ("TV", "ONA", "TV_SHORT")
 ALL_FORMATS = DEFAULT_FORMATS + ("MOVIE", "OVA", "SPECIAL", "MUSIC")
 
@@ -28,6 +33,7 @@ def open_db(db_path: Path) -> duckdb.DuckDBPyConnection:
     con = duckdb.connect(str(db_path))
     con.execute("INSTALL fts")
     con.execute("LOAD fts")
+    ensure_fallback_schema(con)
     return con
 
 
@@ -169,6 +175,7 @@ def rebuild_from_cached_csv(
     try:
         rebuild_con = open_db(rebuild_path)
         row_count = build_index(csv_path, rebuild_con, force=True)
+        copy_fallback_tables(con, rebuild_con)
         rebuild_con.close()
         rebuild_con = None
 

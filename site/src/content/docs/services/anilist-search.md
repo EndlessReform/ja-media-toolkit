@@ -32,9 +32,15 @@ curl "http://localhost:8080/api/v1/anilist/search?query=Steins+Gate&k=5"
 ### Anime Metadata
 `GET /anime/{anilist_id}`
 
-Returns the cached AniList CSV row for one anime. This is a broad metadata
+Returns the local AniList CSV row for one anime. This is a broad metadata
 endpoint intended for local tooling that needs fields beyond fuzzy search, such
 as descriptions, MAL IDs, relations, staff, studios, and character data.
+
+The endpoint is local-first. It checks the Kaggle-backed DuckDB index before
+doing anything else. If the exact AniList ID is absent, the service falls back
+to AniList GraphQL, flattens the response into the same CSV-shaped metadata
+contract, stores that row in DuckDB, and returns it. Later requests for the same
+ID are served from the fallback cache until the row expires.
 
 **Query Parameters:**
 
@@ -50,7 +56,47 @@ curl "http://localhost:8080/api/v1/anilist/anime/395?fields=title_romaji,descrip
 ```
 
 JSON-like CSV columns such as `characters`, `relations`, `staff`, `studios`,
-and `synonyms` are returned as JSON values when they parse cleanly.
+`synonyms`, `tags`, `rankings`, `externalLinks`, `streamingEpisodes`,
+`airingSchedule`, `recommendations`, `reviews`, and score/status distributions
+are returned as JSON values when they parse cleanly.
+
+### Exact-ID Fallback Cache
+
+Direct AniList fallback is used only by `GET /anime/{anilist_id}` when the ID is
+missing from the local CSV index. It is not used for default title search.
+
+Fallback rows live in the same DuckDB file as the search index, in tables that
+are preserved across CSV index rebuilds. A Kaggle refresh can replace the
+derived `anime` table without deleting direct AniList cache rows.
+
+Cache TTLs:
+
+| Row Type | Default TTL | Environment Setting |
+| :--- | :--- | :--- |
+| `FINISHED` anime | 30 days | `ANILIST_SEARCH_FALLBACK_FINISHED_TTL_SECONDS` |
+| Active, unreleased, hiatus, missing, or unknown status | 7 days | `ANILIST_SEARCH_FALLBACK_AIRING_TTL_SECONDS` |
+| Negative exact-ID result | 1 day | `ANILIST_SEARCH_FALLBACK_NEGATIVE_TTL_SECONDS` |
+
+When a positive fallback row has expired, the service tries to refresh it from
+AniList. If AniList is unavailable, the stale positive row is returned instead
+of failing the request. Negative cache rows are not returned as stale data.
+
+### AniList Rate Limit And Debounce
+
+Outbound AniList calls are guarded by `aiolimiter`. The service defaults to 20
+GraphQL calls per 60 seconds:
+
+| Setting | Default |
+| :--- | :--- |
+| `ANILIST_SEARCH_ANILIST_ENDPOINT` | `https://graphql.anilist.co` |
+| `ANILIST_SEARCH_ANILIST_RATE_LIMIT_CALLS` | `20` |
+| `ANILIST_SEARCH_ANILIST_RATE_LIMIT_PERIOD_SECONDS` | `60` |
+| `ANILIST_SEARCH_ANILIST_TIMEOUT_SECONDS` | `15` |
+
+Concurrent misses for the same exact AniList ID are coalesced inside the
+process. The first request owns the upstream fetch; matching requests wait for
+that task and then read the cached result. Different IDs are allowed to fetch
+independently. AniList `429 Retry-After` responses are honored before one retry.
 
 **Python SDK Example:**
 ```python

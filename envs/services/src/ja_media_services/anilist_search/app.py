@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import duckdb
+from aiolimiter import AsyncLimiter
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query
 
@@ -17,9 +18,20 @@ from ja_media_services.anilist_search.db import (
     resolve_formats,
     search,
 )
+from ja_media_services.anilist_search.anilist_api import AniListGraphQLClient
 from ja_media_services.anilist_search.dataset import ensure_dataset
-from ja_media_services.anilist_search.metadata import fetch_anime_metadata
+from ja_media_services.anilist_search.exact_fallback import (
+    ExactFallbackNotFound,
+    ExactFallbackUnavailable,
+    resolve_exact_fallback,
+)
+from ja_media_services.anilist_search.fallback_cache import FallbackTtlPolicy
+from ja_media_services.anilist_search.metadata import (
+    anime_metadata_exists,
+    fetch_anime_metadata,
+)
 from ja_media_services.anilist_search.refresh import RefreshStatus, background_refresh
+from ja_media_services.anilist_search.singleflight import ExactIdSingleFlight
 
 logger = logging.getLogger("ja_media_services.anilist_search")
 
@@ -31,6 +43,10 @@ class AppState:
     db_path: Path | None = None
     data_dir: Path | None = None
     update_interval_seconds: int = 3600
+    anilist_limiter: AsyncLimiter | None = None
+    anilist_client: AniListGraphQLClient | None = None
+    fallback_ttl_policy: FallbackTtlPolicy | None = None
+    exact_id_singleflight = ExactIdSingleFlight()
     _lock = threading.Lock()
     refresh_status = RefreshStatus()
 
@@ -61,6 +77,21 @@ async def lifespan(app: FastAPI):
     app_state.db_path = db_path
     app_state.data_dir = data_dir
     app_state.update_interval_seconds = settings.update_interval_seconds
+    app_state.anilist_limiter = AsyncLimiter(
+        settings.anilist_rate_limit_calls,
+        settings.anilist_rate_limit_period_seconds,
+    )
+    app_state.anilist_client = AniListGraphQLClient(
+        endpoint=settings.anilist_endpoint,
+        timeout_seconds=settings.anilist_timeout_seconds,
+        limiter=app_state.anilist_limiter,
+    )
+    app_state.fallback_ttl_policy = FallbackTtlPolicy(
+        airing_seconds=settings.fallback_airing_ttl_seconds,
+        finished_seconds=settings.fallback_finished_ttl_seconds,
+        negative_seconds=settings.fallback_negative_ttl_seconds,
+    )
+    app_state.exact_id_singleflight = ExactIdSingleFlight()
     app_state.refresh_status.last_attempt_unix = time.time()
     app_state.refresh_status.last_success_unix = app_state.refresh_status.last_attempt_unix
     app_state.refresh_status.last_failure_unix = None
@@ -88,9 +119,16 @@ async def lifespan(app: FastAPI):
 
     with app_state._lock:
         active_connection = app_state.con
+        active_anilist_client = app_state.anilist_client
         app_state.con = None
+        app_state.anilist_limiter = None
+        app_state.anilist_client = None
+        app_state.fallback_ttl_policy = None
+        app_state.exact_id_singleflight = ExactIdSingleFlight()
         if active_connection is not None:
             active_connection.close()
+    if active_anilist_client is not None:
+        await active_anilist_client.aclose()
 
 
 def create_app() -> FastAPI:
@@ -119,7 +157,7 @@ def create_app() -> FastAPI:
         return results
 
     @app.get("/anime/{anilist_id}")
-    def anime_detail_endpoint(
+    async def anime_detail_endpoint(
         anilist_id: int,
         fields: str | None = Query(
             None,
@@ -140,15 +178,38 @@ def create_app() -> FastAPI:
             )
 
         with app_state._lock:
-            try:
-                result = fetch_anime_metadata(
-                    con, anilist_id, fields=requested_fields
-                )
-            except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
-        if result is None:
+            local_exists = anime_metadata_exists(con, anilist_id)
+            if local_exists:
+                try:
+                    result = fetch_anime_metadata(
+                        con, anilist_id, fields=requested_fields
+                    )
+                except ValueError as exc:
+                    raise HTTPException(status_code=400, detail=str(exc)) from exc
+                if result is not None:
+                    return result
+
+        anilist_client = app_state.anilist_client
+        ttl_policy = app_state.fallback_ttl_policy
+        if anilist_client is None or ttl_policy is None:
+            raise HTTPException(status_code=503, detail="AniList fallback not ready")
+
+        try:
+            return await resolve_exact_fallback(
+                anilist_id=anilist_id,
+                fields=requested_fields,
+                con=con,
+                db_lock=app_state._lock,
+                client=anilist_client,
+                ttl_policy=ttl_policy,
+                singleflight=app_state.exact_id_singleflight,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except ExactFallbackNotFound as exc:
             raise HTTPException(status_code=404, detail="AniList anime not found")
-        return result
+        except ExactFallbackUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     @app.get("/health", include_in_schema=False)
     @app.get("/healthz")

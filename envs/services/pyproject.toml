@@ -4,8 +4,10 @@ version = "0.1.0"
 description = "LAN services for ja-media-toolkit"
 requires-python = ">=3.13"
 dependencies = [
+    "aiolimiter>=1.2.1",
     "duckdb>=1.5.0",
     "fastapi>=0.124.0",
+    "httpx>=0.28,<1",
     "ja-media-core",
     "kagglehub>=0.4.0",
     "parse-torrent-title>=2.8.2",
@@ -32,6 +34,7 @@ kitsunekko-subtitles-smoke = "ja_media_services.kitsunekko_subtitles.smoke:main"
 dev = [
     "httpx2>=2.4.0",
     "pytest>=9.0.0",
+    "pytest-asyncio>=1.4.0",
 ]
 
 [build-system]

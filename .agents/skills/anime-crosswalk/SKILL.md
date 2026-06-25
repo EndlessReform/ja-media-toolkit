@@ -1,14 +1,18 @@
 ---
 name: anime-crosswalk
-description: Use the ja-media LAN anime metadata crosswalk service or add client code for it. Trigger this skill when resolving IDs across TVDB, TMDB, MAL, AniDB, AniList, Kitsu, IMDb, or related anime metadata sources; when bridging Sonarr/Jellyfin/TVDB records to AniList/MAL/TMDB data; when downloading anime-list-full.json for coverage analysis; or when adding a small HTTP client to another project that should read ANIME_CROSSWALK_BASE_URL.
+description: Use only for the ja-media anime-crosswalk ID bridge service and its clients. Trigger this skill when querying or changing envs/services/src/ja_media_services/anime_crosswalk, resolving IDs through the anime-list-full crosswalk across TVDB, TMDB, MAL, AniDB, AniList, Kitsu, or IMDb, bridging Sonarr/Jellyfin/TVDB records to AniList/MAL/TMDB IDs, downloading the crosswalk dump, or adding client code that reads ANIME_CROSSWALK_BASE_URL. Do not use for the separate anilist_search mirror/search service, AniList GraphQL fallback work, or Kaggle AniList dataset indexing unless anime_crosswalk is explicitly involved.
 ---
 
 # Anime Crosswalk
 
 ## Core Rule
 
-Use `ANIME_CROSSWALK_BASE_URL` as the service base URL. Do not hard-code
-hostnames or ports in project code.
+Use this skill only for the `anime_crosswalk` service. The separate
+`anilist_search` service owns the local AniList mirror, title search, and direct
+AniList GraphQL fallback work.
+
+For anime-crosswalk clients, use `ANIME_CROSSWALK_BASE_URL` as the service base
+URL. Do not hard-code hostnames or ports in project code.
 
 When working in `ja-media-toolkit`, `ANIME_CROSSWALK_BASE_URL` is expected to
 come from the repo root `.env`. It is the agent's job to load that environment:

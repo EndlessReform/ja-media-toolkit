@@ -6,8 +6,26 @@ from typing import Any
 
 import duckdb
 
-JSON_COLUMNS = frozenset({"characters", "relations", "staff", "studios", "synonyms"})
+JSON_COLUMNS = frozenset({
+    "airingSchedule",
+    "characters",
+    "externalLinks",
+    "genres",
+    "nextAiringEpisode",
+    "rankings",
+    "recommendations",
+    "relations",
+    "reviews",
+    "staff",
+    "stats_scoreDistribution",
+    "stats_statusDistribution",
+    "streamingEpisodes",
+    "studios",
+    "synonyms",
+    "tags",
+})
 RESERVED_DETAIL_COLUMNS = frozenset({"aid", "search_text"})
+PRIVATE_FIELD_PREFIX = "_fallback_"
 
 logger = logging.getLogger("ja_media_services.anilist_search.metadata")
 
@@ -22,9 +40,7 @@ def _requested_columns(
 ) -> tuple[str, ...]:
     available = _available_columns(con)
     available_set = set(available)
-    public_columns = tuple(
-        column for column in available if column not in RESERVED_DETAIL_COLUMNS
-    )
+    public_columns = tuple(_public_columns(available))
     if requested_fields is None:
         return public_columns
 
@@ -34,6 +50,16 @@ def _requested_columns(
         bad = ", ".join([*unknown, *forbidden])
         raise ValueError(f"Unknown AniList metadata field(s): {bad}")
     return tuple(requested_fields)
+
+
+def _public_columns(columns: tuple[str, ...] | list[str]) -> tuple[str, ...]:
+    return tuple(
+        column
+        for column in columns
+        if column not in RESERVED_DETAIL_COLUMNS
+        and not column.startswith(PRIVATE_FIELD_PREFIX)
+        and column != "id"
+    )
 
 
 def _parse_value(column: str, value: Any) -> Any:
@@ -72,3 +98,54 @@ def fetch_anime_metadata(
         column: _parse_value(column, value)
         for column, value in payload.items()
     }
+
+
+def anime_metadata_exists(
+    con: duckdb.DuckDBPyConnection,
+    anilist_id: int | str,
+) -> bool:
+    """Return whether the CSV-backed table has an AniList ID."""
+
+    row = con.execute(
+        "SELECT 1 FROM anime WHERE aid = ? LIMIT 1",
+        [str(anilist_id)],
+    ).fetchone()
+    return row is not None
+
+
+def project_metadata_payload(
+    payload: dict[str, Any],
+    *,
+    anilist_id: int | str,
+    fields: tuple[str, ...] | None = None,
+) -> dict[str, Any]:
+    """Project a CSV-shaped payload from fallback storage for API response."""
+
+    public_payload = {
+        column: value
+        for column, value in payload.items()
+        if column in _public_columns(list(payload))
+    }
+    if fields is None:
+        selected = tuple(public_payload)
+    else:
+        public_columns = set(public_payload)
+        unknown = sorted(set(fields) - public_columns)
+        forbidden = sorted(
+            field
+            for field in fields
+            if field in RESERVED_DETAIL_COLUMNS
+            or field == "id"
+            or field.startswith(PRIVATE_FIELD_PREFIX)
+        )
+        if unknown or forbidden:
+            bad = ", ".join([*unknown, *forbidden])
+            raise ValueError(f"Unknown AniList metadata field(s): {bad}")
+        selected = fields
+
+    result = {
+        column: _parse_value(column, public_payload[column])
+        for column in selected
+    }
+    result["anilist_id"] = int(anilist_id)
+    return result
