@@ -61,6 +61,19 @@ class FrontendCliTest(unittest.TestCase):
         self.assertTrue(args.fetch_subs)
         self.assertTrue(args.sort_by_language)
 
+    def test_vad_local_uses_config_defaults_unless_flags_are_present(self) -> None:
+        parser = build_parser()
+
+        args = parser.parse_args(["vad-local", "episode.wav"])
+
+        self.assertEqual(args.command, "vad-local")
+        self.assertIsNone(args.config)
+        self.assertIsNone(args.threshold)
+        self.assertIsNone(args.min_speech_s)
+        self.assertIsNone(args.min_silence_s)
+        self.assertIsNone(args.speech_pad_s)
+        self.assertIsNone(args.merge_gap_s)
+
     def test_get_id_accepts_forced_anilist_search(self) -> None:
         parser = build_parser()
 

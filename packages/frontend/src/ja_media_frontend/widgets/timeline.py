@@ -52,34 +52,38 @@ class TimelineWidget(Static):
     def __init__(self, *, empty_message: str = "No timeline data.", **kwargs) -> None:
         super().__init__(**kwargs)
         self.empty_message = empty_message
-        self._spans: Sequence[TimedSpan] = ()
+        self._layers: dict[str, Sequence[TimedSpan]] = {}
         self._active_span: TimedSpan | None = None
         self._start_s = 0.0
         self._duration_s = 10.0
         self._title = "Timeline"
 
+
     def set_timeline(
         self,
-        spans: Sequence[TimedSpan],
+        layers: dict[str, Sequence[TimedSpan]],
         *,
         start_s: float,
         duration_s: float,
         title: str = "Timeline",
         active_span: TimedSpan | None = None,
+        active_layer: str | None = None,
     ) -> None:
         """Replace the rendered timeline state and refresh the widget."""
 
-        self._spans = spans
+        self._layers = layers
         self._active_span = active_span
         self._start_s = max(0.0, start_s)
         self._duration_s = max(0.001, duration_s)
         self._title = title
+        self._active_layer = active_layer
         self.update(self.render_timeline())
+
 
     def render_timeline(self) -> Panel:
         """Build the Rich panel representing the current widget state."""
 
-        if not self._spans:
+        if not self._layers:
             return Panel(self.empty_message, title=self._title)
         end_s = self._start_s + self._duration_s
         width = self.bar_width()
@@ -91,42 +95,62 @@ class TimelineWidget(Static):
                 (format_clock(end_s), "cyan"),
                 f"  ({self._duration_s:.1f}s shown)",
             ),
-            self.activity_bar(
+        ]
+        for label, spans in self._layers.items():
+            lines.append(self.activity_bar(
+                label=label,
+                spans=spans,
                 width=width,
                 start_s=self._start_s,
                 end_s=end_s,
-            ),
-            self.tick_bar(width=width, start_s=self._start_s, end_s=end_s),
-        ]
+                is_active=(label == self._active_layer),
+            ))
+        lines.append(self.tick_bar(width=width, start_s=self._start_s, end_s=end_s))
         return Panel(Group(*lines), title=self._title, expand=True)
+
 
     def bar_width(self) -> int:
         """Return the cells available after widget and panel decoration."""
 
         available_width = self.size.width
-        return max(24, (available_width or 96) - 8)
+        # Total overhead:
+        # - Panel borders (2)
+        # - Widget padding (2)
+        # - Label (11: f"{label: <10} ")
+        # - Indicator (2: "● ")
+        # Total = 17. We use 20 for breathing room.
+        return max(24, (available_width or 96) - 20)
 
-    def activity_bar(self, *, width: int, start_s: float, end_s: float) -> Text:
+    def activity_bar(
+        self, *, label: str, spans: Sequence[TimedSpan], width: int, start_s: float, end_s: float, is_active: bool = False
+    ) -> Text:
         """Render span occupancy, highlighting the active span."""
 
         text = Text()
+        text.append(f"{label: <10} ", style="bold")
+        text.append("● " if is_active else "  ", style="bold orange3" if is_active else "dim")
         step_s = (end_s - start_s) / width
+
+        is_vad = label.lower().startswith("speech")
+        block = "▄" if is_vad else SPAN_BLOCK
+        default_style = "bright_black" if is_vad else None
+
         for cell in range(width):
             span_index = self._visible_span_index(
-                start_s + cell * step_s,
-                start_s + (cell + 1) * step_s,
+                spans, start_s + cell * step_s, start_s + (cell + 1) * step_s
             )
             if span_index is None:
                 text.append(GAP_BLOCK, style=GAP_STYLE)
                 continue
-            span = self._spans[span_index]
+            span = spans[span_index]
             style = (
                 ACTIVE_SPAN_STYLE
                 if span is self._active_span
-                else SPAN_STYLES[span_index % len(SPAN_STYLES)]
+                else (default_style if default_style else SPAN_STYLES[span_index % len(SPAN_STYLES)])
             )
-            text.append(SPAN_BLOCK, style=style)
+            text.append(block, style=style)
         return text
+
 
     def tick_bar(self, *, width: int, start_s: float, end_s: float) -> Text:
         """Render start, midpoint, and end labels without overlap clipping."""
@@ -151,12 +175,13 @@ class TimelineWidget(Static):
 
     def _visible_span_index(
         self,
+        spans: Sequence[TimedSpan],
         cell_start_s: float,
         cell_end_s: float,
     ) -> int | None:
         best_index = None
         best_overlap_s = 0.0
-        for index, span in enumerate(self._spans):
+        for index, span in enumerate(spans):
             overlap_s = min(span.end_s, cell_end_s) - max(
                 span.start_s,
                 cell_start_s,
@@ -165,6 +190,7 @@ class TimelineWidget(Static):
                 best_index = index
                 best_overlap_s = overlap_s
         return best_index
+
 
 
 def format_clock(seconds: float) -> str:

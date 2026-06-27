@@ -60,6 +60,36 @@ default. Pass `--sort-by-language` to place Japanese candidates first, followed
 by unknown, bilingual, non-Japanese, and insufficient-text candidates. The
 thresholds come from the global `[subtitles.language_id]` configuration.
 
+By default, the TUI prepares a Demucs `vocals` stem for playback and the VAD
+speech track so background music is less likely to mask cue-boundary checks.
+Subtitle promotion and sidecar paths still target the original media file.
+Configure or disable this TUI-local step with
+`[subsync_tui.vocal_separation]` in your config file:
+
+```toml
+[subsync_tui.vocal_separation]
+enabled = true
+backend = "demucs"
+stem = "vocals"
+model = "htdemucs"
+device = "mps"
+```
+
+This section is deliberately owned by the TUI rather than global VAD config. If
+another workflow needs the same source-routing behavior, extract the shared
+orchestration after the duplication is real.
+
+Demucs is installed by the Apple runtime environment. To verify the real
+backend instead of only mocked adapter behavior, run an opt-in smoke test
+against a short audio fixture:
+
+```sh
+cd envs/apple
+JA_MEDIA_RUN_DEMUCS_SMOKE=1 \
+JA_MEDIA_DEMUCS_SMOKE_AUDIO=/path/to/short.wav \
+uv run pytest tests/test_vocal_separation.py -k real_demucs_smoke
+```
+
 The TUI attempts to parse the episode number from the filename using `parse-torrent-title`. If the filename is ambiguous, you can override it:
 
 ```sh

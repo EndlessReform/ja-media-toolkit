@@ -16,7 +16,7 @@ import numpy as np
 from ja_media_apple.cli import _dump_audio_chunks, run_vad_local
 from ja_media_apple.vad import MlxAudioVadBackend
 from ja_media_core.audio import AudioChunk, probe_audio_source, resolve_audio_source
-from ja_media_core.vad import VadOptions
+from ja_media_core.vad import VadOptions, VadTimeline
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -58,12 +58,16 @@ class FakeSileroModel:
 
 class FakeBackendForCli:
     name = "fake-vad"
+    instances: list["FakeBackendForCli"] = []
 
     def __init__(self, model_id: str) -> None:
         self.model_id = model_id
+        self.detect_calls: list[dict[str, Any]] = []
+        FakeBackendForCli.instances.append(self)
 
     def detect(self, chunks: list[AudioChunk], *, options: VadOptions) -> Any:
-        raise AssertionError("split mode should not run full-file speech detection")
+        self.detect_calls.append({"chunks": chunks, "options": options})
+        return [VadTimeline(chunk=chunks[0], speech=[], backend=self.name)]
 
 
 class MlxAudioVadBackendTest(unittest.TestCase):
@@ -93,7 +97,9 @@ class MlxAudioVadBackendTest(unittest.TestCase):
         self.assertAlmostEqual(timeline.speech[0].start_s, 2.25)
         self.assertAlmostEqual(timeline.speech[0].end_s, 2.75)
         self.assertEqual(timeline.metadata["model_api"], "get_speech_timestamps")
+        self.assertEqual(timeline.metadata["vad_sample_rate_hz"], 16_000)
         self.assertEqual(fake_model.calls[0]["threshold"], 0.35)
+        self.assertEqual(fake_model.calls[0]["sample_rate"], 16_000)
         self.assertEqual(fake_model.calls[0]["min_silence_duration_ms"], 100)
 
     def test_detect_uses_mlx_audio_segments_as_source_timeline_speech(self) -> None:
@@ -184,6 +190,7 @@ class MlxAudioVadBackendTest(unittest.TestCase):
         with TemporaryDirectory() as tmpdir:
             args = Namespace(
                 input=str(JFK_WAV),
+                config=None,
                 start_s=0.0,
                 end_s=1.0,
                 threshold=None,
@@ -202,9 +209,9 @@ class MlxAudioVadBackendTest(unittest.TestCase):
             )
 
             with (
-                patch("ja_media_apple.cli.MlxAudioVadBackend", FakeBackendForCli),
+                patch("ja_media_apple.vad_cli.MlxAudioVadBackend", FakeBackendForCli),
                 patch(
-                    "ja_media_apple.cli.plan_vad_splits",
+                    "ja_media_apple.vad_cli.plan_vad_splits",
                     return_value=[_jfk_chunk(0.0, 0.50), _jfk_chunk(0.50, 1.0)],
                 ),
                 redirect_stdout(StringIO()) as stdout,
@@ -219,6 +226,54 @@ class MlxAudioVadBackendTest(unittest.TestCase):
             self.assertEqual(len(payload["dumped_chunk_paths"]), 2)
             self.assertIn("_split_001_", Path(payload["dumped_chunk_paths"][0]).name)
             self.assertIn("_dur_000000500ms.", Path(payload["dumped_chunk_paths"][0]).name)
+
+    def test_vad_local_uses_config_defaults_for_missing_flags(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.toml"
+            config_path.write_text(
+                "[vad]\n"
+                "threshold = 0.30\n"
+                "min_speech_s = 0.11\n"
+                "min_silence_s = 0.09\n"
+                "speech_pad_s = 0.07\n"
+                "merge_gap_s = 0.04\n",
+                encoding="utf-8",
+            )
+            args = Namespace(
+                input=str(JFK_WAV),
+                config=str(config_path),
+                start_s=0.0,
+                end_s=1.0,
+                threshold=None,
+                min_speech_s=None,
+                min_silence_s=None,
+                speech_pad_s=None,
+                merge_gap_s=None,
+                channel=None,
+                model_id="fake-model",
+                dump_speech_dir=None,
+                dump_audio_format="wav",
+                split_every_minutes=None,
+                split_radius_s=60.0,
+                prefer_before_target=False,
+                format="json",
+            )
+
+            FakeBackendForCli.instances = []
+            with (
+                patch("ja_media_apple.vad_cli.MlxAudioVadBackend", FakeBackendForCli),
+                redirect_stdout(StringIO()) as stdout,
+            ):
+                run_vad_local(args)
+
+            payload = json.loads(stdout.getvalue())
+            options = FakeBackendForCli.instances[0].detect_calls[0]["options"]
+
+            self.assertEqual(payload["vad_options"]["threshold"], 0.30)
+            self.assertAlmostEqual(options.min_speech_s, 0.11)
+            self.assertAlmostEqual(options.min_silence_s, 0.09)
+            self.assertAlmostEqual(options.speech_pad_s, 0.07)
+            self.assertAlmostEqual(options.merge_gap_s, 0.04)
 
 
 def _jfk_chunk(start_s: float, end_s: float) -> AudioChunk:

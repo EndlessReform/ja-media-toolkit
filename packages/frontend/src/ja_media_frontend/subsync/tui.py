@@ -5,7 +5,6 @@ import tempfile
 from pathlib import Path
 from typing import Callable
 
-from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 from textual.app import App, ComposeResult
@@ -23,11 +22,14 @@ from ja_media_frontend.subsync.dialogs import ConfirmOverwriteModal
 from ja_media_frontend.subsync.models import RemoteLookupState
 from ja_media_frontend.widgets.timeline import TimelineWidget, format_clock
 from ja_media_core.kitsunekko import HttpKitsunekkoSubtitlesClient
+
+
 from ja_media_core.subtitle_lid import (
     SubtitleLanguage,
     SubtitleLanguageIdConfig,
 )
 from ja_media_core.transcripts import SubtitleCue
+from ja_media_core.vad import VadOptions
 from ja_media_frontend.subsync.service import (
     SubtitleTrack,
     build_subtitle_track,
@@ -36,6 +38,7 @@ from ja_media_frontend.subsync.service import (
 )
 from ja_media_frontend.subsync.startup import resolve_srt_inputs, run_subsync_tui
 from ja_media_frontend.subsync.remote import SubsyncRemoteMixin
+from ja_media_frontend.subsync.vad import SubsyncVadMixin
 from ja_media_frontend.subsync.interaction import (
     SubsyncInteractionMixin,
     playback_range,
@@ -64,13 +67,21 @@ def subtitle_track_with_language(
     )
 
 
-class SubsyncTuiApp(SubsyncInteractionMixin, SubsyncRemoteMixin, App[None]):
+class SubsyncTuiApp(
+    SubsyncVadMixin,
+    SubsyncInteractionMixin,
+    SubsyncRemoteMixin,
+    App[None],
+):
     """A first-pass Textual shell for inspecting subtitle timing activity."""
 
     BINDINGS = [
         ("f1", "open_help", "Help"),
         ("f6", "open_remote_lookup", "Kitsunekko"),
         ("f7", "open_remote_file_picker", "Pick subtitle"),
+        ("t", "open_vad_threshold", "VAD threshold"),
+        ("[", "set_cue_mode_vad", "Cue: VAD"),
+        ("]", "set_cue_mode_srt", "Cue: SRT"),
     ]
 
     CSS = """
@@ -119,6 +130,9 @@ class SubsyncTuiApp(SubsyncInteractionMixin, SubsyncRemoteMixin, App[None]):
         sort_by_language: bool = False,
         promotion_target: Path | None | object = _USE_PLAYBACK_PATH,
         audio_status: str = "",
+        vad_backend=None,
+        vad_options: VadOptions | None = None,
+        vad_audio_path: Path | None = None,
     ) -> None:
         super().__init__()
         self.audio_source = audio_source
@@ -146,6 +160,11 @@ class SubsyncTuiApp(SubsyncInteractionMixin, SubsyncRemoteMixin, App[None]):
         self._player = MaterializedAudioPlayer(audio_source)
         self._playback_status = ""
         self._playback_poll = None
+        self.init_vad(
+            vad_backend,
+            vad_options=vad_options,
+            vad_audio_path=vad_audio_path,
+        )
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -160,6 +179,7 @@ class SubsyncTuiApp(SubsyncInteractionMixin, SubsyncRemoteMixin, App[None]):
         yield Footer()
 
     def on_mount(self) -> None:
+        self.on_vad_mount()
         self.refresh_view()
         if self._pending_remote_file_picker_message:
             message = self._pending_remote_file_picker_message
@@ -189,21 +209,24 @@ class SubsyncTuiApp(SubsyncInteractionMixin, SubsyncRemoteMixin, App[None]):
         timeline = self.query_one("#timeline", TimelineWidget)
         if self.tracks:
             timeline.set_timeline(
-                self.track.cues,
+                layers=self.timeline_layers(),
                 start_s=self.window_start_s,
                 duration_s=self.window_s,
                 title=self._timeline_title(),
                 active_span=self.current_cue,
+                active_layer=self.active_timeline_layer(),
             )
         else:
             timeline.set_timeline(
-                (),
+                layers=self.timeline_layers(),
                 start_s=self.window_start_s,
                 duration_s=self.window_s,
                 title="No subtitles",
+                active_layer=self.active_timeline_layer(),
             )
         self.query_one("#active", Static).update(self.render_active_cue())
         self.query_one("#help", Static).update(self.render_help())
+
 
     def render_source(self) -> Text:
         text = Text()
@@ -322,28 +345,6 @@ class SubsyncTuiApp(SubsyncInteractionMixin, SubsyncRemoteMixin, App[None]):
             return f"{track.subtitle_id}-{stem}"
         return stem
 
-    def render_active_cue(self) -> Panel:
-        if not self.tracks:
-            return Panel("No subtitle candidates are loaded.", title="Current subtitle")
-        cue = self.current_cue
-        if cue is None:
-            return Panel("No cues in selected SRT.", title="Current subtitle")
-
-        text = Text()
-        text.append(
-            f"{cue.index}  {format_clock(cue.start_s)} -> {format_clock(cue.end_s)}",
-            style="bold cyan",
-        )
-        # Playback state used to live in the bottom status bar, where it was
-        # redundant with the cue timespan already shown here. Surface it as an
-        # orange ▶ right after the timespan so the eye lands on the cue that is
-        # currently making sound.
-        if self.is_playing():
-            text.append(" \u25b6", style="bold orange3")
-        text.append("\n")
-        text.append(cue.text or "<empty cue>")
-        return Panel(text, title="Current subtitle", expand=True)
-
     def render_help(self) -> str:
         pending = "  g..." if self._pending_g else ""
         # The bottom bar only lists the bindings that are easy to forget.
@@ -353,8 +354,9 @@ class SubsyncTuiApp(SubsyncInteractionMixin, SubsyncRemoteMixin, App[None]):
         # them here would just duplicate that row. Playback state lives next
         # to the current cue's timespan (see render_active_cue), not here.
         promote = "p promote" if self.promotion_target is not None else "promotion disabled"
+        mode = f"[{self.cue_mode}]"
         return (
-            "Ctrl-f/b page  Ctrl-d/u half-page  +/- zoom  Ctrl-c copy  "
+            f"{mode} t VAD threshold  Ctrl-f/b page  Ctrl-d/u half-page  +/- zoom  Ctrl-c copy  "
             f"{promote}{pending}"
         )
 
@@ -362,13 +364,14 @@ class SubsyncTuiApp(SubsyncInteractionMixin, SubsyncRemoteMixin, App[None]):
         """Copy the selected cue text to the system clipboard."""
 
         cue = self.current_cue
-        if cue is None or not cue.text.strip():
+        cue_text = getattr(cue, "text", "") if cue is not None else ""
+        if not cue_text.strip():
             self._playback_status = "nothing to copy"
             self.refresh_view()
             return
 
         try:
-            write_clipboard(cue.text)
+            write_clipboard(cue_text)
         except RuntimeError as exc:
             self._playback_status = str(exc)
             self.notify(str(exc), severity="warning")

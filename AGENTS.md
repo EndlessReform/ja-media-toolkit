@@ -169,6 +169,32 @@ uv run pytest tests
 
 Prefer tomllib + Pydantic Settings for configuration where possible.
 
+### Runtime Dependency Verification
+
+Mocks prove adapter logic; they do **not** prove that a new runtime dependency
+is installed, importable, executable, model-compatible, or wired correctly.
+
+When adding or changing any integration that depends on an external binary,
+model runtime, accelerator library, ML package, service process, or command-line
+tool:
+
+- Add the dependency to the owning environment with `uv add` from that
+  environment, unless the repo intentionally documents it as a system
+  prerequisite.
+- Verify the actual dependency through the same environment and command shape
+  users will run. For Python packages, import it with `uv run`. For binaries,
+  run the binary through `uv run` or the package's installed console script.
+- Run at least one real smoke test that exercises the integration boundary. Use
+  the smallest fixture that proves the dependency can start and produce the
+  expected kind of output. Adapter tests with mocked binaries or mocked model
+  calls are useful but are not sufficient.
+- If a real smoke test is too expensive, unavailable on the current machine, or
+  blocked by missing hardware/network/model weights, say that plainly in the
+  progress update and final handoff. Do not imply the feature works end to end.
+- Documentation must distinguish repo-managed dependencies from system
+  prerequisites. If the feature is enabled by default, repo-managed dependency
+  installation and a real smoke test are mandatory before calling it done.
+
 ---
 ## System
 

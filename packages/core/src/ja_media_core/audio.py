@@ -155,9 +155,14 @@ def full_audio_chunk(
     )
 
 
-def materialize_audio_chunk(chunk: AudioChunk) -> InMemoryAudioChunk:
+def materialize_audio_chunk(
+    chunk: AudioChunk,
+    *,
+    target_sample_rate_hz: int | None = None,
+) -> InMemoryAudioChunk:
     source_format = chunk.format or probe_audio_source(chunk.source)
     path = _require_client_local_path(chunk.source)
+    output_sample_rate_hz = target_sample_rate_hz or source_format.sample_rate_hz
     start_frame = _frame_index(
         chunk.start_s,
         source_format.sample_rate_hz,
@@ -173,23 +178,33 @@ def materialize_audio_chunk(chunk: AudioChunk) -> InMemoryAudioChunk:
     if source_format.frame_count is not None and end_frame > source_format.frame_count:
         raise ValueError("Audio chunk end is beyond the source frame count")
 
-    try:
-        samples, sample_rate_hz = sf.read(
-            str(path),
-            start=start_frame,
-            stop=end_frame,
-            dtype="float32",
-            always_2d=True,
-        )
-    except sf.LibsndfileError:
+    if output_sample_rate_hz == source_format.sample_rate_hz:
+        try:
+            samples, sample_rate_hz = sf.read(
+                str(path),
+                start=start_frame,
+                stop=end_frame,
+                dtype="float32",
+                always_2d=True,
+            )
+        except sf.LibsndfileError:
+            samples, sample_rate_hz = _decode_audio_chunk_with_ffmpeg(
+                path,
+                source_format=source_format,
+                start_s=chunk.start_s,
+                end_s=chunk.end_s,
+                output_sample_rate_hz=output_sample_rate_hz,
+            )
+    else:
         samples, sample_rate_hz = _decode_audio_chunk_with_ffmpeg(
             path,
             source_format=source_format,
             start_s=chunk.start_s,
             end_s=chunk.end_s,
+            output_sample_rate_hz=output_sample_rate_hz,
         )
-    if sample_rate_hz != source_format.sample_rate_hz:
-        raise ValueError("Audio sample rate changed between probe and decode")
+    if sample_rate_hz != output_sample_rate_hz:
+        raise ValueError("Audio decoder returned an unexpected sample rate")
     if samples.shape[1] != source_format.channels:
         raise ValueError("Audio channel count changed between probe and decode")
 
@@ -207,7 +222,7 @@ def materialize_audio_chunk(chunk: AudioChunk) -> InMemoryAudioChunk:
     return InMemoryAudioChunk(
         chunk=materialized_chunk,
         samples=samples,
-        sample_rate_hz=source_format.sample_rate_hz,
+        sample_rate_hz=output_sample_rate_hz,
         source_sample_rate_hz=source_format.sample_rate_hz,
         channels=source_format.channels,
         normalized=True,
@@ -311,6 +326,7 @@ def _decode_audio_chunk_with_ffmpeg(
     source_format: AudioFormat,
     start_s: float,
     end_s: float,
+    output_sample_rate_hz: int,
 ) -> tuple[NDArray[np.float32], int]:
     """Decode an audio span to float32 frames using ffmpeg."""
 
@@ -347,7 +363,7 @@ def _decode_audio_chunk_with_ffmpeg(
             "-ac",
             str(source_format.channels),
             "-ar",
-            str(source_format.sample_rate_hz),
+            str(output_sample_rate_hz),
             "pipe:1",
         ],
         check=True,
@@ -357,7 +373,7 @@ def _decode_audio_chunk_with_ffmpeg(
     if samples.size % source_format.channels != 0:
         raise ValueError("Decoded audio sample count is not divisible by channels")
     return samples.reshape((-1, source_format.channels)).astype(np.float32), (
-        source_format.sample_rate_hz
+        output_sample_rate_hz
     )
 
 

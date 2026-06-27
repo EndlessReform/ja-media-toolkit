@@ -8,6 +8,7 @@ from dataclasses import replace
 
 from ja_media_core.proc import run as run_process
 from ja_media_core.transcripts import SubtitleCue, shift_srt_cues
+from ja_media_core.vad import SpeechSpan
 from ja_media_frontend.subsync.service import SubtitleTrack
 from ja_media_frontend.widgets.timeline import format_clock
 
@@ -78,24 +79,44 @@ class SubsyncInteractionMixin:
 
     @property
     def cue_index(self) -> int:
-        return self.cue_indices[self.track_index]
+        if getattr(self, "cue_mode", "srt") == "srt":
+            return self.cue_indices[self.track_index]
+        return getattr(self, "vad_cue_index", 0)
 
     @property
-    def current_cue(self) -> SubtitleCue | None:
-        if not self.tracks or not self.track.cues:
+    def current_cue(self) -> SubtitleCue | SpeechSpan | None:
+        if getattr(self, "cue_mode", "srt") == "srt":
+            if not self.tracks or not self.track.cues:
+                return None
+            return self.track.cues[self.cue_index]
+
+        vad = getattr(self, "vad_timeline", None)
+        if not vad or not vad.speech:
             return None
-        return self.track.cues[self.cue_index]
+        return vad.speech[self.cue_index]
 
     def move_cue(self, delta: int) -> None:
-        if not self.tracks or not self.track.cues:
-            return
-        if self.is_playing():
-            self.stop_playback()
-            self._playback_status = "stopped"
-        self.cue_indices[self.track_index] = max(
-            0,
-            min(len(self.track.cues) - 1, self.cue_index + delta),
-        )
+        if getattr(self, "cue_mode", "srt") == "srt":
+            if not self.tracks or not self.track.cues:
+                return
+            if self.is_playing():
+                self.stop_playback()
+                self._playback_status = "stopped"
+            self.cue_indices[self.track_index] = max(
+                0,
+                min(len(self.track.cues) - 1, self.cue_index + delta),
+            )
+        else:
+            vad = getattr(self, "vad_timeline", None)
+            if not vad or not vad.speech:
+                return
+            if self.is_playing():
+                self.stop_playback()
+                self._playback_status = "stopped"
+            self.vad_cue_index = max(
+                0,
+                min(len(vad.speech) - 1, self.cue_index + delta),
+            )
         self.ensure_cue_visible()
         self.refresh_view()
 
@@ -133,15 +154,25 @@ class SubsyncInteractionMixin:
 
     def go_start(self) -> None:
         self._pending_g = False
+        if getattr(self, "cue_mode", "srt") == "srt":
+            if self.tracks and self.track.cues:
+                self.cue_indices[self.track_index] = 0
+        else:
+            vad = getattr(self, "vad_timeline", None)
+            if vad and vad.speech:
+                self.vad_cue_index = 0
         self.window_start_s = 0.0
-        if self.tracks and self.track.cues:
-            self.cue_indices[self.track_index] = 0
         self.refresh_view()
 
     def go_end(self) -> None:
         self._pending_g = False
-        if self.tracks and self.track.cues:
-            self.cue_indices[self.track_index] = len(self.track.cues) - 1
+        if getattr(self, "cue_mode", "srt") == "srt":
+            if self.tracks and self.track.cues:
+                self.cue_indices[self.track_index] = len(self.track.cues) - 1
+        else:
+            vad = getattr(self, "vad_timeline", None)
+            if vad and vad.speech:
+                self.vad_cue_index = len(vad.speech) - 1
         self.window_start_s = self.timeline_end_s() - self.window_s
         self.normalize_window()
         self.refresh_view()
@@ -157,26 +188,64 @@ class SubsyncInteractionMixin:
         self.normalize_window()
 
     def select_cue_near_time(self, timestamp_s: float) -> None:
-        if not self.tracks:
-            return
-        cues = self.track.cues
-        if not cues:
-            self.cue_indices[self.track_index] = 0
-            return
-        for index, cue in enumerate(cues):
-            if cue.end_s >= timestamp_s:
-                self.cue_indices[self.track_index] = index
+        """Find the cue that contains the timestamp, or the one closest to it."""
+        if getattr(self, "cue_mode", "srt") == "srt":
+            if not self.tracks:
                 return
-        self.cue_indices[self.track_index] = len(cues) - 1
+            cues = self.track.cues
+            if not cues:
+                self.cue_indices[self.track_index] = 0
+                return
+
+            # 1. Try to find an overlapping cue
+            for index, cue in enumerate(cues):
+                if cue.start_s <= timestamp_s <= cue.end_s:
+                    self.cue_indices[self.track_index] = index
+                    return
+
+            # 2. Fallback: find the cue with the closest center
+            best_index = 0
+            min_dist = float("inf")
+            for index, cue in enumerate(cues):
+                dist = abs((cue.start_s + cue.end_s) / 2 - timestamp_s)
+                if dist < min_dist:
+                    min_dist = dist
+                    best_index = index
+            self.cue_indices[self.track_index] = best_index
+        else:
+            vad = getattr(self, "vad_timeline", None)
+            if not vad or not vad.speech:
+                return
+            cues = vad.speech
+
+            # 1. Try to find an overlapping cue
+            for index, cue in enumerate(cues):
+                if cue.start_s <= timestamp_s <= cue.end_s:
+                    self.vad_cue_index = index
+                    return
+
+            # 2. Fallback: find the cue with the closest center
+            best_index = 0
+            min_dist = float("inf")
+            for index, cue in enumerate(cues):
+                dist = abs((cue.start_s + cue.end_s) / 2 - timestamp_s)
+                if dist < min_dist:
+                    min_dist = dist
+                    best_index = index
+            self.vad_cue_index = best_index
 
     def normalize_window(self) -> None:
         max_start_s = max(0.0, self.timeline_end_s() - self.window_s)
         self.window_start_s = max(0.0, min(max_start_s, self.window_start_s))
 
     def timeline_end_s(self) -> float:
-        if not self.tracks:
-            return self.window_s
-        return max(self.track.end_s, self.window_s)
+        ends = [self.window_s]
+        if self.tracks:
+            ends.append(self.track.end_s)
+        vad_end_s = self.vad_timeline_end_s()
+        if vad_end_s is not None:
+            ends.append(vad_end_s)
+        return max(ends)
 
     def toggle_playback(self) -> None:
         if self.is_playing():

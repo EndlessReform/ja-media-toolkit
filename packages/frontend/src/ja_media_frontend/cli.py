@@ -124,13 +124,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run local MLX VAD on a client-local audio file",
     )
     vad_parser.add_argument("input", help="Local audio file path")
+    vad_parser.add_argument(
+        "-c",
+        "--config",
+        help="Path to ja-media-toolkit TOML config. Defaults to JA_MEDIA_CONFIG or XDG config.",
+    )
     vad_parser.add_argument("--start-s", type=float, default=0.0)
     vad_parser.add_argument("--end-s", type=float)
     vad_parser.add_argument("--threshold", type=float)
-    vad_parser.add_argument("--min-speech-s", type=float, default=0.25)
-    vad_parser.add_argument("--min-silence-s", type=float, default=0.20)
-    vad_parser.add_argument("--speech-pad-s", type=float, default=0.05)
-    vad_parser.add_argument("--merge-gap-s", type=float, default=0.10)
+    vad_parser.add_argument("--min-speech-s", type=float)
+    vad_parser.add_argument("--min-silence-s", type=float)
+    vad_parser.add_argument("--speech-pad-s", type=float)
+    vad_parser.add_argument("--merge-gap-s", type=float)
     vad_parser.add_argument("--channel", type=int)
     vad_parser.add_argument("--model-id", default=DEFAULT_APPLE_VAD_MODEL)
     vad_parser.add_argument(

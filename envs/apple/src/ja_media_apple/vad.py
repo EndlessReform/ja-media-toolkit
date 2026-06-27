@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Any, Callable, Protocol, Sequence
+from typing import Any, Callable, Sequence
 
 import numpy as np
 from numpy.typing import NDArray
 
 from ja_media_core.audio import AudioChunk, materialize_audio_chunk
+from ja_media_core.vad_predictions import VadPredictionTimeline
 from ja_media_core.vad import (
     SpeechSpan,
     VadOptions,
@@ -14,26 +15,16 @@ from ja_media_core.vad import (
     normalize_speech_spans,
     speech_chunks_from_timelines,
 )
+from ja_media_apple.vad_predictions import (
+    SILERO_SAMPLE_RATE_HZ,
+    predict_chunk_with_model,
+)
 
 
 DEFAULT_MLX_AUDIO_VAD_MODEL = "mlx-community/silero-vad"
 
 
-class MlxAudioModel(Protocol):
-    def generate(
-        self,
-        audio: NDArray[np.float32],
-        *,
-        sample_rate: int = 16_000,
-        threshold: float = 0.5,
-        min_duration: float = 0.0,
-        merge_gap: float = 0.0,
-        verbose: bool = False,
-    ) -> Any:
-        ...
-
-
-ModelLoader = Callable[..., MlxAudioModel]
+ModelLoader = Callable[..., Any]
 
 
 class MlxAudioVadBackend:
@@ -53,7 +44,7 @@ class MlxAudioVadBackend:
         self.strict = strict
         self.metadata = {} if metadata is None else dict(metadata)
         self._model_loader = model_loader
-        self._model: MlxAudioModel | None = None
+        self._model: Any | None = None
 
     def detect(
         self,
@@ -90,7 +81,10 @@ class MlxAudioVadBackend:
         options: VadOptions | None = None,
     ) -> VadTimeline:
         active_options = VadOptions() if options is None else options
-        materialized = materialize_audio_chunk(chunk)
+        materialized = materialize_audio_chunk(
+            chunk,
+            target_sample_rate_hz=SILERO_SAMPLE_RATE_HZ,
+        )
         source_chunk = materialized.chunk
         waveform = _mono_waveform(
             materialized.samples,
@@ -123,6 +117,8 @@ class MlxAudioVadBackend:
                 **self.metadata,
                 **active_options.metadata,
                 "model_id": self.model_id,
+                "source_sample_rate_hz": materialized.source_sample_rate_hz,
+                "vad_sample_rate_hz": materialized.sample_rate_hz,
                 "threshold": threshold,
                 "min_speech_s": active_options.min_speech_s,
                 "min_silence_s": active_options.min_silence_s,
@@ -132,7 +128,32 @@ class MlxAudioVadBackend:
             },
         )
 
-    def _load_model(self) -> MlxAudioModel:
+    def predict(
+        self,
+        chunks: Sequence[AudioChunk],
+        *,
+        options: VadOptions | None = None,
+    ) -> list[VadPredictionTimeline]:
+        active_options = VadOptions() if options is None else options
+        return [self.predict_chunk(chunk, options=active_options) for chunk in chunks]
+
+    def predict_chunk(
+        self,
+        chunk: AudioChunk,
+        *,
+        options: VadOptions | None = None,
+    ) -> VadPredictionTimeline:
+        active_options = VadOptions() if options is None else options
+        return predict_chunk_with_model(
+            chunk,
+            options=active_options,
+            model=self._load_model(),
+            backend=self.name,
+            model_id=self.model_id,
+            metadata=self.metadata,
+        )
+
+    def _load_model(self) -> Any:
         if self._model is not None:
             return self._model
 
@@ -178,7 +199,7 @@ def _mono_waveform(
 
 
 def _detect_speech_spans(
-    model: MlxAudioModel,
+    model: Any,
     waveform: NDArray[np.float32],
     *,
     sample_rate_hz: int,

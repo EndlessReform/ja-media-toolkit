@@ -9,24 +9,25 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+from ja_media_apple.audio_chunks import select_audio_chunk
 from ja_media_apple.asr_config import (
     build_selected_asr_backend,
     load_apple_asr_config,
 )
 from ja_media_apple.vad import DEFAULT_MLX_AUDIO_VAD_MODEL, MlxAudioVadBackend
+from ja_media_apple.vad_cli import _dump_audio_chunks, run_vad_local
 from ja_media_core.asr import AsrRuntimeOptions, asr_request_from_chunks
 from ja_media_core.audio import (
     AudioChunk,
     full_audio_chunk,
     probe_audio_source,
     resolve_audio_source,
-    write_audio_chunk,
 )
+from ja_media_core.config import load_config
 from ja_media_core.transcripts import SubtitleCue, format_srt
 from ja_media_core.vad import (
     VadOptions,
     plan_vad_splits,
-    speech_chunks_from_timeline,
 )
 
 
@@ -41,8 +42,10 @@ def main() -> None:
 
 def run_transcribe(args: argparse.Namespace) -> None:
     _LOG.info("[bold]Loading ASR config[/bold]")
+    app_config = load_config(args.config, required=True)
     asr_config = load_apple_asr_config(args.config, required=True)
     backend_config = asr_config.get_backend_config(args.backend)
+    vad_options = app_config.vad.to_options()
     input_paths = _expand_input_patterns(args.input)
     _LOG.info(
         "Resolved [bold cyan]%d[/bold cyan] input file(s)",
@@ -57,6 +60,7 @@ def run_transcribe(args: argparse.Namespace) -> None:
             input_path,
             asr_config=asr_config,
             backend_config=backend_config,
+            vad_options=vad_options,
             args=args,
         )
         for input_path in input_paths
@@ -179,6 +183,7 @@ def _prepare_transcribe_input(
     *,
     asr_config: Any,
     backend_config: Any,
+    vad_options: VadOptions,
     args: argparse.Namespace,
 ) -> tuple[dict[str, Any], Any, AsrRuntimeOptions]:
     source = resolve_audio_source(input_path, base_dir=Path.cwd(), must_exist=True)
@@ -192,8 +197,8 @@ def _prepare_transcribe_input(
         kind="asr_input",
         metadata={"purpose": "local_asr"},
     )
-    chunk = _select_chunk(full_chunk, start_s=args.start_s, end_s=args.end_s)
-    asr_chunks = _plan_asr_chunks(chunk, backend_config)
+    chunk = select_audio_chunk(full_chunk, start_s=args.start_s, end_s=args.end_s)
+    asr_chunks = _plan_asr_chunks(chunk, backend_config, vad_options=vad_options)
     request = asr_request_from_chunks(
         asr_chunks,
         language=args.language,
@@ -226,6 +231,7 @@ def _prepare_transcribe_input(
         "asr_chunks": [asdict(asr_chunk) for asr_chunk in asr_chunks],
         "pipeline": {
             "vad_split_enabled": len(asr_chunks) > 1,
+            "vad_options": asdict(vad_options),
             "target_split_s": getattr(backend_config, "target_split_s", None),
             "split_search_radius_s": getattr(
                 backend_config,
@@ -254,88 +260,11 @@ def _prepare_transcribe_input(
     return payload, request, runtime_options
 
 
-def run_vad_local(args: argparse.Namespace) -> None:
-    source = resolve_audio_source(args.input, base_dir=Path.cwd(), must_exist=True)
-    if source.kind != "client-local":
-        raise SystemExit("vad-local only supports client-local files")
-
-    audio_format = probe_audio_source(source)
-    full_chunk = full_audio_chunk(
-        source,
-        audio_format,
-        kind="vad_input",
-        metadata={"purpose": "local_vad"},
-    )
-    chunk = _select_chunk(full_chunk, start_s=args.start_s, end_s=args.end_s)
-    backend = MlxAudioVadBackend(model_id=args.model_id)
-    vad_options = VadOptions(
-        threshold=args.threshold,
-        min_speech_s=args.min_speech_s,
-        min_silence_s=args.min_silence_s,
-        speech_pad_s=args.speech_pad_s,
-        merge_gap_s=args.merge_gap_s,
-        channel=args.channel,
-    )
-
-    timeline = None
-    speech_chunks = []
-    split_chunks = []
-    if args.split_every_minutes is not None:
-        split_chunks = plan_vad_splits(
-            chunk,
-            backend=backend,
-            every_s=args.split_every_minutes * 60.0,
-            search_radius_s=args.split_radius_s,
-            vad_options=vad_options,
-            prefer_before_target=args.prefer_before_target,
-            kind="asr_chunk",
-            metadata={"purpose": "periodic_vad_split"},
-        )
-    else:
-        timeline = backend.detect([chunk], options=vad_options)[0]
-        speech_chunks = speech_chunks_from_timeline(
-            timeline,
-            min_duration_s=args.min_speech_s,
-            kind="speech",
-        )
-
-    dumped_chunk_kind = None
-    dumped_chunk_paths = []
-    if args.dump_speech_dir is not None:
-        dumped_chunks = split_chunks if args.split_every_minutes is not None else speech_chunks
-        dumped_chunk_kind = "split" if args.split_every_minutes is not None else "speech"
-        dumped_chunk_paths = _dump_audio_chunks(
-            dumped_chunks,
-            output_dir=Path(args.dump_speech_dir),
-            source_id=source.id,
-            label=dumped_chunk_kind,
-            audio_format=args.dump_audio_format,
-        )
-
-    payload = {
-        "source": asdict(source),
-        "format": asdict(audio_format),
-        "chunk": asdict(chunk),
-        "backend": backend.name,
-        "metadata": {"model_id": backend.model_id} if timeline is None else timeline.metadata,
-        "speech_detected": timeline is not None,
-        "speech": [] if timeline is None else [asdict(span) for span in timeline.speech],
-        "speech_chunks": [asdict(speech_chunk) for speech_chunk in speech_chunks],
-        "dumped_chunk_kind": dumped_chunk_kind,
-        "dumped_chunk_paths": [str(path) for path in dumped_chunk_paths],
-        "split_chunks": [asdict(split_chunk) for split_chunk in split_chunks],
-    }
-
-    if args.format == "json":
-        print(json.dumps(payload, indent=2, sort_keys=True))
-        return
-
-    print(_timeline_text(payload))
-
-
 def _plan_asr_chunks(
     chunk: AudioChunk,
     backend_config: Any,
+    *,
+    vad_options: VadOptions,
 ) -> list[AudioChunk]:
     target_split_s = getattr(backend_config, "target_split_s", None)
     if target_split_s is None or chunk.duration_s <= target_split_s:
@@ -349,7 +278,7 @@ def _plan_asr_chunks(
         backend=vad_backend,
         every_s=target_split_s,
         search_radius_s=getattr(backend_config, "split_search_radius_s", 45.0),
-        vad_options=VadOptions(),
+        vad_options=vad_options,
         prefer_before_target=getattr(
             backend_config,
             "prefer_split_before_target",
@@ -362,33 +291,6 @@ def _plan_asr_chunks(
             "rejoin_overlap_s": getattr(backend_config, "rejoin_overlap_s", 0.0),
         },
     )
-
-
-def _dump_audio_chunks(
-    chunks: list[AudioChunk],
-    *,
-    output_dir: Path,
-    source_id: str,
-    label: str,
-    audio_format: str,
-) -> list[Path]:
-    if audio_format not in {"wav", "flac"}:
-        raise ValueError(f"Unsupported dump audio format: {audio_format!r}")
-
-    output_paths: list[Path] = []
-    for index, chunk in enumerate(chunks, start=1):
-        start_ms = round(chunk.start_s * 1000)
-        end_ms = round(chunk.end_s * 1000)
-        duration_ms = round(chunk.duration_s * 1000)
-        output_path = output_dir / (
-            f"{source_id}_{label}_{index:03d}_"
-            f"src_{start_ms:09d}ms-{end_ms:09d}ms_"
-            f"dur_{duration_ms:09d}ms.{audio_format}"
-        )
-        output_paths.append(
-            write_audio_chunk(chunk, output_path, format=audio_format.upper())
-        )
-    return output_paths
 
 
 def _expand_input_patterns(patterns: list[str]) -> list[Path]:
@@ -418,63 +320,6 @@ def _expand_input_patterns(patterns: list[str]) -> list[Path]:
     if not paths:
         raise SystemExit("No transcribe inputs were provided")
     return paths
-
-
-def _select_chunk(
-    full_chunk: AudioChunk,
-    *,
-    start_s: float,
-    end_s: float | None,
-) -> AudioChunk:
-    if full_chunk.format is None or full_chunk.format.duration_s is None:
-        raise ValueError("Cannot select a local VAD chunk without known duration")
-    selected_end_s = full_chunk.format.duration_s if end_s is None else end_s
-    if start_s < 0:
-        raise ValueError("VAD start must be non-negative")
-    if selected_end_s <= start_s:
-        raise ValueError("VAD end must be after start")
-    if selected_end_s > full_chunk.format.duration_s:
-        raise ValueError("VAD end is beyond the source duration")
-
-    sample_rate_hz = full_chunk.format.sample_rate_hz
-    return AudioChunk(
-        source=full_chunk.source,
-        start_s=start_s,
-        end_s=selected_end_s,
-        source_start_frame=round(start_s * sample_rate_hz),
-        source_end_frame=round(selected_end_s * sample_rate_hz),
-        format=full_chunk.format,
-        kind=full_chunk.kind,
-        metadata=dict(full_chunk.metadata),
-    )
-
-
-def _timeline_text(payload: dict[str, Any]) -> str:
-    lines = [
-        f"source: {payload['source']['locator']}",
-        f"model: {payload['metadata'].get('model_id', 'not loaded')}",
-        f"chunk: {payload['chunk']['start_s']:.3f}s-{payload['chunk']['end_s']:.3f}s",
-    ]
-    if payload["speech_detected"]:
-        lines.append(f"speech spans: {len(payload['speech'])}")
-        for index, span in enumerate(payload["speech"], start=1):
-            lines.append(f"{index:>3}. {span['start_s']:.3f}s-{span['end_s']:.3f}s")
-    if payload["dumped_chunk_paths"]:
-        kind = payload["dumped_chunk_kind"] or "audio"
-        lines.append(f"dumped {kind} chunks:")
-        for path in payload["dumped_chunk_paths"]:
-            lines.append(f"  {path}")
-    if payload["split_chunks"]:
-        lines.append("split chunks:")
-        for item in payload["split_chunks"]:
-            metadata = item["metadata"]
-            lines.append(
-                f"  {item['start_s']:.3f}s-{item['end_s']:.3f}s "
-                f"next_target={metadata.get('next_target_s')} "
-                f"fallback={metadata.get('next_cut_fallback')} "
-                f"reason={metadata.get('next_cut_reason')}"
-            )
-    return "\n".join(lines)
 
 
 def _asr_payload_text(payload: dict[str, Any], *, startup_only: bool) -> str:

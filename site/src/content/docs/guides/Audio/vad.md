@@ -69,6 +69,25 @@ When using `vad-local`, the following options are available:
 - `--split-every-minutes`: plan ASR chunks by targeting cuts every N minutes.
 - `--split-radius-s`: VAD search radius around each periodic split target.
 
+The segmentation options default to the global `[vad]` config when present.
+Flags override only the value they name, so this is a good pattern for tuning:
+
+```toml
+[vad]
+threshold = 0.25
+min_speech_s = 0.10
+min_silence_s = 0.08
+speech_pad_s = 0.08
+merge_gap_s = 0.10
+```
+
+Then run small one-off probes without changing the config:
+
+```bash
+uv run ja-media vad-local ../../examples/input/example_走る高級レストランに乗ってきた.mp3 \
+  --threshold 0.20 \
+  --format text
+```
 
 ---
 

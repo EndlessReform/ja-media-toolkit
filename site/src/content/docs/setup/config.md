@@ -53,6 +53,73 @@ vllm_base_url = "http://gpu-server:8000"
 
 Refer to the [Transcription Guide](/guides/audio/transcribe) for a detailed breakdown of ASR configuration options.
 
+## Voice Activity Detection
+
+Tools that inspect speech activity share global defaults through `[vad]`.
+These settings are backend-neutral: they describe how speech spans should be
+segmented, while the active runtime still decides which concrete VAD model to
+use. CLI flags and TUI controls can override these values for one run.
+
+```toml
+[vad]
+# Leave unset to use the model/backend default. Lower values usually produce
+# more speech spans; higher values are stricter.
+threshold = 0.25
+
+# Drop very short speech regions.
+min_speech_s = 0.10
+
+# Require this much silence before closing a speech region.
+min_silence_s = 0.08
+
+# Expand detected speech on both sides to avoid clipping syllables.
+speech_pad_s = 0.08
+
+# Merge post-processed spans separated by tiny gaps.
+merge_gap_s = 0.10
+
+# Optional zero-based channel selection. Omit to fold channels to mono.
+channel = 0
+```
+
+These defaults are used by `ja-media vad-local`, VAD-backed ASR chunk planning,
+and the subsync TUI speech track. For quick experiments, pass one-off flags such
+as `--threshold`, `--min-speech-s`, `--min-silence-s`, or `--speech-pad-s` to
+`vad-local`; omitted flags keep the configured value.
+
+## Subsync TUI Vocal Separation
+
+The subsync TUI can prepare cleaner review audio before drawing the speech
+track. This is application-owned orchestration rather than global VAD policy:
+the TUI plays and analyzes the separated vocal stem, while subtitle promotion
+and sidecar paths still target the original media.
+
+Vocal separation is enabled by default for the TUI. Add this section only when
+you want to tune or disable the first Demucs-backed implementation:
+
+```toml
+[subsync_tui.vocal_separation]
+# Keep this app-local. Other workflows should opt in explicitly if they need it.
+enabled = true
+backend = "demucs"
+
+# Demucs stem and runtime policy.
+stem = "vocals"
+model = "htdemucs"
+device = "mps"
+jobs = 1
+segment_s = 10.0
+
+# Optional. Defaults to ~/.cache/ja-media-toolkit/vocal-separation.
+cache_dir = "~/.cache/ja-media-toolkit/vocal-separation"
+```
+
+The backend field is intentionally narrow for now. Demucs is the first local
+implementation and is a repo-managed dependency of `envs/apple`, not an
+untracked system prerequisite. The core vocal-separation contract remains
+backend-neutral so a UVR or service-backed separator can be added later without
+changing the TUI's routing decision.
+
 ## Subtitle Language Identification
 
 Subtitle tools can share a lightweight language-identification policy through

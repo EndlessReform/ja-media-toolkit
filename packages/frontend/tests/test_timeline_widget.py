@@ -24,16 +24,25 @@ class TimelineWidgetTest(unittest.TestCase):
         second = Span(2.0, 3.0)
         widget = TimelineWidget()
         widget.set_timeline(
-            [first, second],
+            {"Subtitle": [first, second]},
             start_s=0.0,
             duration_s=4.0,
             active_span=second,
+            active_layer="Subtitle",
         )
 
-        bar = widget.activity_bar(width=8, start_s=0.0, end_s=4.0)
+        bar = widget.activity_bar(
+            label="Subtitle",
+            spans=[first, second],
+            width=8,
+            start_s=0.0,
+            end_s=4.0,
+            is_active=True,
+        )
 
         self.assertEqual(
             bar.plain,
+            "Subtitle   \u25cf "
             f"{SPAN_BLOCK}{SPAN_BLOCK}{GAP_BLOCK}{GAP_BLOCK}"
             f"{SPAN_BLOCK}{SPAN_BLOCK}{GAP_BLOCK}{GAP_BLOCK}",
         )

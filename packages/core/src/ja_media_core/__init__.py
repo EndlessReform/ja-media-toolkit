@@ -75,6 +75,7 @@ from ja_media_core.config import (
     JaMediaConfig,
     JaMediaSettings,
     SubtitleConfig,
+    VadConfig,
     default_config_path,
     load_config,
     resolve_config_path,
@@ -152,6 +153,12 @@ from ja_media_core.vad import (
     speech_chunks_from_timelines,
     validate_speech_spans,
 )
+from ja_media_core.vad_predictions import (
+    PredictedVadBackend,
+    VadPrediction,
+    VadPredictionTimeline,
+    speech_timeline_from_predictions,
+)
 
 
 __all__ = [
@@ -227,8 +234,12 @@ __all__ = [
     "SampledLanguageMetrics",
     "TimelineSpan",
     "TimelineTrack",
+    "PredictedVadBackend",
     "VadBackend",
+    "VadConfig",
     "VadOptions",
+    "VadPrediction",
+    "VadPredictionTimeline",
     "VadTimeline",
     "asr_request_from_chunks",
     "clean_ass_text",
@@ -271,6 +282,7 @@ __all__ = [
     "sample_line_languages",
     "speech_chunks_from_timeline",
     "speech_chunks_from_timelines",
+    "speech_timeline_from_predictions",
     "shift_srt_cues",
     "subtitle_text_lines",
     "suggest_ordinary_episode",

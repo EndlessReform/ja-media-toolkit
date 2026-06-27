@@ -12,6 +12,11 @@ from ja_media_core.vad import (
     plan_vad_splits,
     speech_chunks_from_timeline,
 )
+from ja_media_core.vad_predictions import (
+    VadPrediction,
+    VadPredictionTimeline,
+    speech_timeline_from_predictions,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -118,6 +123,33 @@ class VadTimelineTest(unittest.TestCase):
 
         self.assertEqual(chunks[0].end_s, 5.0)
         self.assertTrue(chunks[0].metadata["next_cut_fallback"])
+
+    def test_prediction_timeline_can_be_rethresholded_without_backend(self) -> None:
+        chunk = _jfk_chunk(0.0, 2.0)
+        predictions = VadPredictionTimeline(
+            chunk=chunk,
+            backend="fake-vad",
+            predictions=[
+                VadPrediction(0.0, 0.5, 0.20),
+                VadPrediction(0.5, 1.0, 0.40),
+                VadPrediction(1.0, 1.5, 0.70),
+            ],
+        )
+
+        high = speech_timeline_from_predictions(
+            predictions,
+            options=VadOptions(threshold=0.50, speech_pad_s=0.0),
+        )
+        low = speech_timeline_from_predictions(
+            predictions,
+            options=VadOptions(threshold=0.25, speech_pad_s=0.0),
+        )
+
+        self.assertEqual(len(high.speech), 1)
+        self.assertAlmostEqual(high.speech[0].start_s, 1.0)
+        self.assertEqual(len(low.speech), 1)
+        self.assertAlmostEqual(low.speech[0].start_s, 0.5)
+        self.assertAlmostEqual(low.speech[0].end_s, 1.5)
 
 
 class FakeBackend:

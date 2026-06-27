@@ -11,6 +11,10 @@ from ja_media_apple.asr_config import (
     parse_apple_asr_config,
 )
 from ja_media_apple.vad import DEFAULT_MLX_AUDIO_VAD_MODEL, MlxAudioVadBackend
+from ja_media_apple.vocal_separation import (
+    DEFAULT_DEMUCS_MODEL,
+    DemucsVocalSeparationBackend,
+)
 
 
 def main():
@@ -25,9 +29,11 @@ __all__ = [
     "AppleAsrBackendConfig",
     "AppleAsrConfig",
     "DEFAULT_MLX_AUDIO_VAD_MODEL",
+    "DEFAULT_DEMUCS_MODEL",
     "DEFAULT_VIBEVOICE_STOP",
     "DEFAULT_VIBEVOICE_SYSTEM_PROMPT",
     "MlxAudioVadBackend",
+    "DemucsVocalSeparationBackend",
     "OpenAiAudioTranscriptionsAsrConfig",
     "VibeVoiceVllmAsrConfig",
     "build_asr_backend",

@@ -108,3 +108,18 @@ Because the hybrid backend relies on local planning, you can tune how the audio 
 - `target_split_s`: The ideal segment length (e.g., `300` for 5 minutes).
 - `split_search_radius_s`: How far (in seconds) the tool looks around the target for a silence boundary.
 - `rejoin_overlap_s`: Controls how segments are merged back together.
+
+The VAD segmentation policy itself comes from the global `[vad]` section:
+
+```toml
+[vad]
+threshold = 0.25
+min_speech_s = 0.10
+min_silence_s = 0.08
+speech_pad_s = 0.08
+merge_gap_s = 0.10
+```
+
+Keep split cadence in the ASR backend config, and keep speech/silence
+sensitivity in `[vad]`. This makes `transcribe`, `vad-local`, and the subsync
+TUI use the same baseline when you are tuning a model on real episodes.

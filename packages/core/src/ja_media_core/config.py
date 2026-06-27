@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from ja_media_core.subtitle_lid import SubtitleLanguageIdConfig
+from ja_media_core.vad import VadOptions
 
 
 CONFIG_ENV_VAR = "JA_MEDIA_CONFIG"
@@ -112,6 +113,36 @@ class SubtitleConfig(BaseModel):
     )
 
 
+class VadConfig(BaseModel):
+    """Global voice-activity detection defaults shared by VAD workflows.
+
+    These values describe the desired speech segmentation policy, not a
+    concrete runtime. Tools may still expose CLI or TUI overrides for local
+    experimentation, but the config provides one durable baseline for subtitle
+    review, standalone VAD inspection, and ASR chunk planning.
+    """
+
+    threshold: float | None = Field(default=None, ge=0.0, le=1.0)
+    min_speech_s: float = Field(default=0.25, ge=0.0)
+    min_silence_s: float = Field(default=0.20, ge=0.0)
+    speech_pad_s: float = Field(default=0.05, ge=0.0)
+    merge_gap_s: float = Field(default=0.10, ge=0.0)
+    channel: int | None = Field(default=None, ge=0)
+
+    def to_options(self, **overrides: Any) -> VadOptions:
+        """Return runtime VAD options, applying non-``None`` overrides."""
+
+        data = self.model_dump()
+        data.update(
+            {
+                key: value
+                for key, value in overrides.items()
+                if value is not None
+            }
+        )
+        return VadOptions(**data)
+
+
 class JaMediaConfig(BaseModel):
     """Top-level user config file.
 
@@ -124,6 +155,7 @@ class JaMediaConfig(BaseModel):
     metadata: MetadataConfig = Field(default_factory=MetadataConfig)
     services: ServicesConfig = Field(default_factory=ServicesConfig)
     subtitles: SubtitleConfig = Field(default_factory=SubtitleConfig)
+    vad: VadConfig = Field(default_factory=VadConfig)
 
 
 @dataclass
