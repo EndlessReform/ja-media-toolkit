@@ -7,7 +7,6 @@ import json
 import mimetypes
 import os
 import re
-import subprocess
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -16,6 +15,7 @@ import httpx
 
 from ja_media_core.anilist_search import AnimeMetadata
 from ja_media_core.audio_library import AnimeAudioSeriesMetadata, CoverArtifact
+from ja_media_core.proc import run as run_process
 
 SELECTED_FIELDS = (
     "title_english",
@@ -171,7 +171,7 @@ def download_cover(url: str, destination: Path) -> CoverArtifact:
 
 
 def _probe_cover(path: Path) -> tuple[int, int, str]:
-    result = subprocess.run(
+    result = run_process(
         [
             "ffprobe",
             "-v",

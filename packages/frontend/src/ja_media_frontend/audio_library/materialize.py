@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import subprocess
 from pathlib import Path
 
 from ja_media_core.audio_library import (
@@ -14,6 +13,7 @@ from ja_media_core.audio_library import (
     AudioProfile,
     EpisodeMapping,
 )
+from ja_media_core.proc import run as run_process
 
 
 def artifact_filename(episode_key: str) -> str:
@@ -87,7 +87,7 @@ def materialize_episode(
     temporary = destination.with_name(f".{destination.stem}.partial{destination.suffix}")
     temporary.unlink(missing_ok=True)
     try:
-        subprocess.run(
+        run_process(
             build_ffmpeg_command(mapping, temporary, series, profile),
             check=True,
         )
@@ -113,7 +113,7 @@ def verify_audio_artifact(path: Path, profile: AudioProfile) -> ArtifactRecord:
 
     if not path.is_file() or path.stat().st_size <= 0:
         raise ValueError(f"audio artifact is empty or missing: {path}")
-    result = subprocess.run(
+    result = run_process(
         [
             "ffprobe",
             "-v",

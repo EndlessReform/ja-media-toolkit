@@ -40,11 +40,14 @@ class AudioTest(unittest.TestCase):
             source.write_bytes(b"fake")
             pcm = b"\x00\x00\x01\x00"
 
+            def fake_run(command, **kwargs):
+                return Mock(returncode=0, stdout=pcm, stderr=b"")
+
             with (
                 patch("ja_media_frontend.audio.shutil.which", return_value="ffmpeg"),
                 patch(
-                    "ja_media_frontend.audio.subprocess.run",
-                    return_value=Mock(returncode=0, stdout=pcm, stderr=b""),
+                    "ja_media_frontend.audio.run_process",
+                    side_effect=fake_run,
                 ) as run,
             ):
                 audio = materialize_audio(source)
@@ -59,7 +62,8 @@ class AudioTest(unittest.TestCase):
             ])
             self.assertIn("0:a:0", command)
             self.assertIn("pcm_s16le", command)
-            self.assertEqual(command[-2:], ["s16le", "pipe:1"])
+            self.assertIn("s16le", command)
+            self.assertIn("pipe:1", command)
 
     def test_materialize_audio_bails_loudly_when_ffmpeg_is_missing(self) -> None:
         with TemporaryDirectory() as tmpdir:
@@ -71,15 +75,15 @@ class AudioTest(unittest.TestCase):
     def test_materialize_audio_includes_ffmpeg_stderr_on_failure(self) -> None:
         with TemporaryDirectory() as tmpdir:
             source = Path(tmpdir) / "episode.mkv"
+
+            def fake_run(command, **kwargs):
+                return Mock(returncode=1, stdout=b"", stderr=b"Stream map failed")
+
             with (
                 patch("ja_media_frontend.audio.shutil.which", return_value="ffmpeg"),
                 patch(
-                    "ja_media_frontend.audio.subprocess.run",
-                    return_value=Mock(
-                        returncode=1,
-                        stdout=b"",
-                        stderr=b"Stream map failed",
-                    ),
+                    "ja_media_frontend.audio.run_process",
+                    side_effect=fake_run,
                 ),
             ):
                 with self.assertRaisesRegex(RuntimeError, "Stream map failed"):

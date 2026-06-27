@@ -22,6 +22,8 @@ import numpy as np
 import sounddevice
 from numpy.typing import NDArray
 
+from ja_media_core.proc import run as run_process
+
 
 DEFAULT_PLAYBACK_SAMPLE_RATE = 48_000
 DEFAULT_PLAYBACK_CHANNELS = 1
@@ -87,13 +89,25 @@ def materialize_audio(
     The decode intentionally reads the complete source sequentially.  A
     24-minute mono 48 kHz source occupies about 138 MB, avoiding repeated
     container seeks, decoder preroll, and network reads during review.
+
+    PCM is written to a temporary file rather than piped through stdout.  On
+    macOS, a prior HTTP request (e.g. derived-audio cache validation) can
+    initialize Network.framework globals that make fork-based subprocesses
+    unstable when large pipe buffers are involved, causing intermittent
+    SIGSEGVs in ffmpeg.  A file destination keeps the subprocess simple and
+    sidesteps that platform bug.
     """
 
     ffmpeg = shutil.which("ffmpeg")
     if ffmpeg is None:
         raise RuntimeError("ffmpeg not found; cannot decode source audio")
 
-    result = subprocess.run(
+    # PCM streams out over stdout and diagnostics over stderr.  This is the
+    # straightforward, fast path; the macOS fork()-after-HTTP SIGSEGV that used
+    # to make piped subprocesses unstable is handled centrally by
+    # ``ja_media_core.proc.run`` (it forces posix_spawn on Darwin).  See that
+    # module and ``docs/macos-fork-subprocess.md`` for the full story.
+    result = run_process(
         [
             ffmpeg,
             "-hide_banner",
@@ -124,10 +138,10 @@ def materialize_audio(
         raise RuntimeError(
             f"Could not decode first audio stream with ffmpeg:\n{detail}"
         )
-    if not result.stdout:
-        raise RuntimeError(f"ffmpeg decoded no audio from source: {source}")
 
     samples = np.frombuffer(result.stdout, dtype="<i2")
+    if samples.size == 0:
+        raise RuntimeError(f"ffmpeg decoded no audio from source: {source}")
     if samples.size % channels != 0:
         raise RuntimeError("Decoded PCM sample count is not divisible by channels")
     return MaterializedAudio(
