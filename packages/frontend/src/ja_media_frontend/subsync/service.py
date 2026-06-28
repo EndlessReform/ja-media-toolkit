@@ -52,6 +52,7 @@ class SubtitleTrack(SubtitleCandidate):
 
     language_analysis: SubtitleLanguageAnalysis | None = None
     language_error: str | None = None
+    modified: bool = False
 
     @property
     def label(self) -> str:
@@ -230,7 +231,7 @@ def promote_subtitle(
     if destination.exists() and not overwrite:
         raise SubtitleDestinationExistsError(destination)
 
-    if candidate.path.suffix.lower() == ".srt":
+    if candidate.path.suffix.lower() == ".srt" and not getattr(candidate, "modified", False):
         _atomic_write_bytes(destination, candidate.path.read_bytes())
     else:
         _atomic_write_bytes(

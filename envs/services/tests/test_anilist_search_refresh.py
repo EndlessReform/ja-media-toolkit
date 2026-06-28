@@ -124,6 +124,11 @@ def test_rebuild_publishes_fresh_database_and_closes_old_connection(
         assert kwargs == {"force": True}
         return 20_346
 
+    copied_connections: list[tuple[object, object]] = []
+
+    def copy_fallback_tables(source: object, target: object) -> None:
+        copied_connections.append((source, target))
+
     class Connection:
         closed = False
 
@@ -133,6 +138,7 @@ def test_rebuild_publishes_fresh_database_and_closes_old_connection(
     connection = Connection()
     monkeypatch.setattr(db, "build_index", build_index)
     monkeypatch.setattr(db, "open_db", open_db)
+    monkeypatch.setattr(db, "copy_fallback_tables", copy_fallback_tables)
 
     rows, active_connection = db.rebuild_from_cached_csv(
         tmp_path / dataset.CSV_NAME,
@@ -143,6 +149,7 @@ def test_rebuild_publishes_fresh_database_and_closes_old_connection(
     assert rows == 20_346
     assert connection.closed is True
     assert active_connection is published_connection
+    assert copied_connections == [(connection, built_connection)]
     assert opened_paths == [rebuild_path, db_path]
     assert db_path.exists()
     assert not rebuild_path.exists()

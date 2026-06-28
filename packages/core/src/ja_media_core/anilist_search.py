@@ -81,6 +81,7 @@ class AniListSearchClient(Protocol):
         include_movies: bool = False,
         include_ova: bool = False,
         all_formats: bool = False,
+        force_anilist: bool = False,
     ) -> SearchResponse:
         ...
 
@@ -140,6 +141,7 @@ class HttpAniListSearchClient:
         include_movies: bool = False,
         include_ova: bool = False,
         all_formats: bool = False,
+        force_anilist: bool = False,
     ) -> SearchResponse:
         params = urllib.parse.urlencode({
             "query": query,
@@ -147,6 +149,7 @@ class HttpAniListSearchClient:
             "include_movies": str(include_movies).lower(),
             "include_ova": str(include_ova).lower(),
             "all_formats": str(all_formats).lower(),
+            "force_anilist": str(force_anilist).lower(),
         })
         payload = self._get_json(f"/search?{params}")
         return SearchResponse.from_mapping(payload)

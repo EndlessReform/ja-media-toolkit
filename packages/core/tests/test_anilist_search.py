@@ -84,6 +84,23 @@ class AniListSearchContractTest(unittest.TestCase):
         )
         self.assertEqual(metadata.get("description"), "Space opera.")
 
+    def test_search_request_encodes_force_anilist(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {"ANILIST_SEARCH_BASE_URL": "http://127.0.0.1:8000"},
+            clear=True,
+        ):
+            client = HttpAniListSearchClient()
+
+        with patch.object(client, "_get_json", return_value=[]) as get_json:
+            response = client.search("Class de 2-banme", top_k=1, force_anilist=True)
+
+        get_json.assert_called_once_with(
+            "/search?query=Class+de+2-banme&k=1&include_movies=false&"
+            "include_ova=false&all_formats=false&force_anilist=true"
+        )
+        self.assertEqual(response.results, ())
+
 
 if __name__ == "__main__":
     unittest.main()

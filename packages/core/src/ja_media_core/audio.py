@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import shutil
-import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -11,6 +10,8 @@ from urllib.parse import urlparse
 import numpy as np
 import soundfile as sf
 from numpy.typing import NDArray
+
+from ja_media_core.proc import run as run_process
 
 
 AudioSourceKind = Literal["client-local", "s3"]
@@ -255,7 +256,7 @@ def _probe_audio_source_with_ffprobe(path: Path) -> AudioFormat:
             "is not installed"
         )
 
-    completed = subprocess.run(
+    completed = run_process(
         [
             ffprobe,
             "-v",
@@ -324,7 +325,7 @@ def _decode_audio_chunk_with_ffmpeg(
     if duration_s < 0:
         raise ValueError("Audio chunk end must not be before start")
 
-    completed = subprocess.run(
+    completed = run_process(
         [
             ffmpeg,
             "-hide_banner",

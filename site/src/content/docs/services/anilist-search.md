@@ -23,18 +23,37 @@ Returns a list of matching anime entries.
 | `include_movies` | `bool` | `false` | Include movies in search results. |
 | `include_ova` | `bool` | `false` | Include OVA entries in search results. |
 | `all_formats` | `bool` | `false` | Include all anime formats (specials, music, etc.). |
+| `force_anilist` | `bool` | `false` | Query AniList GraphQL directly instead of the local BM25 index. |
 
 **Example Request:**
 ```sh
 curl "http://localhost:8080/api/v1/anilist/search?query=Steins+Gate&k=5"
 ```
 
+Forced direct search is opt-in. It is meant for brand-new titles that are not
+yet present in the Kaggle-backed local mirror. Direct results are flattened
+into the same CSV-shaped contract as exact-ID fallback rows, cached by AniList
+ID, and the query result list is cached separately so repeated lookups do not
+poll AniList.
+
+```sh
+curl "http://localhost:8080/api/v1/anilist/search?query=Class+de+2-banme+ni+Kawaii+Onnanoko+to+Tomodachi+ni+Natta&k=1&force_anilist=true"
+```
+
+The current smoke-test expectation for that query is AniList ID `169580`.
+
 ### Anime Metadata
 `GET /anime/{anilist_id}`
 
-Returns the cached AniList CSV row for one anime. This is a broad metadata
+Returns the local AniList CSV row for one anime. This is a broad metadata
 endpoint intended for local tooling that needs fields beyond fuzzy search, such
 as descriptions, MAL IDs, relations, staff, studios, and character data.
+
+The endpoint is local-first. It checks the Kaggle-backed DuckDB index before
+doing anything else. If the exact AniList ID is absent, the service falls back
+to AniList GraphQL, flattens the response into the same CSV-shaped metadata
+contract, stores that row in DuckDB, and returns it. Later requests for the same
+ID are served from the fallback cache until the row expires.
 
 **Query Parameters:**
 
@@ -50,13 +69,75 @@ curl "http://localhost:8080/api/v1/anilist/anime/395?fields=title_romaji,descrip
 ```
 
 JSON-like CSV columns such as `characters`, `relations`, `staff`, `studios`,
-and `synonyms` are returned as JSON values when they parse cleanly.
+`synonyms`, `tags`, `rankings`, `externalLinks`, `streamingEpisodes`,
+`airingSchedule`, `recommendations`, `reviews`, and score/status distributions
+are returned as JSON values when they parse cleanly.
+
+### Direct AniList Fallback Cache
+
+Direct AniList fallback is used by `GET /anime/{anilist_id}` when the ID is
+missing from the local CSV index, and by `GET /search` only when
+`force_anilist=true`. Default title search remains local BM25 over the DuckDB
+mirror.
+
+Fallback rows live in the same DuckDB file as the search index, in tables that
+are preserved across CSV index rebuilds. A Kaggle refresh can replace the
+derived `anime` table without deleting direct AniList cache rows.
+
+Cache TTLs:
+
+| Row Type | Default TTL | Environment Setting |
+| :--- | :--- | :--- |
+| `FINISHED` anime | 30 days | `ANILIST_SEARCH_FALLBACK_FINISHED_TTL_SECONDS` |
+| Active, unreleased, hiatus, missing, or unknown status | 7 days | `ANILIST_SEARCH_FALLBACK_AIRING_TTL_SECONDS` |
+| Negative exact-ID result | 1 day | `ANILIST_SEARCH_FALLBACK_NEGATIVE_TTL_SECONDS` |
+
+When a positive fallback row has expired, the service tries to refresh it from
+AniList. If AniList is unavailable, the stale positive row is returned instead
+of failing the request. Negative cache rows are not returned as stale data.
+
+Forced search stores two cache layers:
+
+| Cache | Purpose |
+| :--- | :--- |
+| `anilist_fallback_anime` | CSV-shaped AniList media rows keyed by AniList ID. |
+| `anilist_fallback_query` | Direct-search query shapes mapped to ordered result IDs. |
+
+If a forced-search query cache has expired and AniList is unavailable, the
+service returns the stale cached ID list when the referenced fallback rows are
+still present. This keeps new-title workflows usable during brief upstream
+outages without changing normal local search behavior.
+
+### AniList Rate Limit And Debounce
+
+Outbound AniList calls are guarded by `aiolimiter`. The service defaults to 20
+GraphQL calls per 60 seconds:
+
+| Setting | Default |
+| :--- | :--- |
+| `ANILIST_SEARCH_ANILIST_ENDPOINT` | `https://graphql.anilist.co` |
+| `ANILIST_SEARCH_ANILIST_RATE_LIMIT_CALLS` | `20` |
+| `ANILIST_SEARCH_ANILIST_RATE_LIMIT_PERIOD_SECONDS` | `60` |
+| `ANILIST_SEARCH_ANILIST_TIMEOUT_SECONDS` | `15` |
+
+Concurrent misses for the same exact AniList ID are coalesced inside the
+process. The first request owns the upstream fetch; matching requests wait for
+that task and then read the cached result. Different IDs are allowed to fetch
+independently. Forced search is rate-limited and cached, but not coalesced.
+AniList `429 Retry-After` responses are honored before one retry.
 
 **Python SDK Example:**
 ```python
 from ja_media_core.anilist_search import HttpAniListSearchClient
 
 client = HttpAniListSearchClient()
+results = client.search(
+    "Class de 2-banme ni Kawaii Onnanoko to Tomodachi ni Natta",
+    top_k=1,
+    force_anilist=True,
+)
+print(results.results[0].anilist_id)
+
 metadata = client.anime(
     395,
     fields=("title_romaji", "description", "characters", "relations"),
@@ -74,7 +155,9 @@ for character in metadata.get("characters", []):
 `GET /healthz`
 
 Returns the current health status of the service and the index size.
-`GET /health` remains available as a compatibility alias.
+`GET /health` remains available as a compatibility alias. Fallback counters are
+process-local and reset when the service restarts; cache row counts are read
+from DuckDB.
 
 **Response Body:**
 ```json
@@ -88,6 +171,47 @@ Returns the current health status of the service and the index size.
     "consecutive_failures": 0,
     "last_index_rows": 12345,
     "stale": false
+  },
+  "fallback": {
+    "cached_rows": 42,
+    "expired_rows": 3,
+    "negative_rows": 2,
+    "inflight_exact_ids": 0,
+    "exact_coalesced_waits": 1,
+    "exact_hit_rate": 0.75,
+    "search_hit_rate": 0.5,
+    "exact_requests": 8,
+    "exact_cache_hits": 6,
+    "exact_cache_misses": 2,
+    "search_requests": 4,
+    "search_cache_hits": 2,
+    "search_cache_misses": 2,
+    "outbound_requests": 4,
+    "outbound_429s": 0,
+    "outbound_errors": 0
   }
 }
 ```
+
+### Metrics
+`GET /metrics`
+
+Returns Prometheus exposition text. The metrics include the local index row
+count, refresh freshness, fallback cache row counts, process-local exact/search
+request counters, cache hits and misses, coalesced exact-ID waits, outbound
+AniList requests, `429` responses, and outbound errors.
+
+Useful metric names:
+
+| Metric | Meaning |
+| :--- | :--- |
+| `anilist_search_rows_total` | Rows in the local CSV-backed search index. |
+| `anilist_search_refresh_consecutive_failures` | Consecutive failed refresh attempts. |
+| `anilist_search_fallback_cached_rows` | Direct AniList fallback rows in DuckDB. |
+| `anilist_search_fallback_requests_total{kind="exact"}` | Exact-ID fallback requests. |
+| `anilist_search_fallback_requests_total{kind="search"}` | Forced-search fallback requests. |
+| `anilist_search_fallback_cache_hits_total{kind="exact"}` | Exact-ID fallback cache hits. |
+| `anilist_search_fallback_cache_hits_total{kind="search"}` | Forced-search query cache hits. |
+| `anilist_search_fallback_outbound_requests_total` | Outbound AniList GraphQL requests. |
+| `anilist_search_fallback_outbound_429s_total` | AniList rate-limit responses. |
+| `anilist_search_fallback_outbound_errors_total` | Outbound AniList failures. |

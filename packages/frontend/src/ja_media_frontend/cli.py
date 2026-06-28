@@ -58,6 +58,7 @@ def main() -> None:
             include_movies=args.include_movies,
             include_ova=args.include_ova,
             all_formats=args.all_formats,
+            force_anilist=args.force_anilist,
             output_format=args.format,
         )
         return
@@ -111,45 +112,12 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command")
 
     from ja_media_frontend.audio_library.cli import register_audio_library_parser
+    from ja_media_frontend.anilist_search_cli import register_get_id_parser
     from ja_media_frontend.cli_parsers import register_subsync_parser
 
     register_subsync_parser(subparsers)
     register_audio_library_parser(subparsers)
-
-    search_parser = subparsers.add_parser(
-        "get-id",
-        help="Search anime by title via the AniList fuzzy-search service",
-    )
-    search_parser.add_argument("query", nargs="?", help="Search query (title, romaji, or keywords)")
-    search_parser.add_argument("-f", "--file", help="Parse query from file path")
-    search_parser.add_argument(
-        "-n", "--top-k",
-
-        type=int,
-        default=3,
-        help="Number of results to return. Defaults to 3.",
-    )
-    search_parser.add_argument(
-        "--include-movies",
-        action="store_true",
-        help="Include movies in search results.",
-    )
-    search_parser.add_argument(
-        "--include-ova",
-        action="store_true",
-        help="Include OVA entries in search results.",
-    )
-    search_parser.add_argument(
-        "--all-formats",
-        action="store_true",
-        help="Include all anime formats (specials, music, etc.).",
-    )
-    search_parser.add_argument(
-        "--format",
-        choices=("table", "json"),
-        default="table",
-        help="Output format. Defaults to table.",
-    )
+    register_get_id_parser(subparsers)
 
     vad_parser = subparsers.add_parser(
         "vad-local",

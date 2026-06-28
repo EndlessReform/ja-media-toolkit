@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+from dataclasses import replace
 
-from ja_media_core.transcripts import SubtitleCue
+from ja_media_core.proc import run as run_process
+from ja_media_core.transcripts import SubtitleCue, shift_srt_cues
 from ja_media_frontend.subsync.service import SubtitleTrack
 from ja_media_frontend.widgets.timeline import format_clock
 
@@ -57,6 +59,10 @@ class SubsyncInteractionMixin:
             self.zoom_window(0.5)
         elif char == "p":
             self.action_promote()
+        elif char == "z":
+            self.shift_track_timing(-0.1)
+        elif char == "x":
+            self.shift_track_timing(0.1)
         elif char in {"-", "_"}:
             self.zoom_window(2.0)
         else:
@@ -99,6 +105,17 @@ class SubsyncInteractionMixin:
         self.track_index = (self.track_index + delta) % len(self.tracks)
         self.normalize_window()
         self.select_cue_near_time(self.window_start_s + self.window_s / 2)
+        self.refresh_view()
+
+    def shift_track_timing(self, offset_s: float) -> None:
+        """Shift the selected track's cues by a constant offset."""
+        if not self.tracks:
+            return
+        track = self.track
+        if not track.cues:
+            return
+        shifted_cues = shift_srt_cues(track.cues, offset_s, negative="clamp")
+        self.tracks[self.track_index] = replace(track, cues=shifted_cues, modified=True)
         self.refresh_view()
 
     def page_window(self, pages: float) -> None:
@@ -238,7 +255,7 @@ def write_clipboard(text: str) -> None:
     if command is None:
         raise RuntimeError("clipboard command not found")
     try:
-        subprocess.run(
+        run_process(
             command,
             input=text.encode("utf-8"),
             stdout=subprocess.DEVNULL,

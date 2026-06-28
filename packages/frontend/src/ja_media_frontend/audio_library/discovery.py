@@ -11,6 +11,7 @@ from pathlib import Path
 
 from ja_media_core.audio_library import AudioStreamProbe, SourceMediaProbe
 from ja_media_core.media_filename import suggest_ordinary_episode
+from ja_media_core.proc import run as run_process
 
 SUPPORTED_MEDIA_EXTENSIONS = frozenset({".mkv", ".mp4", ".m4v", ".webm"})
 
@@ -129,7 +130,7 @@ def _run_ffprobe(
 
     attempts = signal_retries + 1
     for attempt in range(attempts):
-        result = subprocess.run(
+        result = run_process(
             command,
             check=False,
             capture_output=True,

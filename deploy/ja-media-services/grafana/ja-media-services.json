@@ -300,8 +300,15 @@
           "legendFormat": "audio artifacts",
           "range": true,
           "refId": "E"
+        },
+        {
+          "editorMode": "code",
+          "expr": "anilist_search_rows_total{deployment=\"ja-media-services\"}",
+          "legendFormat": "anilist search",
+          "range": true,
+          "refId": "F"
         }
-      ],
+       ],
       "title": "Current corpus sizes",
       "type": "stat"
     },
@@ -545,11 +552,176 @@
       "type": "stat"
     },
     {
-      "description": "Revision 2 adds anime-audio coverage: index validity, corpus size, watched-directory freshness, worker state, and failure counters. AniList Search remains absent because it does not expose /metrics yet.",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "description": "Index refresh status for AniList search mirror.",
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "green", "value": 0}
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 6, "w": 8, "x": 0, "y": 34},
+      "id": 13,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "anilist_search_refresh_consecutive_failures{deployment=\"ja-media-services\"}",
+          "legendFormat": "consecutive failures",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "expr": "time() - anilist_search_refresh_last_success_timestamp_seconds{deployment=\"ja-media-services\"}",
+          "legendFormat": "since last success",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "AniList Search Index",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "description": "Internal state of the AniList fallback cache.",
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{"color": "green", "value": null}]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 6, "w": 8, "x": 8, "y": 34},
+      "id": 14,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "anilist_search_fallback_cached_rows{deployment=\"ja-media-services\"}",
+          "legendFormat": "cached rows",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "expr": "anilist_search_fallback_expired_rows{deployment=\"ja-media-services\"}",
+          "legendFormat": "expired rows",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "editorMode": "code",
+          "expr": "anilist_search_fallback_negative_rows{deployment=\"ja-media-services\"}",
+          "legendFormat": "negative rows",
+          "range": true,
+          "refId": "C"
+        },
+        {
+          "editorMode": "code",
+          "expr": "anilist_search_fallback_inflight_exact_ids{deployment=\"ja-media-services\"}",
+          "legendFormat": "inflight exact",
+          "range": true,
+          "refId": "D"
+        }
+      ],
+      "title": "AniList Search Fallback",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "description": "Outbound AniList API usage and health.",
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "red", "value": 1}
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 6, "w": 8, "x": 16, "y": 34},
+      "id": 15,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "anilist_search_fallback_outbound_requests{deployment=\"ja-media-services\"}",
+          "legendFormat": "total requests",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "expr": "anilist_search_fallback_outbound_429s{deployment=\"ja-media-services\"}",
+          "legendFormat": "429s",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "editorMode": "code",
+          "expr": "anilist_search_fallback_outbound_errors{deployment=\"ja-media-services\"}",
+          "legendFormat": "errors",
+          "range": true,
+          "refId": "C"
+        },
+        {
+          "editorMode": "code",
+          "expr": "anilist_search_fallback_exact_coalesced_waits{deployment=\"ja-media-services\"}",
+          "legendFormat": "coalesced waits",
+          "range": true,
+          "refId": "D"
+        }
+      ],
+      "title": "AniList Search Outbound",
+      "type": "stat"
+    },
+    {
       "gridPos": {"h": 4, "w": 24, "x": 0, "y": 30},
       "id": 9,
       "options": {
-        "content": "### Current monitoring boundary\n\nanime-audio is now fully represented: index validity appears alongside the other refresh panels, corpus sizes are in the shared stat, and a dedicated row shows watched-directory freshness, index worker state, and accumulated failure counters.\n\nAniList Search is not represented because it does not yet expose Prometheus metrics. For crosswalk and kitsunekko-subtitles, refresh panels show current artifact validity but not refresh age; timestamps can be added once those services publish them.",
+        "content": "### Current monitoring boundary\n\nanime-audio and AniList Search are now fully represented. For crosswalk and kitsunekko-subtitles, refresh panels show current artifact validity but not refresh age; timestamps can be added once those services publish them.",
         "mode": "markdown"
       },
       "title": "Read this before trusting the dashboard",
