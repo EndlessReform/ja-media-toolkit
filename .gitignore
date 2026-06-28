@@ -13,6 +13,7 @@ wheels/
 input
 output
 out
+.ja-media-runs/
 envs/apple/config.local.toml
 envs/services/data
 *.jsonl.gz

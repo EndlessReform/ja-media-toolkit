@@ -18,6 +18,10 @@ from ja_media_frontend.srt_cleaning.contracts import (
     sha256_text,
 )
 from ja_media_frontend.srt_cleaning.prompt_rendering import render_window_prompt
+from ja_media_frontend.srt_cleaning.workspace import (
+    WINDOW_SCHEMA_NAME,
+    WINDOW_SCHEMA_VERSION,
+)
 
 
 def build_windows(
@@ -63,6 +67,8 @@ def build_manifest_row(window: CueWindow, *, model: str) -> dict[str, Any]:
 
     source = window.source
     return {
+        "schema_name": WINDOW_SCHEMA_NAME,
+        "schema_version": WINDOW_SCHEMA_VERSION,
         "custom_id": window.custom_id,
         "pipeline_version": PIPELINE_VERSION,
         "anilist_id": source.anilist_id,
@@ -141,6 +147,29 @@ def write_generation_artifacts(
     )
 
 
+def write_workspace_generation_artifacts(
+    rows: Iterable[dict[str, Any]],
+    manifest_rows: Iterable[dict[str, Any]],
+    *,
+    output_dir: Path,
+    max_requests_per_shard: int = DEFAULT_MAX_REQUESTS_PER_SHARD,
+    max_bytes_per_shard: int = DEFAULT_MAX_BYTES_PER_SHARD,
+    single_jsonl: bool = False,
+) -> list[BatchShard]:
+    """Write standard workspace artifact names into one run directory."""
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    write_jsonl(output_dir / "manifest.jsonl", manifest_rows)
+    return write_batch_shards(
+        rows,
+        output_prefix=output_dir / "batch",
+        max_requests_per_shard=max_requests_per_shard,
+        max_bytes_per_shard=max_bytes_per_shard,
+        single_jsonl=single_jsonl,
+        suffix_template="-{shard_number:05d}.jsonl",
+    )
+
+
 def write_batch_shards(
     rows: Iterable[dict[str, Any]],
     *,
@@ -148,6 +177,7 @@ def write_batch_shards(
     max_requests_per_shard: int,
     max_bytes_per_shard: int,
     single_jsonl: bool = False,
+    suffix_template: str = ".batch-{shard_number:05d}.jsonl",
 ) -> list[BatchShard]:
     """Write JSONL shards without exceeding request or byte limits."""
 
@@ -196,7 +226,7 @@ def write_batch_shards(
             shard_number += 1
             current_path = prefix_artifact_path(
                 output_prefix,
-                f".batch-{shard_number:05d}.jsonl",
+                suffix_template.format(shard_number=shard_number),
             )
             current_file = current_path.open("wb")
             current_count = 0

@@ -15,10 +15,18 @@ from ja_media_frontend.srt_cleaning.batch import (
     prefix_artifact_path,
     sha256_text,
     write_generation_artifacts,
+    write_workspace_generation_artifacts,
     write_shards_summary,
 )
-from ja_media_frontend.srt_cleaning.contracts import SourceDocument
+from ja_media_frontend.srt_cleaning.contracts import PIPELINE_VERSION, SourceDocument
 from ja_media_frontend.srt_cleaning.reconstruct import reconstruct_from_batch
+from ja_media_frontend.srt_cleaning.workspace import (
+    SrtCleanRun,
+    prepare_run_dir,
+    run_for_anilist,
+    workspace_run_id,
+    write_run_manifest,
+)
 
 
 console = Console()
@@ -96,8 +104,13 @@ def run_generate(
 
     policy_text = house_style_path.read_text(encoding="utf-8")
     policy_sha = sha256_text(policy_text)
-    output_prefix = Path(args.out).expanduser().resolve()
-    sources_dir = output_prefix.parent / f"{output_prefix.name}.sources"
+    workspace_run = resolve_generate_workspace(args, anilist_ids, policy_sha)
+    output_prefix = explicit_output_prefix(args)
+    if workspace_run is not None:
+        sources_dir = workspace_run.sources_dir
+    else:
+        assert output_prefix is not None
+        sources_dir = output_prefix.parent / f"{output_prefix.name}.sources"
     sources_dir.mkdir(parents=True, exist_ok=True)
 
     rows: list[dict[str, Any]] = []
@@ -145,27 +158,52 @@ def run_generate(
                 build_manifest_row(window, model=args.model) for window in windows
             )
 
-    shards = write_generation_artifacts(
-        rows,
-        manifest_rows,
-        output_prefix=output_prefix,
-        max_requests_per_shard=args.max_requests_per_shard,
-        max_bytes_per_shard=args.max_bytes_per_shard,
-        single_jsonl=args.single_jsonl,
-    )
-    write_shards_summary(prefix_artifact_path(output_prefix, ".shards.json"), shards, model=args.model)
+    if workspace_run is not None:
+        shards = write_workspace_generation_artifacts(
+            rows,
+            manifest_rows,
+            output_dir=workspace_run.run_dir,
+            max_requests_per_shard=args.max_requests_per_shard,
+            max_bytes_per_shard=args.max_bytes_per_shard,
+            single_jsonl=args.single_jsonl,
+        )
+        write_shards_summary(workspace_run.shards_summary_path, shards, model=args.model)
+        write_run_manifest(
+            workspace_run,
+            batch_shards=[shard.path for shard in shards],
+            model=args.model,
+            pipeline_version=PIPELINE_VERSION,
+            prompt_policy_sha256=policy_sha,
+        )
+        manifest_path = workspace_run.manifest_path
+    else:
+        assert output_prefix is not None
+        shards = write_generation_artifacts(
+            rows,
+            manifest_rows,
+            output_prefix=output_prefix,
+            max_requests_per_shard=args.max_requests_per_shard,
+            max_bytes_per_shard=args.max_bytes_per_shard,
+            single_jsonl=args.single_jsonl,
+        )
+        manifest_path = prefix_artifact_path(output_prefix, ".manifest.jsonl")
+        write_shards_summary(prefix_artifact_path(output_prefix, ".shards.json"), shards, model=args.model)
     console.print(
         f"[green]Generated[/] {len(rows)} requests across {len(shards)} shard(s); "
-        f"manifest: [cyan]{prefix_artifact_path(output_prefix, '.manifest.jsonl')}[/]"
+        f"manifest: [cyan]{manifest_path}[/]"
     )
+    if workspace_run is not None:
+        console.print(f"Run: [cyan]{workspace_run.run_dir}[/]")
+        console.print(f"vLLM output target: [cyan]{workspace_run.results_path}[/]")
 
 
 def run_reconstruct(args: argparse.Namespace) -> None:
     """Reconstruct cleaned SRTs from one or more batch output files."""
+    manifest_path, batch_outputs, output_dir = resolve_reconstruct_paths(args)
     summary = reconstruct_from_batch(
-        batch_output_paths=[Path(path).expanduser().resolve() for path in args.batch_output],
-        manifest_path=Path(args.manifest).expanduser().resolve(),
-        output_dir=Path(args.out_dir).expanduser().resolve(),
+        batch_output_paths=batch_outputs,
+        manifest_path=manifest_path,
+        output_dir=output_dir,
         allow_partial=args.allow_partial,
         archive=not args.no_archive,
     )
@@ -178,3 +216,78 @@ def run_reconstruct(args: argparse.Namespace) -> None:
     console.print(f"DLQ: [cyan]{summary.dlq_path}[/]")
     if summary.archive_path:
         console.print(f"Archive: [cyan]{summary.archive_path}[/]")
+
+
+def explicit_output_prefix(args: argparse.Namespace) -> Path | None:
+    if not args.out:
+        return None
+    return Path(args.out).expanduser().resolve()
+
+
+def resolve_generate_workspace(
+    args: argparse.Namespace,
+    anilist_ids: list[int],
+    policy_sha: str,
+) -> SrtCleanRun | None:
+    """Resolve and prepare workspace output when --out is omitted."""
+
+    if args.out:
+        return None
+    if len(anilist_ids) != 1:
+        console.print("[bold red]Error:[/] Workspace output requires exactly one AniList ID.")
+        sys.exit(2)
+    run_id = workspace_run_name(args, anilist_ids[0], policy_sha)
+    workspace_root = Path(args.workspace_root).expanduser() if args.workspace_root else None
+    run = run_for_anilist(anilist_ids[0], workspace_root=workspace_root, run_id=run_id)
+    prepare_run_dir(run, clobber=run.run_id == "current")
+    return run
+
+
+def workspace_run_name(args: argparse.Namespace, anilist_id: int, policy_sha: str) -> str:
+    if args.run_id:
+        return args.run_id
+    if args.run_hash:
+        return workspace_run_id(
+            {
+                "anilist_id": anilist_id,
+                "model": args.model,
+                "window_size": args.window_size,
+                "context_cues": args.context_cues,
+                "group_prefix": args.group_prefix or [],
+                "episode_one_only": args.episode_one_only,
+                "single_jsonl": args.single_jsonl,
+                "prompt_policy_sha256": policy_sha,
+            }
+        )
+    return "current"
+
+
+def resolve_reconstruct_paths(
+    args: argparse.Namespace,
+) -> tuple[Path, list[Path], Path]:
+    if args.manifest:
+        if not args.batch_output:
+            console.print("[bold red]Error:[/] Provide --batch-output with --manifest.")
+            sys.exit(2)
+        if not args.out_dir:
+            console.print("[bold red]Error:[/] Provide --out-dir with --manifest.")
+            sys.exit(2)
+        return (
+            Path(args.manifest).expanduser().resolve(),
+            [Path(path).expanduser().resolve() for path in args.batch_output],
+            Path(args.out_dir).expanduser().resolve(),
+        )
+
+    if args.anilist is None:
+        console.print("[bold red]Error:[/] Provide --anilist or --manifest.")
+        sys.exit(2)
+
+    workspace_root = Path(args.workspace_root).expanduser() if args.workspace_root else None
+    run = run_for_anilist(args.anilist, workspace_root=workspace_root, run_id=args.run_id)
+    batch_outputs = (
+        [Path(path).expanduser().resolve() for path in args.batch_output]
+        if args.batch_output
+        else [run.results_path]
+    )
+    output_dir = Path(args.out_dir).expanduser().resolve() if args.out_dir else run.reconstruct_dir
+    return run.manifest_path, batch_outputs, output_dir

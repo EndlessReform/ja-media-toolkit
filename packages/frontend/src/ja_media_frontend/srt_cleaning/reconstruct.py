@@ -24,6 +24,11 @@ from ja_media_frontend.srt_cleaning.source_rebuild import (
     render_decision_rows,
     validate_source_windows,
 )
+from ja_media_frontend.srt_cleaning.workspace import (
+    WINDOW_SCHEMA_NAME,
+    WINDOW_SCHEMA_VERSION,
+    validate_schema_major,
+)
 
 
 @dataclass(frozen=True)
@@ -59,6 +64,7 @@ def reconstruct_from_batch(
 
     output_dir.mkdir(parents=True, exist_ok=True)
     manifest_rows = read_jsonl(manifest_path)
+    validate_manifest_schemas(manifest_path, manifest_rows)
     manifests = {str(row["custom_id"]): row for row in manifest_rows}
     expected_by_source = group_expected_windows(manifest_rows)
 
@@ -155,6 +161,22 @@ def reconstruct_from_batch(
         dlq_path=dlq_path,
         archive_path=archive_path,
     )
+
+
+def validate_manifest_schemas(
+    manifest_path: Path,
+    manifest_rows: list[dict[str, Any]],
+) -> None:
+    """Reject future incompatible manifest row schemas."""
+
+    for row in manifest_rows:
+        validate_schema_major(
+            schema_name=row.get("schema_name"),
+            schema_version=row.get("schema_version"),
+            expected_name=WINDOW_SCHEMA_NAME,
+            expected_version=WINDOW_SCHEMA_VERSION,
+            artifact=manifest_path,
+        )
 
 
 def iter_jsonl_rows(

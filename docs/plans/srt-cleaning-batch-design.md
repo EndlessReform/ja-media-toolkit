@@ -1,338 +1,464 @@
-# SRT Cleaning Batch Pipeline Design
+# SRT Cleaning Batch Pipeline
 
-## Current One-Off Usage
+## Current State
 
-The first implementation lives in `packages/frontend` as the
-`ja-media-srt-clean` script. It expects the local LAN metadata/subtitle services
-to be reachable through normal toolkit config, and it writes generated artifacts
-next to the `--out` prefix:
+This branch has a working first slice in `packages/frontend`:
+
+- `ja-media-srt-clean smoke-test` fetches AniList metadata and Kitsunekko subtitle inventory.
+- `ja-media-srt-clean generate` writes OpenAI-compatible chat-completions JSONL, a manifest, a shard summary, and cached source SRTs.
+- `ja-media-srt-clean reconstruct` consumes unordered OpenAI-style result JSONL and writes cleaned SRTs plus analysis logs.
+- Tests cover window generation, custom IDs, shard limits, result parsing, unordered reconstruction, invalid rows, and source-level blocking errors.
+
+The branch is not done. The biggest missing piece is the execution surface between generated JSONL and reconstructed output. Today the user still has to hand-run provider-specific commands and remember vLLM/OpenAI quirks, but generated artifacts now live in a predictable workspace.
+
+The CLI entrypoint has been split into smaller modules. Keep it that way: add future behavior to focused modules under `ja_media_frontend.srt_cleaning`, not to the script entrypoint.
+
+## Goal
+
+Produce cleaned Japanese subtitle text that is faithful enough to feed an audio-aware forced aligner.
+
+Durable stages:
+
+1. Discover subtitle candidates from local services.
+2. Convert source SRT cues into deterministic cleaning windows.
+3. Run those windows as OpenAI-compatible batch rows, with local vLLM as the happy path.
+4. Reconstruct complete cleaned SRTs from unordered provider results.
+5. Pair cleaned SRT cues with local audio/VAD windows for forced alignment.
+
+Models, providers, batch APIs, and GPU runtimes can change. The manifest, source cache, decisions log, and cleaned SRTs are the durable artifacts.
+
+## Current Usage
+
+Run commands from the frontend package:
 
 ```sh
 cd packages/frontend
-uv run ja-media-srt-clean generate \
-  --anilist 101573 \
-  --episode-one-only \
-  --out /tmp/ja-media-srt-clean/101573
-
-uv run ja-media-srt-clean generate \
-  --anilist 101573,183385 \
-  --episode-one-only \
-  --out /tmp/ja-media-srt-clean/101573-183385
 ```
 
-Generated files use gitignored names:
+Optional sanity check before generation:
 
-- `<prefix>.batch-00001.jsonl`: OpenAI-compatible request JSONL.
-- `<prefix>.manifest.jsonl`: durable local reconstruction manifest.
-- `<prefix>.shards.json`: shard summary.
-- `<prefix>.sources/`: cached source SRTs.
+```sh
+uv run ja-media-srt-clean smoke-test \
+  --anilist 101573 \
+  --episode-one-only \
+  --preview-srt
+```
 
-Generation sends only active cues by default. Surrounding cue context is opt-in
-with `--context-cues N`; keep it off unless a model has proven it can ignore
-non-active cue indexes reliably.
+Generate batch rows into the default workspace:
 
-After a provider/vLLM smoke run returns OpenAI-style batch output, reconstruct
-with:
+```sh
+uv run ja-media-srt-clean generate \
+  --anilist 101573 \
+  --episode-one-only
+```
+
+This clobbers the previous workspace run by default and writes:
+
+```text
+../../.ja-media-runs/srt-clean/anilist-101573/current/
+├── run-manifest.json
+├── batch-00001.jsonl
+├── manifest.jsonl
+├── shards.json
+└── sources/
+```
+
+Run the current local vLLM path by mounting that run directory as `/data`:
+
+```sh
+cd ../..
+docker run --rm --runtime nvidia --gpus all \
+  -v ~/.cache/huggingface:/root/.cache/huggingface \
+  -v vllm-cache:/root/.cache/vllm \
+  -v "$PWD/.ja-media-runs/srt-clean/anilist-101573/current:/data" \
+  -e VLLM_SKIP_MODEL_NAME_VALIDATION=1 \
+  -e HF_HOME=/root/.cache/huggingface \
+  --entrypoint vllm vllm/vllm-openai run-batch \
+  -i /data/batch-00001.jsonl \
+  -o /data/results.jsonl \
+  --model RedHatAI/gemma-4-26B-A4B-it-NVFP4 \
+  --max-model-len 96000 \
+  --max-num-batched-tokens 16384
+```
+
+Reconstruct from the workspace once `results.jsonl` exists:
 
 ```sh
 cd packages/frontend
 uv run ja-media-srt-clean reconstruct \
-  --manifest /tmp/ja-media-srt-clean/101573.manifest.jsonl \
-  --batch-output /path/to/provider-output.jsonl \
-  --out-dir /tmp/ja-media-srt-clean/reconstructed-101573
+  --anilist 101573
 ```
 
-Reconstruction writes `decisions.jsonl`, `errors.jsonl`, `dlq.jsonl`, cleaned
-SRTs, and a `cleaned-srts.tar.gz` archive unless `--no-archive` is passed.
-`decisions.jsonl` is the model-evidence log, so it includes parsed decisions
-even when a source SRT is skipped, with `compliant`, `within_active_span`, and
-`noncompliant_reasons` fields for introspection.
+That writes:
 
-## Status
+```text
+../../.ja-media-runs/srt-clean/anilist-101573/current/reconstruct/
+├── decisions.jsonl
+├── errors.jsonl
+├── dlq.jsonl
+├── cleaned/
+└── cleaned-srts.tar.gz
+```
 
-Draft for review. This document proposes the first implementation slice for
-generating LLM batch rows from Kitsunekko SRT candidates, then reconstructing
-cleaned subtitle artifacts from batch output.
+Useful variants:
 
-No implementation should proceed until the decision gates below are approved.
+- Add `--run-hash` to `generate` when you want a preserved `sha256-*` run instead of clobbering `current/`.
+- Add `--run-id sha256-...` to `reconstruct` to reconstruct a preserved run.
+- Add `--workspace-root /path/to/runs` if the default repo-local `.ja-media-runs/` is inconvenient.
+- Add `--out PREFIX` to `generate` or `--manifest/--batch-output/--out-dir` to `reconstruct` for the legacy explicit-path flow.
+- Use `uv run scripts/oai_batch_rollout.py stats --input ../../.ja-media-runs/srt-clean/anilist-101573/current/batch-00001.jsonl` from `packages/frontend` for the rough token/cost calculator.
 
-## Feasibility
+Generated paths under the run directory:
 
-This is feasible with the current repository shape.
+- `batch-00001.jsonl`: OpenAI-compatible request JSONL.
+- `manifest.jsonl`: local reconstruction manifest.
+- `shards.json`: shard summary.
+- `sources/`: cached source SRT files.
 
-The core services already expose the two durable data sources the pipeline
-needs:
+Reconstruction paths:
 
-- `ja_media_core.anilist_search.HttpAniListSearchClient.anime()` can fetch a
-  projected AniList metadata row by ID.
-- `ja_media_core.kitsunekko.HttpKitsunekkoSubtitlesClient` can list subtitles
-  by AniList ID and download individual file content by `subtitle_id`.
-- `ja_media_core.transcripts.parse_srt()` and `format_srt()` already preserve
-  original cue indexes, timing settings, text, and stable source-clock seconds.
-- `ja_media_core.media_filename.suggest_ordinary_episode()` provides the
-  conservative existing episode parser; the Kitsunekko service also has runtime
-  episode filtering in
-  `envs/services/src/ja_media_services/kitsunekko_subtitles/episode.py`.
+- `decisions.jsonl`: one parsed model decision per active cue.
+- `errors.jsonl`: malformed rows, provider failures, schema errors, and source validation failures.
+- `dlq.jsonl`: retry/review rows derived from errors.
+- `cleaned/*.cleaned.srt`: source-clock SRTs after cleaning.
+- `cleaned-srts.tar.gz`: portable archive, unless disabled.
 
-The main risk is not API availability, but result provenance. Batch result
-ordering is explicitly non-stable for OpenAI Batch, so every generated request
-must carry a collision-resistant `custom_id` and a local manifest row with the
-same key. The OpenAI Batch docs cap each input file at 50,000 requests and
-200 MB; the generator should shard across multiple JSONL files before either
-limit, not fail the whole job.
+## Artifact Workspace
 
-## Recommended Placement
+The default local workspace should be a repo-local, gitignored directory:
 
-Start as an experimental root script, not `packages/frontend`.
+```text
+.ja-media-runs/
+└── srt-clean/
+    └── anilist-101573/
+        ├── current/
+        │   ├── run-manifest.json
+        │   ├── batch-00001.jsonl
+        │   ├── manifest.jsonl
+        │   ├── shards.json
+        │   ├── sources/
+        │   ├── results.jsonl
+        │   └── reconstruct/
+        │       ├── decisions.jsonl
+        │       ├── errors.jsonl
+        │       ├── dlq.jsonl
+        │       ├── cleaned/
+        │       └── cleaned-srts.tar.gz
+        └── sha256-8f3a21c4d90b/
+```
 
-Reasoning:
+Default behavior:
 
-- This may be a one-off experiment to produce one batch corpus and learn
-  whether the workflow is worth keeping.
-- Root scripts can still use `uv run` and import first-party packages without
-  committing to a permanent `ja-media` CLI surface.
-- The design should preserve clean promotion paths, but the public command
-  should wait until the aligner experiment proves value.
+- `generate --anilist 101573` writes to `.ja-media-runs/srt-clean/anilist-101573/current/`.
+- A new `generate` run clobbers `current/` by default.
+- `reconstruct --anilist 101573` autodetects `current/manifest.jsonl`, `current/results.jsonl`, and writes to `current/reconstruct/`.
+- The vLLM wrapper autodetects `current/batch-00001.jsonl` and writes `current/results.jsonl`.
+- The review TUI autodetects `current/manifest.jsonl`, `current/reconstruct/decisions.jsonl`, `current/reconstruct/errors.jsonl`, and the cached source SRTs.
+- `--run-hash` writes to `sha256-<hash>/` instead of clobbering `current/`.
+- `--workspace-root` can move the root, but the default remains repo-local so the whole state can be archived with `tar`.
 
-Proposed first slice:
+`run-manifest.json` is the run-level index:
 
-- `scripts/exploration/subtitle_cleaning_batch.py`
-- `scripts/exploration/README.md` usage notes
-- focused tests only if helpers are promoted out of the script
+```json
+{
+  "schema_name": "ja-media.srt-clean.run",
+  "schema_version": "1.0.0",
+  "anilist_id": 101573,
+  "run_id": "current",
+  "created_at": "2026-06-28T00:00:00Z",
+  "pipeline_version": "clean:v1",
+  "prompt_policy_sha256": "hex",
+  "model": "RedHatAI/gemma-4-26B-A4B-it-NVFP4",
+  "paths": {
+    "batch_shards": ["batch-00001.jsonl"],
+    "window_manifest": "manifest.jsonl",
+    "shards_summary": "shards.json",
+    "sources_dir": "sources",
+    "results": "results.jsonl",
+    "reconstruct_dir": "reconstruct"
+  }
+}
+```
 
-Promotion gate: move to `packages/frontend` only after one successful
-end-to-end batch, reconstruction, cleaned-SRT aligner run, and a clear
-expectation that this will be reused.
+Every durable machine-read artifact should carry a semver `schema_version`.
+Additive changes bump the minor version and remain readable. Breaking changes bump the major version; generate, reconstruct, rollout, and review commands must refuse mismatched major versions with a direct error instead of quietly interpreting stale state.
 
-## Input Scope
+## Data Sources
 
-The batch generator should accept AniList IDs in either form:
-
-- `--anilist 101573,12345,67890`
-- `--anilist-file ids.txt`, one integer per non-empty line, with `#` comments
-  ignored.
-
-Subtitle selection knobs:
-
-- `--window-size N`, default `10`.
-- `--context-cues N`, default `0`, used only as opt-in prompt context around
-  the active window.
-- `--group-prefix PREFIX`, repeatable, filtering `repo_path` or filename to
-  candidates whose leading path/name starts with the prefix.
-- `--episode-one-only`, opt-in, filtering through the existing conservative
-  episode parser.
-- `--language ja|unknown|all`, default `all` for the first slice unless review
-  prefers Japanese-only LID filtering.
-
-For the episode-one experiment, prefer local filtering over a service change:
-fetch the full AniList file list, keep supported `.srt` rows, parse the filename
-stem with `suggest_ordinary_episode()`, and retain only episode `1`. This keeps
-the experiment cheap and auditable.
-
-## Metadata Source
-
-Use the local AniList search service as the metadata engine:
+Metadata comes from the local AniList search service:
 
 ```python
-fields = (
-    "title_english",
-    "title_native",
-    "title_romaji",
-    "description",
-    "characters",
-)
+fields = ("title_english", "title_native", "title_romaji", "description", "characters")
 metadata = HttpAniListSearchClient().anime(anilist_id, fields=fields)
 ```
 
-The service's direct AniList fallback already requests `characters` including
-character full/native names and voice actor names. The local CSV-backed dataset
-may or may not have equally rich character JSON for every row; the generator
-should tolerate missing character details and include a `metadata_warnings`
-array in its manifest.
-
-Open question: whether `description` should be HTML-stripped for prompt context.
-Recommendation: yes, reuse the plain-text description logic currently in
-`packages/frontend/src/ja_media_frontend/audio_library/metadata.py` or move a
-small helper into this package.
-
-## Prompt And Structured Output Contract
-
-The prompt should combine:
-
-1. `MOVETHIS-house-style.md` verbatim as the system/developer cleaning policy.
-2. Series context: English/Japanese/Romaji titles, synopsis, and compact
-   character list.
-3. One active cue window plus before/after context.
-
-The response model should wrap the house-style row schema in an object, because
-top-level arrays are awkward for some structured-output validators. Proposed
-shape:
+Subtitle candidates come from the local Kitsunekko subtitles service:
 
 ```python
-class CleanDecision(BaseModel):
-    index: int
-    decision: Literal["asis", "edit", "remove", "escalate"]
-    text: str | None
-    category: CleanCategory | None
+files = HttpKitsunekkoSubtitlesClient().anilist_files(anilist_id)
+content = HttpKitsunekkoSubtitlesClient().file_content(subtitle_id)
+```
 
+The CLI should keep using toolkit config and first-party clients. Service URLs are not secrets and should not be hand-assembled in feature code.
+
+## Cleaning Prompt Contract
+
+The system message is `packages/frontend/src/ja_media_frontend/house-style.md`. It defines the normalization rules and the structured-output task.
+
+Each request contains:
+
+- Series context: AniList ID, English/native/Romaji titles, synopsis, and a compact character list.
+- Optional context cues before and after the active span.
+- Active cues with local request IDs.
+
+Active cue IDs are local to one request. They are not source SRT indexes. Models must return exactly one decision for every active local ID and no decisions for context cues.
+
+Current structured output:
+
+```python
+DecisionKind = Literal["asis", "edit", "remove", "escalate"]
+
+class CleanDecision(BaseModel):
+    cue_id: int = Field(alias="id")
+    decision: DecisionKind
+    text: str | None = None
+    category: str | None = None
 
 class CleanWindowResult(BaseModel):
     decisions: list[CleanDecision]
 ```
 
-The generator should use this Pydantic model to emit JSON Schema into each
-provider-specific request body. For OpenAI Chat Completions, the current docs
-support `response_format={"type": "json_schema", "json_schema": ...}` and the
-Python SDK also supports Pydantic models for synchronous parse calls. For batch
-JSONL, we should emit the raw JSON Schema body, because the batch file is just
-endpoint parameters serialized per line.
+`asis` and `escalate` preserve original cue text during reconstruction. `edit` replaces text while preserving timing. `remove` drops the cue.
 
-## Batch Row Shape
+## Batch Request Contract
 
-Use OpenAI-compatible JSONL as the first concrete output target. Official docs
-say a batch row `body` uses the same parameters as the underlying endpoint, and
-the OpenAPI spec confirms `/v1/chat/completions` is a supported batch endpoint.
-Minimal row:
+The canonical request artifact is OpenAI-compatible JSONL for `/v1/chat/completions`:
 
 ```json
 {
-  "custom_id": "clean:v1:anilist-101573:srt-abcd1234:w0007:sha256-deadbeef",
+  "custom_id": "clean:v1:anilist-101573:srt-subtitle:w00001:1-10:policy-abcd:sha256-deadbeef",
   "method": "POST",
   "url": "/v1/chat/completions",
   "body": {
     "model": "gpt-5.5",
     "messages": [],
-    "response_format": {"type": "json_schema", "json_schema": {}}
+    "response_format": {
+      "type": "json_schema",
+      "json_schema": {"name": "clean_window_result", "strict": true, "schema": {}}
+    }
   }
 }
 ```
 
-The command should also write sidecar manifests:
+Shard limits default to 50,000 requests and 200 MB per JSONL file. The row can be accepted by OpenAI Batch, compatible batch APIs, provider scripts, or local vLLM tooling. Reconstruction only requires OpenAI-style result rows keyed by `custom_id`.
 
-- `<out>.manifest.jsonl`: one row per window with `custom_id`, AniList ID,
-  subtitle ID, `repo_path`, original filename, source SHA-256, cue index span,
-  window number, model target, prompt-policy hash, and local cache path.
-- `<out>.shards.json`: shard paths, request counts, byte sizes, model, endpoint,
-  and enough metadata to submit each shard independently.
-- `<out>.sources/`: downloaded source SRT files named by subtitle ID and source
-  hash.
+## Manifest Contract
 
-The custom ID should be deterministic from pipeline version, AniList ID,
-subtitle ID or file hash, cue span, prompt-policy hash, and active cue text
-hash. This lets failed windows be regenerated without changing successful IDs.
+Each window has one manifest row:
 
-## Reconstruction
+```json
+{
+  "custom_id": "clean:v1:...",
+  "pipeline_version": "clean:v1",
+  "anilist_id": 101573,
+  "subtitle_id": "abc123",
+  "repo_path": "subtitles/anime_tv/Show/[Group] Show - 01.srt",
+  "filename": "[Group] Show - 01.srt",
+  "source_sha256": "hex",
+  "cue_start_index": 1,
+  "cue_end_index": 10,
+  "active_indexes": [1, 2, 3],
+  "window_number": 1,
+  "model": "gpt-5.5",
+  "prompt_policy_sha256": "hex",
+  "local_cache_path": ".ja-media-runs/srt-clean/anilist-101573/current/sources/abc123.hash.srt",
+  "metadata_warnings": []
+}
+```
 
-Add a second subcommand that consumes:
+`custom_id` is deterministic from pipeline version, AniList ID, subtitle ID, window number, source cue span, prompt policy hash, and active text hash. It is the join key between provider output and local reconstruction state.
 
-- OpenAI-style batch output JSONL.
-- The generator manifest JSONL.
-- The cached source files directory.
+## Local Rollout Strategy
 
-Outputs:
+Hosted batch rollout is not the short-term path. A cost pass on one all-episode show shard made the API option look silly compared with a local RTX 5090 finishing the same work in minutes with Gemma. Keep the generic OpenAI-compatible rollout driver as a useful someday tool, but optimize the immediate workflow for the local vLLM batch path.
 
-- `decisions.jsonl`: one row per cue decision for DuckDB analysis.
-- `errors.jsonl`: invalid rows, failed API responses, schema errors, missing
-  cues, duplicate decisions, or index mismatches.
-- `<stem>.cleaned.srt` for each sane source SRT.
-- `cleaned-srts.tar.zst` or `cleaned-srts.tar.gz`.
+The rough edge right now is the Docker incantation:
 
-Reconstruction rules:
+```sh
+docker run --rm --runtime nvidia --gpus all \
+  -v ~/.cache/huggingface:/root/.cache/huggingface \
+  -v vllm-cache:/root/.cache/vllm \
+  -v "$PWD/.ja-media-runs/srt-clean/anilist-184591/current:/data" \
+  -e VLLM_SKIP_MODEL_NAME_VALIDATION=1 \
+  -e HF_HOME=/root/.cache/huggingface \
+  --entrypoint vllm vllm/vllm-openai run-batch \
+  -i /data/batch-00001.jsonl \
+  -o /data/results.jsonl \
+  --model RedHatAI/gemma-4-26B-A4B-it-NVFP4 \
+  --max-model-len 96000 \
+  --max-num-batched-tokens 16384
+```
 
-- `asis`: keep original cue text and timing.
-- `edit`: keep timing, replace text with `text`.
-- `remove`: drop the cue.
-- `escalate`: keep original cue text by default and mark the decision in
-  `decisions.jsonl`; optionally support `--drop-escalated` later.
+Replace that with a small local wrapper, either a root script or a `ja-media-srt-clean run-vllm` subcommand:
 
-Validation gates for a source file:
+```sh
+uv run scripts/srt_clean_vllm_batch.py \
+  --anilist 184591 \
+  --model RedHatAI/gemma-4-26B-A4B-it-NVFP4 \
+  --max-model-len 96000 \
+  --max-num-batched-tokens 16384
+```
 
-- Every non-overlapping window decision must reference indexes present in the
-  source SRT.
-- A cue may receive only one decision unless overlap is explicitly enabled in a
-  future design.
-- Missing windows make the source incomplete unless `--allow-partial` is set.
-- The cleaned SRT uses `format_srt()` for sequential indexes, while
-  `decisions.jsonl` preserves original indexes.
+Wrapper contract:
 
-## OpenAI SDK Dependency
+- Accept host paths and map them into one Docker `/data` mount automatically.
+- Default Hugging Face and vLLM cache mounts to the known-good local layout.
+- Print the exact Docker command before running it.
+- Support `--dry-run` for copy/paste/debugging.
+- Support `--image`, `--gpus`, `--runtime`, `--env KEY=VALUE`, and repeated `--extra-vllm-arg`.
+- With `--anilist`, autodetect `.ja-media-runs/srt-clean/anilist-<id>/current/batch-00001.jsonl` and write `results.jsonl`.
+- Infer an output path next to the input if `--out` is omitted.
+- Refuse inputs outside the chosen data mount unless the user passes an explicit `--data-root`.
+- Keep vLLM container startup separate from any hosted-provider rollout story.
 
-Do not require `openai` for offline generation, but add an SDK-backed validation
-gate before trusting the payload shape.
+The existing `scripts/oai_batch_rollout.py stats` calculator is still useful as a sizing/cost sanity check, but the async hosted rollout driver should move to backlog. If it returns later, it should remain a dumb pipe over OpenAI batch JSONL and not know about SRT cleaning.
 
-Receipts:
+Backlog shape for the generic hosted runner:
 
-- The Batch guide says each JSONL row contains one request and the row `body`
-  has the same parameters as the underlying endpoint.
-- The Batch OpenAPI spec requires `input_file_id`, `endpoint`, and
-  `completion_window`; supported endpoints include `/v1/chat/completions`; each
-  uploaded batch input file can contain up to 50,000 requests and 200 MB.
-- The Chat Completions reference says `response_format: {"type": "json_schema",
-  "json_schema": {...}}` enables Structured Outputs.
-- The Structured Outputs guide says SDKs support Pydantic/Zod helpers and
-  recommends avoiding schema/type divergence.
+```sh
+uv run scripts/oai_batch_rollout.py \
+  --input .ja-media-runs/srt-clean/anilist-101573/current/batch-00001.jsonl \
+  --out .ja-media-runs/srt-clean/anilist-101573/current/results.jsonl \
+  --base-url http://localhost:8000/v1 \
+  --model RedHatAI/gemma-4-26B-A4B-it-NVFP4 \
+  --api-key-env VLLM_API_KEY \
+  --concurrency 16
+```
 
-Recommendation: generate JSONL offline, but implement `--validate-openai-one`
-as an optional smoke test before a real batch. If approved, add `openai` with
-`uv add openai` from the relevant package/script environment and use the SDK's
-structured-output/Pydantic support to validate one representative window.
+The stats subcommand can stay as a batch sizing tool:
 
-If the script remains in `scripts/exploration`, do not add `openai` to
-`packages/frontend` just for validation. Use the environment that owns the
-script invocation, or defer SDK validation until promotion.
+```sh
+uv run scripts/oai_batch_rollout.py stats \
+  --input .ja-media-runs/srt-clean/anilist-101573/current/batch-00001.jsonl \
+  --tokenizer o200k_base \
+  --rate-limit-ktpm 30000 \
+  --rate-limit-rpm 10000 \
+  --safety-margin 0.80 \
+  --input-price-per-mtok 1.25 \
+  --cached-input-price-per-mtok 0.125 \
+  --output-price-per-mtok 10.00
+```
 
-## Provider Portability
+The stats command should render a Rich table with request count, shard path, stable system-prompt tokens, user-prompt min/p50/p95/max/total, estimated uncached and cached input tokens, output tokens, optional cost, and optional RPS/RPM/KTPM guesstimates. Rate limits use kilotokens per minute so provider quota pages can be copied without counting zeros. If RPM is supplied without KTPM, treat it as concurrency only.
 
-Use OpenAI-compatible JSONL as the canonical first artifact, but keep provider
-details isolated in `batch.py`.
+```sh
+uv run --project packages/frontend scripts/oai_batch_rollout.py tui \
+  --input .ja-media-runs/srt-clean/anilist-101573/current/batch-00001.jsonl
+```
 
-Potential future targets: `openai-chat-completions`, `openai-responses`,
-`openrouter-chat-completions`, and `vllm-chat-completions`.
+The cost estimate is deliberately crude. Assume the system prompt is cacheable and the user prompt is variable. Treat output as `1.5x` input unless the user passes an override. This is an upper-bound planning tool, not billing truth.
 
-For non-OpenAI targets, the stable local manifest and `custom_id` remain the
-reconstruction contract; only request body generation changes.
+## Reconstruction Contract
 
-## Project Gates
+Reconstruction accepts one manifest and one or more provider output JSONL files. Provider output order is irrelevant.
 
-Gate 1: Placement. Approve root `scripts/exploration/` first, with promotion to
-`packages/frontend` only after a successful end-to-end experiment.
+Validation rules:
 
-Gate 2: Metadata. Approve `HttpAniListSearchClient.anime()` and local GraphQL
-fallback, with no direct AniList dependency in the CLI.
+- Every expected window needs one successful result unless `--allow-partial` is set.
+- A result `custom_id` must exist in the manifest.
+- A source cue can receive only one decision.
+- A window must contain exactly one decision for each active local ID.
+- Decisions outside the active local ID range are errors.
+- A source with blocking errors is skipped unless partial output is explicitly allowed.
 
-Gate 3: Subtitle Scope. Approve `.srt` only for the first slice. ASS can be
-normalized later through existing `parse_ass()` and `format_srt()`.
+The cleaned SRT uses source timings and sequential formatted indexes. The decision log preserves original source indexes for analysis.
 
-Gate 4: Windowing. Approve non-overlapping windows with separate context cues.
+## Cleaning Review UI
 
-Gate 5: Batch Body. Approve OpenAI Chat Completions JSONL as the first target,
-with sharding and an optional SDK-backed one-row validation gate.
+Before forced alignment, add a review surface for checking whether the model cleaning is trustworthy. Reuse the subsync Textual/application primitives rather than inventing a separate interaction model.
 
-Gate 6: Escalations. Approve keeping escalated cues unchanged in `.cleaned.srt`
-while recording them in `decisions.jsonl`.
+Inputs:
 
-Gate 7: Compression. Approve `tar.gz` as the portable default. Use `tar.zst`
-only if we confirm `zstd` is available in the target environment.
+- Source SRT cache path from the manifest.
+- Cleaned SRT path from reconstruction.
+- `decisions.jsonl` and `errors.jsonl`.
+- Optional media path or resolved audio artifact.
 
-## Implementation Plan After Approval
+Primary view:
 
-1. Add Pydantic models and tests for ID parsing, metadata context formatting,
-   windowing, custom ID determinism, and reconstruction validation.
-2. Add subtitle inventory/download helpers using `HttpKitsunekkoSubtitlesClient`.
-3. Add sharded batch JSONL generation and manifest/source cache writing.
-4. Add reconstruction from batch output to decisions JSONL and cleaned SRTs.
-5. Add optional OpenAI SDK one-row validation if approved.
-6. Run `uv run pytest packages/frontend/tests packages/core/tests/test_srt.py`
-   from the repo root or `uv run pytest tests` from `packages/frontend`,
-   depending on touched files.
+- One row per source cue or decision.
+- Columns for source index, time, original text, cleaned text, decision, category, and warning/error state.
+- Filters for `edit`, `remove`, `escalate`, schema errors, changed text, and unchanged text.
+- Diff-oriented cell rendering for base vs rewritten line.
+- Jump/play controls using `MaterializedAudio` and `MaterializedAudioPlayer`.
+- Accept/reject/mark-review actions written to a sidecar review JSONL.
 
-## References
+This UI is a quality gate, not a proofreading sink. The first goal is to answer: is this model/prompt good enough to feed the aligner for this show?
 
-- Local policy input: `MOVETHIS-house-style.md`
-- Local batch semantics input: `DELETETHIS-oai-batch-api-semantics.md`
-- OpenAI Batch API docs:
-  `https://developers.openai.com/api/docs/guides/batch`
-- OpenAI Structured Outputs docs:
-  `https://developers.openai.com/api/docs/guides/structured-outputs`
-- OpenAI Python SDK:
-  `https://github.com/openai/openai-python`
+## Alignment End State
+
+Cleaned SRTs are not the final product. They are text candidates for a forced alignment workflow that needs local audio.
+
+Likely end state:
+
+1. Resolve a local media file or arbitrary media folder to AniList show and episode metadata.
+2. Fetch or select cleaned subtitle candidates for that episode.
+3. Split the audio into VAD windows using the existing subsync/audio strategy.
+4. Join candidate subtitle cues to VAD/audio regions by source clock time.
+5. Feed each region to the forced aligner with audio plus candidate text.
+6. Produce scored aligned regions for mining, shadowing, or candidate ranking.
+
+The audio server can help with media discovery and episode matching, but this should not require the full Docker service stack. A local-folder path should be first-class: given this directory of media files, find likely show/episode matches, then align against cleaned subtitles.
+
+Important boundary: SRT cleaning can be service-backed because it depends on Kitsunekko/AniList mirrors. Alignment is local-media-backed because it depends on the user's actual audio file.
+
+## What Is Left
+
+1. Add a local vLLM Docker wrapper.
+   This should remove the hand-edited `docker run` command, infer mounts and output names, and make local Gemma the happy path.
+
+2. Add first-class smoke paths for the local path.
+   One command should generate a tiny request set, run vLLM, reconstruct it, and summarize errors without manual path editing.
+
+3. Add the cleaning review TUI.
+   Reuse subsync/audio primitives to compare original vs cleaned text, inspect decisions, and optionally play the matching audio span.
+
+4. Add retry/DLQ ergonomics.
+   Failed provider calls and schema failures should become an obvious rerun input, not a manual JSONL archaeology task.
+
+5. Add model/body override hooks to generation or local execution.
+   Some compatible runtimes diverge on structured output support. The workflow needs a clean way to disable strict JSON schema, change temperature, or add provider-specific extra body fields without corrupting the manifest contract.
+
+6. Add local media episode resolution for alignment.
+   Start with arbitrary folders and existing filename heuristics. Use services for AniList matching when available, but do not require Docker for local alignment experiments.
+
+7. Define the alignment input manifest.
+   It should join `cleaned_srt_path`, source subtitle identity, media path, episode identity, VAD region timings, cue indexes, and aligner settings.
+
+8. Add an end-to-end fixture.
+   Use a small checked-in or generated audio/SRT fixture to prove generate -> rollout smoke -> reconstruct -> alignment manifest creation.
+
+9. Keep the generic hosted rollout driver as nice-to-have.
+   It is still useful for non-cleaning workflows or machines without local GPU, but it is not the current bottleneck.
+
+## Non-Ergonomic Spots
+
+- Local vLLM execution is disconnected from generation and reconstruction.
+- vLLM batch usage leaks Docker, cache mounts, model flags, and path rewriting into the user's working memory.
+- Output naming does not yet make the next command obvious.
+- There is no single small safe smoke-test path.
+- Error recovery exists as data, but not yet as a pleasant command.
+- There is no pleasant way to review model decisions against original text and audio.
+- The alignment destination is still conceptual, so it is unclear when a cleaned SRT is good enough.
+- The CLI entry module has absorbed too many responsibilities.
+
+## Suggestions
+
+- Make local vLLM the short-term happy path.
+- Keep the generic OpenAI-compatible JSONL executor as backlog, not as the next blocker.
+- Wrap vLLM Docker execution directly enough to remove path/caching mistakes.
+- Reuse subsync Textual and audio primitives for cleaning review.
+- Make local folders a first-class alignment input, even if service metadata is used opportunistically.
+- Prefer manifest-driven resumes and reruns everywhere. The user should rarely hand-edit JSONL.
+- Add next-command hints after generation and vLLM execution. The CLI should print the exact reconstruct and review commands for the artifacts it just wrote.
+- Keep cleaned SRTs source-clocked. Do not retime them during cleaning; timing changes belong to alignment/subsync stages.
