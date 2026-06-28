@@ -18,9 +18,6 @@ from ja_media_frontend.subsync.service import (
     resolve_subtitle_inputs,
     sidecar_path,
 )
-from ja_media_frontend.subsync.vocal_separation import (
-    SubsyncVocalSeparationConfig,
-)
 
 
 def run_subsync_tui(
@@ -35,12 +32,12 @@ def run_subsync_tui(
     fetch_subs: bool = False,
     tvdb_media_kind: str | None = "tv",
     sort_by_language: bool = False,
+    vocal_separation: bool = False,
 ) -> None:
     """Resolve playback and subtitle inputs, then run the Textual shell."""
 
     load_dotenv()
     config = load_config()
-    separation_config = SubsyncVocalSeparationConfig.load()
 
     from ja_media_frontend.subsync.tui import SubsyncTuiApp
     try:
@@ -90,7 +87,7 @@ def run_subsync_tui(
     with tempfile.TemporaryDirectory(prefix="ja-media-subsync-") as tmpdir:
         vad_audio_path, vad_status = _prepare_vad_audio_source(
             audio_selection.playback_path,
-            separation_config,
+            vocal_separation=vocal_separation,
         )
         playback_path = vad_audio_path or audio_selection.playback_path
         try:
@@ -147,9 +144,10 @@ def resolve_srt_inputs(inputs: list[str], *, allow_empty: bool = False) -> list[
 
 def _prepare_vad_audio_source(
     source_path: Path,
-    separation_config: SubsyncVocalSeparationConfig,
+    *,
+    vocal_separation: bool = False,
 ) -> tuple[Path | None, str]:
-    if not separation_config.enabled:
+    if not vocal_separation:
         return None, "playback/VAD source: original audio"
     try:
         from ja_media_apple.vocal_separation import DemucsVocalSeparationBackend
@@ -159,28 +157,18 @@ def _prepare_vad_audio_source(
     source = resolve_audio_source(source_path, must_exist=True)
     audio_format = probe_audio_source(source)
     chunk = full_audio_chunk(source, audio_format, kind="subsync_vad_source")
-    backend = DemucsVocalSeparationBackend(
-        model=separation_config.model,
-        device=separation_config.device,
-        jobs=separation_config.jobs,
-        segment_s=separation_config.segment_s,
-    )
+    backend = DemucsVocalSeparationBackend()
     try:
         result = backend.separate(
-            [
-                chunk,
-            ],
-            options=VocalSeparationOptions(
-                stem=separation_config.stem,
-                cache_dir=separation_config.cache_dir,
-            ),
+            [chunk],
+            options=VocalSeparationOptions(stem="vocals"),
         )[0]
     except RuntimeError as exc:
         raise SystemExit(str(exc)) from exc
     cache_label = "cache hit" if result.cache_hit else "created"
     return (
         Path(result.stem_chunk.source.locator),
-        f"playback/VAD source: {separation_config.stem} stem ({cache_label})",
+        f"playback/VAD source: vocals stem ({cache_label})",
     )
 
 

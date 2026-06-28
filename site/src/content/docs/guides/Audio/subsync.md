@@ -60,26 +60,19 @@ default. Pass `--sort-by-language` to place Japanese candidates first, followed
 by unknown, bilingual, non-Japanese, and insufficient-text candidates. The
 thresholds come from the global `[subtitles.language_id]` configuration.
 
-By default, the TUI prepares a Demucs `vocals` stem for playback and the VAD
-speech track so background music is less likely to mask cue-boundary checks.
-Subtitle promotion and sidecar paths still target the original media file.
-Configure or disable this TUI-local step with
-`[subsync_tui.vocal_separation]` in your config file:
+By default, the TUI uses the original audio for playback and the VAD speech
+track. Pass `--vocal-separation` to run Demucs and produce a cleaner `vocals`
+stem before opening the TUI, so background music is less likely to mask
+cue-boundary checks. This adds seconds-to-minutes of startup time depending on
+episode length and accelerator (MPS on Apple Silicon). Subtitle promotion and
+sidecar paths still target the original media file.
 
-```toml
-[subsync_tui.vocal_separation]
-enabled = true
-backend = "demucs"
-stem = "vocals"
-model = "htdemucs"
-device = "mps"
+```sh
+uv run ja-media subsync tui episode.mkv --vocal-separation --anilist 183385
 ```
 
-This section is deliberately owned by the TUI rather than global VAD config. If
-another workflow needs the same source-routing behavior, extract the shared
-orchestration after the duplication is real.
-
-Demucs is installed by the Apple runtime environment. To verify the real
+Demucs is installed by the Apple runtime environment. It defaults to the
+`htdemucs` model and auto-selects MPS on Apple Silicon. To verify the real
 backend instead of only mocked adapter behavior, run an opt-in smoke test
 against a short audio fixture:
 

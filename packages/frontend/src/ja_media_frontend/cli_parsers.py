@@ -100,4 +100,13 @@ def register_subsync_parser(subparsers: argparse._SubParsersAction) -> None:
         default=120.0,
         help="Initial subtitle timeline seconds shown on screen.",
     )
+    tui.add_argument(
+        "--vocal-separation",
+        action="store_true",
+        help=(
+            "Run Demucs vocal separation before opening the TUI to produce a "
+            "cleaner VAD/playback source. Off by default; adds seconds-to-minutes "
+            "of startup time depending on episode length and accelerator."
+        ),
+    )
     tui.set_defaults(subsync_parser=parser)

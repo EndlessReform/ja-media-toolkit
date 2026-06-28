@@ -88,6 +88,7 @@ def main() -> None:
                 fetch_subs=args.fetch_subs,
                 tvdb_media_kind=args.tvdb_kind,
                 sort_by_language=args.sort_by_language,
+                vocal_separation=args.vocal_separation,
             )
             return
         args.subsync_parser.print_help()

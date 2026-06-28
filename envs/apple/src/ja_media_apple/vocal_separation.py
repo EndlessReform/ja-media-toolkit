@@ -21,6 +21,23 @@ from ja_media_core.vocal_separation import (
 DEFAULT_DEMUCS_MODEL = "htdemucs"
 
 
+# Demucs on the Apple runtime should default to Metal: there is no CUDA on
+# macOS, and Demucs's own auto-selection ("cuda if available else cpu") falls
+# back to CPU on Macs even when MPS is present.  This keeps the repo-managed
+# dependency honest about where it actually runs.
+def _default_device() -> str:
+    try:
+        import torch
+    except ImportError:
+        return "cpu"
+    try:
+        if torch.backends.mps.is_available():
+            return "mps"
+    except Exception:
+        pass
+    return "cpu"
+
+
 class DemucsVocalSeparationBackend:
     """Local Demucs CLI adapter that produces a cacheable vocal stem.
 
@@ -42,7 +59,10 @@ class DemucsVocalSeparationBackend:
         command: str = "demucs",
     ) -> None:
         self.model = model
-        self.device = device
+        # Resolve MPS lazily so import-time torch probing is deferred to the
+        # moment a separation actually runs; this also keeps the backend cheap
+        # to construct in tests that never execute Demucs.
+        self.device = device if device is not None else _default_device()
         self.jobs = jobs
         self.segment_s = segment_s
         self.command = command
@@ -145,8 +165,11 @@ def _demucs_command(
         "-o",
         str(output_root),
     ]
-    if backend.device:
-        command.extend(["-d", backend.device])
+    # ``backend.device`` is always resolved in ``__init__`` (to ``mps`` by
+    # default on Apple Silicon, or ``cpu`` when MPS/torch is unavailable), so
+    # always pass ``-d`` explicitly rather than rely on Demucs's own
+    # "cuda else cpu" auto-selection, which silently picks CPU on a Mac.
+    command.extend(["-d", backend.device])
     if backend.jobs is not None:
         command.extend(["-j", str(backend.jobs)])
     if backend.segment_s is not None:
