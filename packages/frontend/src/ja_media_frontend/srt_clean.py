@@ -372,7 +372,7 @@ def main() -> None:
     generate.add_argument("--anilist-file", help="File with one AniList ID per line")
     generate.add_argument("--out", required=True, help="Output prefix for batch artifacts")
     generate.add_argument("--model", default="gpt-5.5", help="Chat model name")
-    generate.add_argument("--window-cues", type=int, default=10)
+    generate.add_argument("--window-size", type=int, default=10)
     generate.add_argument(
         "--context-cues",
         type=int,
@@ -383,6 +383,7 @@ def main() -> None:
     generate.add_argument("--episode-one-only", action="store_true")
     generate.add_argument("--max-requests-per-shard", type=int, default=50_000)
     generate.add_argument("--max-bytes-per-shard", type=int, default=200 * 1000 * 1000)
+    generate.add_argument("--single-jsonl", action="store_true", help="Write all requests to a single batch file (ignores shard limits)")
 
     reconstruct = subparsers.add_parser("reconstruct", help="Rebuild cleaned SRTs")
     reconstruct.add_argument("--manifest", required=True, help="Generator manifest JSONL")

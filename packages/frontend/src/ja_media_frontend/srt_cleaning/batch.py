@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any, Iterable
 
-from ja_media_core.transcripts import SubtitleCue, parse_srt
+from ja_media_core.transcripts import parse_srt
 
 from ja_media_frontend.srt_cleaning.contracts import (
     DEFAULT_MAX_BYTES_PER_SHARD,
@@ -17,39 +17,40 @@ from ja_media_frontend.srt_cleaning.contracts import (
     SourceDocument,
     sha256_text,
 )
+from ja_media_frontend.srt_cleaning.prompt_rendering import render_window_prompt
 
 
 def build_windows(
     source: SourceDocument,
     source_text: str,
     *,
-    window_cues: int,
+    window_size: int,
     context_cues: int,
     prompt_policy_sha256: str,
 ) -> list[CueWindow]:
     """Split one SRT into deterministic non-overlapping cleaning windows."""
 
-    if window_cues < 1:
-        raise ValueError("window_cues must be at least 1")
+    if window_size < 1:
+        raise ValueError("window_size must be at least 1")
     if context_cues < 0:
         raise ValueError("context_cues must not be negative")
 
     cues = parse_srt(source_text, source_path=source.source_path)
     source_sha = sha256_text(source_text)
     windows: list[CueWindow] = []
-    for offset in range(0, len(cues), window_cues):
-        active = tuple(cues[offset : offset + window_cues])
+    for offset in range(0, len(cues), window_size):
+        active = tuple(cues[offset : offset + window_size])
         if not active:
             continue
         before_start = max(0, offset - context_cues)
-        after_end = min(len(cues), offset + window_cues + context_cues)
+        after_end = min(len(cues), offset + window_size + context_cues)
         windows.append(
             CueWindow(
                 source=source,
                 window_number=len(windows) + 1,
                 active=active,
                 before=tuple(cues[before_start:offset]),
-                after=tuple(cues[offset + window_cues : after_end]),
+                after=tuple(cues[offset + window_size : after_end]),
                 source_sha256=source_sha,
                 prompt_policy_sha256=prompt_policy_sha256,
             )
@@ -117,27 +118,6 @@ def build_batch_row(
     }
 
 
-def render_window_prompt(window: CueWindow, *, series_context: str) -> str:
-    """Render cue context in a stable, line-oriented prompt format."""
-
-    sections = [series_context.strip(), "Active cues are the only cues to decide."]
-    if window.before:
-        sections.append("Before context:\n" + render_cues(window.before))
-    sections.append("Active cues:\n" + render_cues(window.active))
-    if window.after:
-        sections.append("After context:\n" + render_cues(window.after))
-    return "\n\n".join(section for section in sections if section)
-
-
-def render_cues(cues: Iterable[SubtitleCue]) -> str:
-    lines: list[str] = []
-    for cue in cues:
-        lines.append(
-            f"[{cue.index}] {cue.start_s:.3f} --> {cue.end_s:.3f}\n{cue.text}"
-        )
-    return "\n\n".join(lines)
-
-
 def write_generation_artifacts(
     rows: Iterable[dict[str, Any]],
     manifest_rows: Iterable[dict[str, Any]],
@@ -145,6 +125,7 @@ def write_generation_artifacts(
     output_prefix: Path,
     max_requests_per_shard: int = DEFAULT_MAX_REQUESTS_PER_SHARD,
     max_bytes_per_shard: int = DEFAULT_MAX_BYTES_PER_SHARD,
+    single_jsonl: bool = False,
 ) -> list[BatchShard]:
     """Write manifest JSONL and size-bounded batch request shards."""
 
@@ -156,6 +137,7 @@ def write_generation_artifacts(
         output_prefix=output_prefix,
         max_requests_per_shard=max_requests_per_shard,
         max_bytes_per_shard=max_bytes_per_shard,
+        single_jsonl=single_jsonl,
     )
 
 
@@ -165,6 +147,7 @@ def write_batch_shards(
     output_prefix: Path,
     max_requests_per_shard: int,
     max_bytes_per_shard: int,
+    single_jsonl: bool = False,
 ) -> list[BatchShard]:
     """Write JSONL shards without exceeding request or byte limits."""
 
@@ -203,8 +186,10 @@ def write_batch_shards(
             )
         needs_new = (
             current_file is None
-            or current_count >= max_requests_per_shard
-            or current_bytes + len(encoded) > max_bytes_per_shard
+            or (
+                not single_jsonl
+                and (current_count >= max_requests_per_shard or current_bytes + len(encoded) > max_bytes_per_shard)
+            )
         )
         if needs_new:
             close_current()

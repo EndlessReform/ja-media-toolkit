@@ -51,41 +51,41 @@ def validate_window_decisions(
 ) -> list[dict[str, Any]]:
     errors: list[dict[str, Any]] = []
     custom_id = str(manifest["custom_id"])
-    expected = set(int(index) for index in manifest["active_indexes"])
+    expected = set(range(1, len(manifest["active_indexes"]) + 1))
     seen: set[int] = set()
     for decision in result.decisions:
-        if decision.index not in expected:
+        if decision.cue_id not in expected:
             errors.append(
                 base_window_error(
                     custom_id,
-                    "index_mismatch",
-                    f"Decision references cue {decision.index}, outside expected active span.",
+                    "id_mismatch",
+                    f"Decision references local cue id {decision.cue_id}, outside expected active ids.",
                     manifest,
                 )
             )
-            errors[-1]["decision_index"] = decision.index
-        if decision.index in seen:
+            errors[-1]["decision_id"] = decision.cue_id
+        if decision.cue_id in seen:
             errors.append(
                 base_window_error(
                     custom_id,
                     "duplicate_decision",
-                    f"Cue {decision.index} has more than one decision in this window.",
+                    f"Local cue id {decision.cue_id} has more than one decision in this window.",
                     manifest,
                 )
             )
-            errors[-1]["decision_index"] = decision.index
-        seen.add(decision.index)
+            errors[-1]["decision_id"] = decision.cue_id
+        seen.add(decision.cue_id)
     missing = expected - seen
     if missing:
         errors.append(
             base_window_error(
                 custom_id,
                 "missing_decision",
-                f"Window is missing decisions for cues {sorted(missing)}.",
+                f"Window is missing decisions for local cue ids {sorted(missing)}.",
                 manifest,
             )
         )
-        errors[-1]["missing_indexes"] = sorted(missing)
+        errors[-1]["missing_ids"] = sorted(missing)
     return errors
 
 
@@ -101,21 +101,23 @@ def collect_source_decisions(
         result = results.get(str(manifest["custom_id"]))
         if result is None:
             continue
-        expected = set(int(index) for index in manifest["active_indexes"])
+        active_indexes = [int(index) for index in manifest["active_indexes"]]
+        expected = set(range(1, len(active_indexes) + 1))
         for decision in result.decisions:
-            if decision.index not in expected:
+            if decision.cue_id not in expected:
                 continue
-            if decision.index in decisions:
+            source_index = active_indexes[decision.cue_id - 1]
+            if source_index in decisions:
                 error = base_window_error(
                     str(manifest["custom_id"]),
                     "overlapping_decision",
-                    f"Cue {decision.index} already has a decision from another window.",
+                    f"Cue {source_index} already has a decision from another window.",
                     manifest,
                 )
                 errors.append(error)
                 dlq.append(to_dlq_row(error, manifest))
                 continue
-            decisions[decision.index] = decision
+            decisions[source_index] = decision
     return decisions
 
 
@@ -156,15 +158,21 @@ def render_decision_rows(
         result = results.get(custom_id)
         if result is None:
             continue
-        expected = set(int(index) for index in manifest["active_indexes"])
+        active_indexes = [int(index) for index in manifest["active_indexes"]]
+        expected = set(range(1, len(active_indexes) + 1))
         seen: set[int] = set()
         for position, decision in enumerate(result.decisions, start=1):
             noncompliant_reasons: list[str] = []
-            if decision.index not in expected:
-                noncompliant_reasons.append("index_mismatch")
-            if decision.index in seen:
+            source_index = (
+                active_indexes[decision.cue_id - 1]
+                if decision.cue_id in expected
+                else None
+            )
+            if decision.cue_id not in expected:
+                noncompliant_reasons.append("id_mismatch")
+            if decision.cue_id in seen:
                 noncompliant_reasons.append("duplicate_decision")
-            seen.add(decision.index)
+            seen.add(decision.cue_id)
             rows.append(
                 {
                     "custom_id": custom_id,
@@ -174,11 +182,12 @@ def render_decision_rows(
                     "repo_path": manifest["repo_path"],
                     "window_number": manifest["window_number"],
                     "result_position": position,
-                    "index": decision.index,
+                    "id": decision.cue_id,
+                    "index": source_index,
                     "decision": decision.decision,
                     "text": decision.text,
                     "category": decision.category,
-                    "within_active_span": decision.index in expected,
+                    "within_active_span": decision.cue_id in expected,
                     "compliant": not noncompliant_reasons,
                     "noncompliant_reasons": noncompliant_reasons,
                 }
@@ -188,7 +197,7 @@ def render_decision_rows(
             str(row["source_key"]),
             int(row["window_number"]),
             int(row["result_position"]),
-            int(row["index"]),
+            int(row["id"]),
         )
     )
     return rows
@@ -202,7 +211,7 @@ def has_blocking_source_error(
     blocking = {
         "missing_result",
         "duplicate_result",
-        "index_mismatch",
+        "id_mismatch",
         "duplicate_decision",
         "missing_decision",
         "overlapping_decision",

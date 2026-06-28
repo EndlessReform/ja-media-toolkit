@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from ja_media_core.transcripts import SubtitleCue
 
@@ -19,11 +19,11 @@ DecisionKind = Literal["asis", "edit", "remove", "escalate"]
 
 
 class CleanDecision(BaseModel):
-    """One model decision for one original source cue."""
+    """One model decision for one active cue's local prompt ID."""
 
     model_config = ConfigDict(extra="forbid")
 
-    index: int
+    cue_id: int = Field(alias="id")
     decision: DecisionKind
     text: str | None = None
     category: str | None = None
@@ -107,4 +107,3 @@ def sha256_bytes(value: bytes) -> str:
 
 def safe_id(value: str) -> str:
     return "".join(char if char.isalnum() or char in "-_" else "-" for char in value)
-

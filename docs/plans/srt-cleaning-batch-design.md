@@ -114,7 +114,7 @@ The batch generator should accept AniList IDs in either form:
 
 Subtitle selection knobs:
 
-- `--window-cues N`, default `10`.
+- `--window-size N`, default `10`.
 - `--context-cues N`, default `0`, used only as opt-in prompt context around
   the active window.
 - `--group-prefix PREFIX`, repeatable, filtering `repo_path` or filename to

@@ -72,7 +72,7 @@ def build_manifest_and_windows(source: SourceDocument) -> tuple[Path, list[objec
     windows = build_windows(
         source,
         SRT_TEXT,
-        window_cues=2,
+        window_size=2,
         context_cues=0,
         prompt_policy_sha256="a" * 64,
     )
@@ -91,15 +91,15 @@ def test_reconstruct_uses_custom_ids_not_batch_order(tmp_path: Path) -> None:
             result_row(
                 windows[1].custom_id,
                 [
-                    {"index": 3, "decision": "remove", "text": None, "category": "noise"},
-                    {"index": 4, "decision": "escalate", "text": None, "category": "unclear"},
+                    {"id": 1, "decision": "remove", "text": None, "category": "noise"},
+                    {"id": 2, "decision": "escalate", "text": None, "category": "unclear"},
                 ],
             ),
             result_row(
                 windows[0].custom_id,
                 [
-                    {"index": 1, "decision": "asis", "text": None, "category": None},
-                    {"index": 2, "decision": "edit", "text": "二 cleaned", "category": "ocr"},
+                    {"id": 1, "decision": "asis", "text": None, "category": None},
+                    {"id": 2, "decision": "edit", "text": "二 cleaned", "category": "ocr"},
                 ],
             ),
         ],
@@ -124,6 +124,7 @@ def test_reconstruct_uses_custom_ids_not_batch_order(tmp_path: Path) -> None:
         json.loads(line)
         for line in summary.decisions_path.read_text(encoding="utf-8").splitlines()
     ]
+    assert [row["id"] for row in decisions] == [1, 2, 1, 2]
     assert [row["index"] for row in decisions] == [1, 2, 3, 4]
 
 
@@ -147,15 +148,15 @@ def test_failed_span_goes_to_dlq_without_stopping_other_sources(tmp_path: Path) 
             result_row(
                 good_windows[0].custom_id,
                 [
-                    {"index": 1, "decision": "asis", "text": None, "category": None},
-                    {"index": 2, "decision": "asis", "text": None, "category": None},
+                    {"id": 1, "decision": "asis", "text": None, "category": None},
+                    {"id": 2, "decision": "asis", "text": None, "category": None},
                 ],
             ),
             result_row(
                 good_windows[1].custom_id,
                 [
-                    {"index": 3, "decision": "asis", "text": None, "category": None},
-                    {"index": 4, "decision": "asis", "text": None, "category": None},
+                    {"id": 1, "decision": "asis", "text": None, "category": None},
+                    {"id": 2, "decision": "asis", "text": None, "category": None},
                 ],
             ),
             api_error_row(bad_windows[0].custom_id, 429, "rate limited"),
@@ -185,7 +186,7 @@ def test_failed_span_goes_to_dlq_without_stopping_other_sources(tmp_path: Path) 
     assert any(row["retryable"] is False and row["status_code"] == 401 for row in dlq)
 
 
-def test_index_mismatch_blocks_source_and_is_reported(tmp_path: Path) -> None:
+def test_id_mismatch_blocks_source_and_is_reported(tmp_path: Path) -> None:
     source = source_doc(tmp_path / "source.srt")
     _, windows = build_manifest_and_windows(source)
     manifest_path = tmp_path / "manifest.jsonl"
@@ -197,15 +198,15 @@ def test_index_mismatch_blocks_source_and_is_reported(tmp_path: Path) -> None:
             result_row(
                 windows[0].custom_id,
                 [
-                    {"index": 1, "decision": "asis", "text": None, "category": None},
-                    {"index": 99, "decision": "asis", "text": None, "category": None},
+                    {"id": 1, "decision": "asis", "text": None, "category": None},
+                    {"id": 99, "decision": "asis", "text": None, "category": None},
                 ],
             ),
             result_row(
                 windows[1].custom_id,
                 [
-                    {"index": 3, "decision": "asis", "text": None, "category": None},
-                    {"index": 4, "decision": "asis", "text": None, "category": None},
+                    {"id": 1, "decision": "asis", "text": None, "category": None},
+                    {"id": 2, "decision": "asis", "text": None, "category": None},
                 ],
             ),
         ],
@@ -228,12 +229,13 @@ def test_index_mismatch_blocks_source_and_is_reported(tmp_path: Path) -> None:
         json.loads(line)
         for line in summary.decisions_path.read_text(encoding="utf-8").splitlines()
     ]
-    assert {row["error_kind"] for row in errors} >= {"index_mismatch", "missing_decision"}
-    assert [row["index"] for row in decisions] == [1, 99, 3, 4]
+    assert {row["error_kind"] for row in errors} >= {"id_mismatch", "missing_decision"}
+    assert [row["id"] for row in decisions] == [1, 99, 1, 2]
+    assert [row["index"] for row in decisions] == [1, None, 3, 4]
     assert any(
-        row["index"] == 99
+        row["id"] == 99
         and row["compliant"] is False
-        and row["noncompliant_reasons"] == ["index_mismatch"]
+        and row["noncompliant_reasons"] == ["id_mismatch"]
         for row in decisions
     )
 
@@ -247,8 +249,8 @@ def test_duplicate_result_blocks_source_because_order_would_be_ambiguous(tmp_pat
     first_window = result_row(
         windows[0].custom_id,
         [
-            {"index": 1, "decision": "asis", "text": None, "category": None},
-            {"index": 2, "decision": "asis", "text": None, "category": None},
+            {"id": 1, "decision": "asis", "text": None, "category": None},
+            {"id": 2, "decision": "asis", "text": None, "category": None},
         ],
     )
     write_jsonl(
@@ -259,8 +261,8 @@ def test_duplicate_result_blocks_source_because_order_would_be_ambiguous(tmp_pat
             result_row(
                 windows[1].custom_id,
                 [
-                    {"index": 3, "decision": "asis", "text": None, "category": None},
-                    {"index": 4, "decision": "asis", "text": None, "category": None},
+                    {"id": 1, "decision": "asis", "text": None, "category": None},
+                    {"id": 2, "decision": "asis", "text": None, "category": None},
                 ],
             ),
         ],

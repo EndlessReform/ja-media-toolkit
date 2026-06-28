@@ -128,7 +128,7 @@ def run_generate(
             windows = build_windows(
                 source,
                 source_text,
-                window_cues=args.window_cues,
+                window_size=args.window_size,
                 context_cues=args.context_cues,
                 prompt_policy_sha256=policy_sha,
             )
@@ -151,6 +151,7 @@ def run_generate(
         output_prefix=output_prefix,
         max_requests_per_shard=args.max_requests_per_shard,
         max_bytes_per_shard=args.max_bytes_per_shard,
+        single_jsonl=args.single_jsonl,
     )
     write_shards_summary(prefix_artifact_path(output_prefix, ".shards.json"), shards, model=args.model)
     console.print(

@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from ja_media_frontend.srt_cleaning.batch import (
+    build_batch_row,
     build_manifest_row,
     build_windows,
     prefix_artifact_path,
@@ -56,14 +57,14 @@ def test_build_windows_are_non_overlapping_with_context_and_stable_ids(tmp_path:
     windows = build_windows(
         source,
         SRT_TEXT,
-        window_cues=2,
+        window_size=2,
         context_cues=1,
         prompt_policy_sha256="a" * 64,
     )
     again = build_windows(
         source,
         SRT_TEXT,
-        window_cues=2,
+        window_size=2,
         context_cues=1,
         prompt_policy_sha256="a" * 64,
     )
@@ -81,17 +82,65 @@ def test_window_prompt_omits_surrounding_context_when_window_has_none(tmp_path: 
     window = build_windows(
         source,
         SRT_TEXT,
-        window_cues=2,
+        window_size=2,
         context_cues=0,
         prompt_policy_sha256="a" * 64,
     )[0]
 
     prompt = render_window_prompt(window, series_context="AniList ID: 101")
 
-    assert "Before context:" not in prompt
-    assert "After context:" not in prompt
-    assert "Active cues:" in prompt
-    assert "[3]" not in prompt
+    assert '<context_before count="' not in prompt
+    assert '<context_after count="' not in prompt
+    assert "<active>" in prompt
+    assert '<cue id="1" start="1.000" end="2.000">一</cue>' in prompt
+    assert '<cue id="2" start="2.000" end="3.000">二</cue>' in prompt
+    assert '<cue id="3"' not in prompt
+    assert "[1]" not in prompt
+
+
+def test_window_prompt_renders_context_without_actionable_ids(tmp_path: Path) -> None:
+    source = source_doc(tmp_path / "episode01.srt")
+
+    window = build_windows(
+        source,
+        SRT_TEXT,
+        window_size=2,
+        context_cues=1,
+        prompt_policy_sha256="a" * 64,
+    )[1]
+
+    prompt = render_window_prompt(window, series_context="AniList ID: 101")
+
+    assert '<context_before count="1">' in prompt
+    assert '<context_after count="1">' in prompt
+    assert '<context_before count="1">\n<cue start="2.000" end="3.000">二</cue>' in prompt
+    assert '<context_after count="1">\n<cue start="5.000" end="6.000">五</cue>' in prompt
+    assert '<cue id="1" start="3.000" end="4.000">三</cue>' in prompt
+    assert '<cue id="2" start="4.000" end="5.000">四</cue>' in prompt
+
+
+def test_batch_schema_uses_local_id_not_source_index(tmp_path: Path) -> None:
+    source = source_doc(tmp_path / "episode01.srt")
+    window = build_windows(
+        source,
+        SRT_TEXT,
+        window_size=2,
+        context_cues=0,
+        prompt_policy_sha256="a" * 64,
+    )[0]
+
+    row = build_batch_row(
+        window,
+        model="test-model",
+        policy_text="policy",
+        series_context="AniList ID: 101",
+    )
+
+    schema = row["body"]["response_format"]["json_schema"]["schema"]
+    decision = schema["$defs"]["CleanDecision"]
+    assert "id" in decision["properties"]
+    assert "index" not in decision["properties"]
+    assert "id" in decision["required"]
 
 
 def test_write_batch_shards_respects_request_limits(tmp_path: Path) -> None:
@@ -109,6 +158,23 @@ def test_write_batch_shards_respects_request_limits(tmp_path: Path) -> None:
         "batch.batch-00001.jsonl",
         "batch.batch-00002.jsonl",
         "batch.batch-00003.jsonl",
+    ]
+
+
+def test_write_batch_shards_single_jsonl(tmp_path: Path) -> None:
+    rows = [{"custom_id": f"row-{index}", "body": {"n": index}} for index in range(5)]
+
+    shards = write_batch_shards(
+        rows,
+        output_prefix=tmp_path / "batch",
+        max_requests_per_shard=2,
+        max_bytes_per_shard=10_000,
+        single_jsonl=True,
+    )
+
+    assert [shard.request_count for shard in shards] == [5]
+    assert [path.name for path in sorted(tmp_path.glob("*.jsonl"))] == [
+        "batch.batch-00001.jsonl",
     ]
 
 
@@ -160,7 +226,7 @@ def test_result_parser_classifies_auth_errors_as_non_retryable(tmp_path: Path) -
     window = build_windows(
         source,
         SRT_TEXT,
-        window_cues=5,
+        window_size=5,
         context_cues=0,
         prompt_policy_sha256="a" * 64,
     )[0]

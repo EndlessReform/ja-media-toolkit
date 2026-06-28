@@ -99,23 +99,33 @@ Escalate only when a cue clearly exceeds **double** these (e.g. >~52 chars, or c
 
 ## 6. Input / Output Format
 
-The model receives a batch of `N` cues (default `N = 10`, configurable) plus surrounding context, to help with ambiguous calls — e.g. whether a sign is being read aloud, or whether a speaker label belongs to the current line vs. context already established.
+The model receives a batch of `N` active cues (default `N = 10`, configurable) plus optional surrounding context, to help with ambiguous calls — e.g. whether a sign is being read aloud, or whether a speaker label belongs to the current line vs. context already established.
+
+Active cue IDs are **local to this one request**. They are not source `.srt` indices and they are not timestamps. Use only the `id` attributes from `<active>` in the output.
+
+Return exactly one decision for each cue in `<active>`:
+- Do not split one cue into multiple decisions, even if it contains multiple wrapped lines or mixed spoken/non-spoken text.
+- Do not merge neighboring cues.
+- Do not renumber cues.
+- Do not create decisions for `<context_before>` or `<context_after>`.
+- Line breaks inside one `<cue>` are display wrapping, not separate cues.
 
 ### Input shape (per batch)
 
-```json
-{
-  "cues": [
-    {
-      "index": 42,
-      "text": "田中：無理だろ…？",
-      "start": "00:05:12,300",
-      "end": "00:05:14,800",
-      "context_before": ["...previous cue text..."],
-      "context_after": ["...next cue text..."]
-    }
-  ]
-}
+```xml
+<context_before count="1">
+<cue start="308.100" end="309.900">...previous cue text...</cue>
+</context_before>
+
+<active>
+<cue id="1" start="312.300" end="314.800">田中：無理だろ…？</cue>
+<cue id="2" start="314.800" end="317.200">次の発話が
+字幕表示上だけ折り返されている</cue>
+</active>
+
+<context_after count="1">
+<cue start="317.200" end="319.000">...next cue text...</cue>
+</context_after>
 ```
 
 ### Output JSON Schema (structured output)
@@ -126,7 +136,7 @@ The model receives a batch of `N` cues (default `N = 10`, configurable) plus sur
   "items": {
     "type": "object",
     "properties": {
-      "index": { "type": "integer" },
+      "id": { "type": "integer" },
       "decision": {
         "type": "string",
         "enum": ["asis", "edit", "remove", "escalate"]
@@ -148,13 +158,13 @@ The model receives a batch of `N` cues (default `N = 10`, configurable) plus sur
         ]
       }
     },
-    "required": ["index", "decision", "text", "category"],
+    "required": ["id", "decision", "text", "category"],
     "additionalProperties": false
   }
 }
 ```
 
-`index` always echoes the input cue's index, for mapping output back to the source `.srt`.
+`id` always echoes an active cue's local `id` attribute. Never output timestamps, source `.srt` indices, or IDs from context.
 
 ---
 
@@ -163,31 +173,31 @@ The model receives a batch of `N` cues (default `N = 10`, configurable) plus sur
 **Speaker label removal**
 Input: `田中：無理だろ…？` (2.0s)
 ```json
-{"index": 1, "decision": "edit", "text": "無理だろ…？", "category": null}
+{"id": 1, "decision": "edit", "text": "無理だろ…？", "category": null}
 ```
 
 **SFX removal**
 Input: `[風の音]` (1.5s)
 ```json
-{"index": 2, "decision": "remove", "text": null, "category": "sfx"}
+{"id": 2, "decision": "remove", "text": null, "category": "sfx"}
 ```
 
 **ASCII punctuation normalization**
 Input: `そんな事...知らない.`
 ```json
-{"index": 3, "decision": "edit", "text": "そんな事…知らない。", "category": null}
+{"id": 3, "decision": "edit", "text": "そんな事…知らない。", "category": null}
 ```
 
 **Indirect quote, already correct**
 Input: `先生が「ダメだ」と言った`
 ```json
-{"index": 4, "decision": "asis", "text": null, "category": null}
+{"id": 4, "decision": "asis", "text": null, "category": null}
 ```
 
 **Bleeped dialogue**
 Input: `××××！`
 ```json
-{"index": 5, "decision": "remove", "text": null, "category": "censored"}
+{"id": 5, "decision": "remove", "text": null, "category": "censored"}
 ```
 
 **Dual speakers in one cue**
@@ -197,43 +207,43 @@ Input:
 - もちろん
 ```
 ```json
-{"index": 6, "decision": "escalate", "text": "two distinct speakers in one cue", "category": "multiple_speakers"}
+{"id": 6, "decision": "escalate", "text": "two distinct speakers in one cue", "category": "multiple_speakers"}
 ```
 
 **In-speech cutoff (normalize, keep)**
 Input: `待って、それは―`
 ```json
-{"index": 7, "decision": "edit", "text": "待って、それは-", "category": null}
+{"id": 7, "decision": "edit", "text": "待って、それは-", "category": null}
 ```
 
 **Cross-cue continuation dash (strip)**
 Input: `さっきから思ってたんだけど――`  *(sentence finishes in the next cue)*
 ```json
-{"index": 8, "decision": "edit", "text": "さっきから思ってたんだけど", "category": null}
+{"id": 8, "decision": "edit", "text": "さっきから思ってたんだけど", "category": null}
 ```
 
 **Pause-space preserved through label removal**
 Input: `（藤原（ふじわら））あっ　みかん　頂きますね`
 ```json
-{"index": 9, "decision": "edit", "text": "あっ　みかん　頂きますね", "category": null}
+{"id": 9, "decision": "edit", "text": "あっ　みかん　頂きますね", "category": null}
 ```
 
 **Nested label + multi-part name stripped in full**
 Input: `（白銀（しろがね）・かぐや）あっ…`
 ```json
-{"index": 10, "decision": "edit", "text": "あっ…", "category": null}
+{"id": 10, "decision": "edit", "text": "あっ…", "category": null}
 ```
 
 **Vowel elongation kept — not treated as a cutoff dash**
 Input: `（圭（けい）・萌葉（もえは））バイバイ殺法〜！`
 ```json
-{"index": 11, "decision": "edit", "text": "バイバイ殺法〜！", "category": null}
+{"id": 11, "decision": "edit", "text": "バイバイ殺法〜！", "category": null}
 ```
 
 **Generalized furigana-gloss stripped mid-dialogue**
 Input: `（ミコ）げっ…石上（いしがみ）だけ？`
 ```json
-{"index": 12, "decision": "edit", "text": "げっ…石上だけ？", "category": null}
+{"id": 12, "decision": "edit", "text": "げっ…石上だけ？", "category": null}
 ```
 
 **ASS leftover tag + multi-line join**
@@ -243,13 +253,13 @@ Input:
 悪いわけ？
 ```
 ```json
-{"index": 13, "decision": "edit", "text": "僕だけじゃ悪いわけ？", "category": null}
+{"id": 13, "decision": "edit", "text": "僕だけじゃ悪いわけ？", "category": null}
 ```
 
 **Full-width Latin normalized, pause space and profanity both kept**
 Input: `（石上）は？　嫌ですけど　どうせクソゲーでしょ`
 ```json
-{"index": 14, "decision": "edit", "text": "は？　嫌ですけど　どうせクソゲーでしょ", "category": null}
+{"id": 14, "decision": "edit", "text": "は？　嫌ですけど　どうせクソゲーでしょ", "category": null}
 ```
 
 **Mixed dialogue + SFX in one cue**
@@ -259,17 +269,17 @@ Input:
 （たたく音）
 ```
 ```json
-{"index": 15, "decision": "edit", "text": "石上もやるの！", "category": null}
+{"id": 15, "decision": "edit", "text": "石上もやるの！", "category": null}
 ```
 
 **Angle-bracket narration, kept as voiced dialogue**
 Input: `＜舞台に使う大道具の製作が　遅れていたのである＞`
 ```json
-{"index": 16, "decision": "edit", "text": "舞台に使う大道具の製作が　遅れていたのである", "category": null}
+{"id": 16, "decision": "edit", "text": "舞台に使う大道具の製作が　遅れていたのである", "category": null}
 ```
 
 **Quote-mark style normalized to 「」**
 Input: `（石上）"げっ"ってなんだよ`
 ```json
-{"index": 17, "decision": "edit", "text": "「げっ」ってなんだよ", "category": null}
+{"id": 17, "decision": "edit", "text": "「げっ」ってなんだよ", "category": null}
 ```
