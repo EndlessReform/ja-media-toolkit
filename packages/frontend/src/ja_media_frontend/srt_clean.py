@@ -373,7 +373,12 @@ def main() -> None:
     generate.add_argument("--out", required=True, help="Output prefix for batch artifacts")
     generate.add_argument("--model", default="gpt-5.5", help="Chat model name")
     generate.add_argument("--window-cues", type=int, default=10)
-    generate.add_argument("--context-cues", type=int, default=2)
+    generate.add_argument(
+        "--context-cues",
+        type=int,
+        default=0,
+        help="Opt-in surrounding cue context per side (default: 0)",
+    )
     generate.add_argument("--group-prefix", action="append")
     generate.add_argument("--episode-one-only", action="store_true")
     generate.add_argument("--max-requests-per-shard", type=int, default=50_000)

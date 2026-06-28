@@ -27,6 +27,10 @@ Generated files use gitignored names:
 - `<prefix>.shards.json`: shard summary.
 - `<prefix>.sources/`: cached source SRTs.
 
+Generation sends only active cues by default. Surrounding cue context is opt-in
+with `--context-cues N`; keep it off unless a model has proven it can ignore
+non-active cue indexes reliably.
+
 After a provider/vLLM smoke run returns OpenAI-style batch output, reconstruct
 with:
 
@@ -40,6 +44,9 @@ uv run ja-media-srt-clean reconstruct \
 
 Reconstruction writes `decisions.jsonl`, `errors.jsonl`, `dlq.jsonl`, cleaned
 SRTs, and a `cleaned-srts.tar.gz` archive unless `--no-archive` is passed.
+`decisions.jsonl` is the model-evidence log, so it includes parsed decisions
+even when a source SRT is skipped, with `compliant`, `within_active_span`, and
+`noncompliant_reasons` fields for introspection.
 
 ## Status
 
@@ -108,8 +115,8 @@ The batch generator should accept AniList IDs in either form:
 Subtitle selection knobs:
 
 - `--window-cues N`, default `10`.
-- `--context-cues N`, default `2`, used only as prompt context around the active
-  window.
+- `--context-cues N`, default `0`, used only as opt-in prompt context around
+  the active window.
 - `--group-prefix PREFIX`, repeatable, filtering `repo_path` or filename to
   candidates whose leading path/name starts with the prefix.
 - `--episode-one-only`, opt-in, filtering through the existing conservative

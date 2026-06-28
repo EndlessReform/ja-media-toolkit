@@ -100,6 +100,9 @@ def reconstruct_from_batch(
     clean_dir.mkdir(exist_ok=True)
 
     for source_key, source_manifests in expected_by_source.items():
+        decisions_rows.extend(
+            render_decision_rows(source_key, source_manifests, window_results)
+        )
         source_errors = validate_source_windows(source_manifests, window_results)
         if source_errors:
             errors.extend(source_errors)
@@ -118,9 +121,6 @@ def reconstruct_from_batch(
             window_results,
             errors=errors,
             dlq=dlq,
-        )
-        decisions_rows.extend(
-            render_decision_rows(source_key, source_manifests, decisions_by_index)
         )
         if has_blocking_source_error(source_manifests, errors) and not allow_partial:
             skipped_count += 1
@@ -191,4 +191,3 @@ def iter_jsonl_rows(
                 )
                 continue
             yield line_number, row
-

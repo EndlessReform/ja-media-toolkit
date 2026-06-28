@@ -224,7 +224,18 @@ def test_index_mismatch_blocks_source_and_is_reported(tmp_path: Path) -> None:
         json.loads(line)
         for line in summary.errors_path.read_text(encoding="utf-8").splitlines()
     ]
+    decisions = [
+        json.loads(line)
+        for line in summary.decisions_path.read_text(encoding="utf-8").splitlines()
+    ]
     assert {row["error_kind"] for row in errors} >= {"index_mismatch", "missing_decision"}
+    assert [row["index"] for row in decisions] == [1, 99, 3, 4]
+    assert any(
+        row["index"] == 99
+        and row["compliant"] is False
+        and row["noncompliant_reasons"] == ["index_mismatch"]
+        for row in decisions
+    )
 
 
 def test_duplicate_result_blocks_source_because_order_would_be_ambiguous(tmp_path: Path) -> None:

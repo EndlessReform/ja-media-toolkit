@@ -9,6 +9,7 @@ from ja_media_frontend.srt_cleaning.batch import (
     build_manifest_row,
     build_windows,
     prefix_artifact_path,
+    render_window_prompt,
     write_batch_shards,
 )
 from ja_media_frontend.srt_cleaning.commands import render_series_context
@@ -72,6 +73,25 @@ def test_build_windows_are_non_overlapping_with_context_and_stable_ids(tmp_path:
     assert [tuple(cue.index for cue in window.after) for window in windows] == [(3,), (5,), ()]
     assert [window.custom_id for window in windows] == [window.custom_id for window in again]
     assert "srt-sub-one" in windows[0].custom_id
+
+
+def test_window_prompt_omits_surrounding_context_when_window_has_none(tmp_path: Path) -> None:
+    source = source_doc(tmp_path / "episode01.srt")
+
+    window = build_windows(
+        source,
+        SRT_TEXT,
+        window_cues=2,
+        context_cues=0,
+        prompt_policy_sha256="a" * 64,
+    )[0]
+
+    prompt = render_window_prompt(window, series_context="AniList ID: 101")
+
+    assert "Before context:" not in prompt
+    assert "After context:" not in prompt
+    assert "Active cues:" in prompt
+    assert "[3]" not in prompt
 
 
 def test_write_batch_shards_respects_request_limits(tmp_path: Path) -> None:

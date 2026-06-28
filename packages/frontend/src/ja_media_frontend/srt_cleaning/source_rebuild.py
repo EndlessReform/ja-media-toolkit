@@ -63,6 +63,7 @@ def validate_window_decisions(
                     manifest,
                 )
             )
+            errors[-1]["decision_index"] = decision.index
         if decision.index in seen:
             errors.append(
                 base_window_error(
@@ -72,6 +73,7 @@ def validate_window_decisions(
                     manifest,
                 )
             )
+            errors[-1]["decision_index"] = decision.index
         seen.add(decision.index)
     missing = expected - seen
     if missing:
@@ -83,6 +85,7 @@ def validate_window_decisions(
                 manifest,
             )
         )
+        errors[-1]["missing_indexes"] = sorted(missing)
     return errors
 
 
@@ -145,15 +148,23 @@ def apply_decisions(
 def render_decision_rows(
     source_key_value: str,
     manifests: list[dict[str, Any]],
-    decisions: dict[int, CleanDecision],
+    results: dict[str, WindowResult],
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for manifest in manifests:
         custom_id = str(manifest["custom_id"])
-        for index in manifest["active_indexes"]:
-            decision = decisions.get(int(index))
-            if decision is None:
-                continue
+        result = results.get(custom_id)
+        if result is None:
+            continue
+        expected = set(int(index) for index in manifest["active_indexes"])
+        seen: set[int] = set()
+        for position, decision in enumerate(result.decisions, start=1):
+            noncompliant_reasons: list[str] = []
+            if decision.index not in expected:
+                noncompliant_reasons.append("index_mismatch")
+            if decision.index in seen:
+                noncompliant_reasons.append("duplicate_decision")
+            seen.add(decision.index)
             rows.append(
                 {
                     "custom_id": custom_id,
@@ -162,16 +173,21 @@ def render_decision_rows(
                     "subtitle_id": manifest["subtitle_id"],
                     "repo_path": manifest["repo_path"],
                     "window_number": manifest["window_number"],
+                    "result_position": position,
                     "index": decision.index,
                     "decision": decision.decision,
                     "text": decision.text,
                     "category": decision.category,
+                    "within_active_span": decision.index in expected,
+                    "compliant": not noncompliant_reasons,
+                    "noncompliant_reasons": noncompliant_reasons,
                 }
             )
     rows.sort(
         key=lambda row: (
             str(row["source_key"]),
             int(row["window_number"]),
+            int(row["result_position"]),
             int(row["index"]),
         )
     )
