@@ -1,5 +1,46 @@
 # SRT Cleaning Batch Pipeline Design
 
+## Current One-Off Usage
+
+The first implementation lives in `packages/frontend` as the
+`ja-media-srt-clean` script. It expects the local LAN metadata/subtitle services
+to be reachable through normal toolkit config, and it writes generated artifacts
+next to the `--out` prefix:
+
+```sh
+cd packages/frontend
+uv run ja-media-srt-clean generate \
+  --anilist 101573 \
+  --episode-one-only \
+  --out /tmp/ja-media-srt-clean/101573
+
+uv run ja-media-srt-clean generate \
+  --anilist 101573,183385 \
+  --episode-one-only \
+  --out /tmp/ja-media-srt-clean/101573-183385
+```
+
+Generated files use gitignored names:
+
+- `<prefix>.batch-00001.jsonl`: OpenAI-compatible request JSONL.
+- `<prefix>.manifest.jsonl`: durable local reconstruction manifest.
+- `<prefix>.shards.json`: shard summary.
+- `<prefix>.sources/`: cached source SRTs.
+
+After a provider/vLLM smoke run returns OpenAI-style batch output, reconstruct
+with:
+
+```sh
+cd packages/frontend
+uv run ja-media-srt-clean reconstruct \
+  --manifest /tmp/ja-media-srt-clean/101573.manifest.jsonl \
+  --batch-output /path/to/provider-output.jsonl \
+  --out-dir /tmp/ja-media-srt-clean/reconstructed-101573
+```
+
+Reconstruction writes `decisions.jsonl`, `errors.jsonl`, `dlq.jsonl`, cleaned
+SRTs, and a `cleaned-srts.tar.gz` archive unless `--no-archive` is passed.
+
 ## Status
 
 Draft for review. This document proposes the first implementation slice for
