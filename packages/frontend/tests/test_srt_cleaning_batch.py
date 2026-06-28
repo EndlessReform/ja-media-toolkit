@@ -11,6 +11,7 @@ from ja_media_frontend.srt_cleaning.batch import (
     prefix_artifact_path,
     write_batch_shards,
 )
+from ja_media_frontend.srt_cleaning.commands import render_series_context
 from ja_media_frontend.srt_cleaning.contracts import SourceDocument
 from ja_media_frontend.srt_cleaning.result_parser import parse_batch_result_row
 
@@ -106,6 +107,32 @@ def test_write_batch_shards_rejects_single_request_over_byte_limit(tmp_path: Pat
             max_requests_per_shard=10,
             max_bytes_per_shard=20,
         )
+
+
+def test_series_context_uses_native_character_names_before_romaji() -> None:
+    class Context:
+        anilist_id = 101573
+        title_english = "Bloom Into You"
+        title_native = "やがて君になる"
+        title_romaji = "Yagate Kimi ni Naru"
+        description = None
+        characters = [
+            {
+                "node": {
+                    "name": {
+                        "full": "Touko Nanami",
+                        "native": "七海燈子",
+                        "alternative": ["Nanami Touko"],
+                    }
+                }
+            },
+            {"node": {"name": {"full": "Yuu Koito", "native": "小糸侑"}}},
+        ]
+
+    context = render_series_context(Context())
+
+    assert "Characters: 七海燈子 (Touko Nanami / Nanami Touko), 小糸侑 (Yuu Koito)" in context
+    assert "Characters: Touko Nanami, Yuu Koito" not in context
 
 
 def test_result_parser_classifies_auth_errors_as_non_retryable(tmp_path: Path) -> None:
