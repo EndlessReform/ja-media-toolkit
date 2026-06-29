@@ -216,7 +216,7 @@ Active cue IDs are local to one request. They are not source SRT indexes. Models
 Current structured output:
 
 ```python
-DecisionKind = Literal["asis", "edit", "remove", "escalate"]
+DecisionKind = Literal["as_is", "asis", "edit", "remove", "escalate"]
 
 class CleanDecision(BaseModel):
     cue_id: int = Field(alias="id")
@@ -228,7 +228,10 @@ class CleanWindowResult(BaseModel):
     decisions: list[CleanDecision]
 ```
 
-`asis` and `escalate` preserve original cue text during reconstruction. `edit` replaces text while preserving timing. `remove` drops the cue.
+`as_is` preserves the mechanically normalized cue baseline during reconstruction.
+Legacy `asis` remains readable for older result artifacts. `edit` replaces text
+while preserving timing, `remove` drops the cue, and `escalate` preserves the
+raw original cue for human review.
 
 ## Batch Request Contract
 

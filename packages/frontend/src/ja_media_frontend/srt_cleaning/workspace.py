@@ -12,7 +12,7 @@ from typing import Any
 RUN_SCHEMA_NAME = "ja-media.srt-clean.run"
 RUN_SCHEMA_VERSION = "1.0.0"
 WINDOW_SCHEMA_NAME = "ja-media.srt-clean.window"
-WINDOW_SCHEMA_VERSION = "1.0.0"
+WINDOW_SCHEMA_VERSION = "1.1.0"
 
 
 @dataclass(frozen=True)
@@ -152,4 +152,3 @@ def validate_schema_major(
         raise ValueError(
             f"{artifact} uses schema {schema_version}; expected {expected_version}"
         )
-

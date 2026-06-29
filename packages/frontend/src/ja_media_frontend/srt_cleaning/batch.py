@@ -17,6 +17,7 @@ from ja_media_frontend.srt_cleaning.contracts import (
     SourceDocument,
     sha256_text,
 )
+from ja_media_frontend.srt_cleaning.normalization import mechanically_normalize_cue
 from ja_media_frontend.srt_cleaning.prompt_rendering import render_window_prompt
 from ja_media_frontend.srt_cleaning.workspace import (
     WINDOW_SCHEMA_NAME,
@@ -39,7 +40,11 @@ def build_windows(
     if context_cues < 0:
         raise ValueError("context_cues must not be negative")
 
-    cues = parse_srt(source_text, source_path=source.source_path)
+    original_cues = parse_srt(source_text, source_path=source.source_path)
+    cues = [
+        mechanically_normalize_cue(cue)
+        for cue in original_cues
+    ]
     source_sha = sha256_text(source_text)
     windows: list[CueWindow] = []
     for offset in range(0, len(cues), window_size):
@@ -57,6 +62,9 @@ def build_windows(
                 after=tuple(cues[offset + window_size : after_end]),
                 source_sha256=source_sha,
                 prompt_policy_sha256=prompt_policy_sha256,
+                original_active_texts=tuple(
+                    cue.text for cue in original_cues[offset : offset + window_size]
+                ),
             )
         )
     return windows
@@ -79,6 +87,8 @@ def build_manifest_row(window: CueWindow, *, model: str) -> dict[str, Any]:
         "cue_start_index": window.cue_start_index,
         "cue_end_index": window.cue_end_index,
         "active_indexes": list(window.active_indexes),
+        "active_texts": [cue.text for cue in window.active],
+        "active_original_texts": list(window.original_active_texts),
         "window_number": window.window_number,
         "model": model,
         "prompt_policy_sha256": window.prompt_policy_sha256,

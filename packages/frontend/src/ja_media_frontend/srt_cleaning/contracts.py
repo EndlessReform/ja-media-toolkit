@@ -15,7 +15,7 @@ OPENAI_CHAT_COMPLETIONS_URL = "/v1/chat/completions"
 DEFAULT_MAX_REQUESTS_PER_SHARD = 50_000
 DEFAULT_MAX_BYTES_PER_SHARD = 200 * 1000 * 1000
 
-DecisionKind = Literal["asis", "edit", "remove", "escalate"]
+DecisionKind = Literal["as_is", "asis", "edit", "remove", "escalate"]
 
 
 class CleanDecision(BaseModel):
@@ -60,6 +60,7 @@ class CueWindow:
     after: tuple[SubtitleCue, ...]
     source_sha256: str
     prompt_policy_sha256: str
+    original_active_texts: tuple[str, ...] = ()
 
     @property
     def cue_start_index(self) -> int:

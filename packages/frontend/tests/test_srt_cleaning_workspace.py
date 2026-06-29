@@ -161,7 +161,7 @@ def test_reconstruct_rejects_incompatible_manifest_schema(tmp_path: Path) -> Non
     write_jsonl(manifest_path, [manifest])
     write_jsonl(output_path, [result_row(windows[0].custom_id, [])])
 
-    with pytest.raises(ValueError, match="expected 1.0.0"):
+    with pytest.raises(ValueError, match="expected 1.1.0"):
         reconstruct_from_batch(
             batch_output_paths=[output_path],
             manifest_path=manifest_path,

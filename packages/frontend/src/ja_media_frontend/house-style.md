@@ -78,12 +78,12 @@ None of the following is actual speech. Remove it entirely if it's the whole cue
 
 Choose exactly one `decision` per cue:
 
-- **`asis`** — Spoken dialogue, already matches house style exactly. `text` and `category` stay `null`.
+- **`as_is`** — Spoken dialogue, already matches house style exactly. `text` and `category` stay `null`. Use this whenever you would otherwise return the cue text unchanged.
 - **`edit`** — Spoken dialogue that needs normalization (strip a speaker label while keeping the line, fix punctuation, convert quotes, join wrapped lines, strip a furigana gloss, cut out a mixed-in caption fragment, etc.). Put the fully cleaned line in `text`. `category` stays `null`.
 - **`remove`** — No spoken dialogue at all in this cue. Set `category` from the table above. If `category` is `other`, the reason goes in `text`; otherwise `text` stays `null`.
 - **`escalate`** — No principled automatic call is possible; a human must review. Use **rarely** — only for:
   - **Multiple speakers in one cue** → `category: multiple_speakers`
-  - **Grossly oversized cues** — character count or duration is more than **2x** the reference limits below. This is a high bar; ordinary minor overages are `asis`/`edit`, not escalated.
+  - **Grossly oversized cues** — character count or duration is more than **2x** the reference limits below. This is a high bar; ordinary minor overages are `as_is`/`edit`, not escalated.
   - Genuinely indeterminate spoken-vs-caption cases, even with context — rare. The most common real instance of this is an angle-bracket narration/inner-monologue line (§2) where context gives no clue whether it's voiced — default to treating it as voiced (`edit`) and only escalate when truly ambiguous.
 
   Always put a short reason in `text` for escalations.
@@ -139,7 +139,7 @@ Return exactly one decision for each cue in `<active>`:
       "id": { "type": "integer" },
       "decision": {
         "type": "string",
-        "enum": ["asis", "edit", "remove", "escalate"]
+        "enum": ["as_is", "edit", "remove", "escalate"]
       },
       "text": { "type": ["string", "null"] },
       "category": {
@@ -191,7 +191,7 @@ Input: `そんな事...知らない.`
 **Indirect quote, already correct**
 Input: `先生が「ダメだ」と言った`
 ```json
-{"id": 4, "decision": "asis", "text": null, "category": null}
+{"id": 4, "decision": "as_is", "text": null, "category": null}
 ```
 
 **Bleeped dialogue**

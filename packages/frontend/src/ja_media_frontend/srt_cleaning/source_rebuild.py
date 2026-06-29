@@ -7,6 +7,7 @@ from typing import Any, Iterable
 from ja_media_core.transcripts import SubtitleCue
 
 from ja_media_frontend.srt_cleaning.contracts import CleanDecision
+from ja_media_frontend.srt_cleaning.normalization import mechanically_normalize_text
 from ja_media_frontend.srt_cleaning.result_parser import (
     WindowResult,
     base_window_error,
@@ -128,20 +129,13 @@ def apply_decisions(
     cleaned: list[SubtitleCue] = []
     for cue in cues:
         decision = decisions.get(cue.index)
-        if decision is None or decision.decision in {"asis", "escalate"}:
+        baseline = mechanically_normalize_text(cue.text).text
+        if decision is None or decision.decision == "escalate":
             cleaned.append(cue)
+        elif decision.decision in {"as_is", "asis"}:
+            cleaned.append(_cue_with_text(cue, baseline))
         elif decision.decision == "edit":
-            cleaned.append(
-                SubtitleCue(
-                    source_path=cue.source_path,
-                    index=cue.index,
-                    start_s=cue.start_s,
-                    end_s=cue.end_s,
-                    text=decision.text or "",
-                    timing_settings=cue.timing_settings,
-                    metadata=dict(cue.metadata),
-                )
-            )
+            cleaned.append(_cue_with_text(cue, decision.text or ""))
         elif decision.decision == "remove":
             continue
     return cleaned
@@ -173,6 +167,7 @@ def render_decision_rows(
             if decision.cue_id in seen:
                 noncompliant_reasons.append("duplicate_decision")
             seen.add(decision.cue_id)
+            mechanical = _mechanical_for_source_index(manifest, source_index)
             rows.append(
                 {
                     "custom_id": custom_id,
@@ -187,6 +182,14 @@ def render_decision_rows(
                     "decision": decision.decision,
                     "text": decision.text,
                     "category": decision.category,
+                    "mechanical_text": mechanical.text,
+                    "mechanically_changed": mechanical.changed,
+                    "mechanical_rules": list(mechanical.rules),
+                    "model_text_matches_mechanical": (
+                        decision.text == mechanical.text
+                        if isinstance(decision.text, str)
+                        else None
+                    ),
                     "within_active_span": decision.cue_id in expected,
                     "compliant": not noncompliant_reasons,
                     "noncompliant_reasons": noncompliant_reasons,
@@ -229,3 +232,27 @@ def source_key(row: dict[str, Any]) -> str:
 def cleaned_srt_name(row: dict[str, Any]) -> str:
     stem = Path(str(row.get("filename") or row["subtitle_id"])).stem
     return f"{stem}.{str(row['source_sha256'])[:12]}.cleaned.srt"
+
+
+def _cue_with_text(cue: SubtitleCue, text: str) -> SubtitleCue:
+    return SubtitleCue(
+        source_path=cue.source_path,
+        index=cue.index,
+        start_s=cue.start_s,
+        end_s=cue.end_s,
+        text=text,
+        timing_settings=cue.timing_settings,
+        metadata=dict(cue.metadata),
+    )
+
+
+def _mechanical_for_source_index(row: dict[str, Any], index: int | None):
+    texts = row.get("active_original_texts") or row.get("active_texts")
+    indexes = row.get("active_indexes")
+    if index is None or not isinstance(texts, list) or not isinstance(indexes, list):
+        return mechanically_normalize_text("")
+    for offset, source_index in enumerate(indexes):
+        if int(source_index) == index and offset < len(texts):
+            value = texts[offset] if isinstance(texts[offset], str) else ""
+            return mechanically_normalize_text(value)
+    return mechanically_normalize_text("")

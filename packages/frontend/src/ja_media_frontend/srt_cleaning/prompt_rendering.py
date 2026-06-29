@@ -17,7 +17,8 @@ def render_window_prompt(window: CueWindow, *, series_context: str) -> str:
             "Return exactly one decision for each cue in <active>. "
             "Use only the cue's local id attribute. Do not split one cue into "
             "multiple decisions, merge cues, renumber cues, or create decisions "
-            "for <context_before> or <context_after>."
+            "for <context_before> or <context_after>. Use decision as_is, not "
+            "edit, when the cue text should stay exactly the same."
         ),
     ]
     if window.before:

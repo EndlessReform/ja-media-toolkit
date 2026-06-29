@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 from ja_media_frontend.srt_cleaning.commands import run_generate, run_reconstruct
+from ja_media_frontend.srt_cleaning.review_command import run_review
 from ja_media_frontend.srt_cleaning.smoke import (
     fetch_metadata,
     fetch_subtitle_inventory,
@@ -28,6 +29,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_generate_parser(subparsers)
     register_run_vllm_parser(subparsers)
     add_reconstruct_parser(subparsers)
+    add_review_parser(subparsers)
     return parser
 
 
@@ -109,6 +111,32 @@ def add_reconstruct_parser(
     reconstruct.add_argument("--no-archive", action="store_true")
 
 
+def add_review_parser(
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+) -> None:
+    review = subparsers.add_parser(
+        "review",
+        help="Review original vs cleaned SRTs with optional audio",
+    )
+    review.add_argument("--anilist", type=int, required=True, help="AniList series ID")
+    review.add_argument("--workspace-root", help="Override .ja-media-runs root")
+    review.add_argument("--run-id", default="current", help="Workspace run ID")
+    review.add_argument(
+        "--episode",
+        type=int,
+        help="Episode to open first. Defaults to 1.",
+    )
+    review.add_argument(
+        "--audio",
+        help="Manual local audio/media file to use for playback.",
+    )
+    review.add_argument(
+        "--audio-profile",
+        default="portable-aac-v1",
+        help="Derived audio profile to prefer. Defaults to portable-aac-v1.",
+    )
+
+
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
@@ -126,6 +154,8 @@ def main() -> None:
         run_vllm_batch(args)
     elif args.command == "reconstruct":
         run_reconstruct(args)
+    elif args.command == "review":
+        run_review(args)
     else:
         parser.print_help()
         sys.exit(1)
