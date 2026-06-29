@@ -10,6 +10,10 @@ from ja_media_frontend.srt_cleaning.smoke import (
     fetch_subtitle_inventory,
     run_smoke_test,
 )
+from ja_media_frontend.srt_cleaning.vllm_batch import (
+    register_run_vllm_parser,
+    run_vllm_batch,
+)
 
 
 HOUSE_STYLE_PATH = Path(__file__).parents[1] / "house-style.md"
@@ -22,6 +26,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command")
     add_smoke_parser(subparsers)
     add_generate_parser(subparsers)
+    register_run_vllm_parser(subparsers)
     add_reconstruct_parser(subparsers)
     return parser
 
@@ -117,9 +122,10 @@ def main() -> None:
             fetch_metadata=fetch_metadata,
             fetch_subtitle_inventory=fetch_subtitle_inventory,
         )
+    elif args.command == "run-vllm":
+        run_vllm_batch(args)
     elif args.command == "reconstruct":
         run_reconstruct(args)
     else:
         parser.print_help()
         sys.exit(1)
-
