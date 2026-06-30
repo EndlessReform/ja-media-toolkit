@@ -13,12 +13,21 @@ fi
 
 MODEL_ID="${MODEL_ID:-Qwen/Qwen3-ForcedAligner-0.6B}"
 SERVER_PORT="${SERVER_PORT:-8000}"
-VLLM_IMAGE="${VLLM_IMAGE:-vllm/vllm-openai:latest}"
+VLLM_BASE_IMAGE="${VLLM_BASE_IMAGE:-vllm/vllm-openai:v0.24.0}"
+VLLM_AUDIO_EXTRA_VERSION="${VLLM_AUDIO_EXTRA_VERSION:-0.24.0}"
+VLLM_AUDIO_IMAGE="${VLLM_AUDIO_IMAGE:-qwen3-forced-aligner-vllm:0.24.0-audio}"
 HF_HOME="${HF_HOME:-/var/lib/qwen3-forced-aligner/huggingface}"
 MAX_NUM_SEQS="${MAX_NUM_SEQS:-1}"
 GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.90}"
 
 mkdir -p "${HF_HOME}"
+
+docker build \
+  --pull \
+  --build-arg "VLLM_BASE_IMAGE=${VLLM_BASE_IMAGE}" \
+  --build-arg "VLLM_AUDIO_EXTRA_VERSION=${VLLM_AUDIO_EXTRA_VERSION}" \
+  -t "${VLLM_AUDIO_IMAGE}" \
+  "${ROOT_DIR}"
 
 docker run --rm \
   --name qwen3-forced-aligner-vllm \
@@ -30,12 +39,11 @@ docker run --rm \
   -v "${HF_HOME}:/root/.cache/huggingface" \
   -v "${ROOT_DIR}/config:/config:ro" \
   --entrypoint vllm \
-  "${VLLM_IMAGE}" \
+  "${VLLM_AUDIO_IMAGE}" \
   serve "${MODEL_ID}" \
   --host 0.0.0.0 \
   --port 8000 \
   --runner pooling \
-  --enforce-eager \
   --chat-template /config/raw_content_chat_template.jinja \
   --hf-overrides '{"architectures":["Qwen3ASRForcedAlignerForTokenClassification"]}' \
   --max-num-seqs "${MAX_NUM_SEQS}" \

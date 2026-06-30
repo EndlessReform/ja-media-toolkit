@@ -60,7 +60,6 @@ These notes summarize the current plan for using
   ```bash
   vllm serve Qwen/Qwen3-ForcedAligner-0.6B \
     --runner pooling \
-    --enforce-eager \
     --chat-template /path/to/raw_content_chat_template.jinja \
     --hf-overrides '{"architectures": ["Qwen3ASRForcedAlignerForTokenClassification"]}'
   ```
@@ -73,6 +72,8 @@ These notes summarize the current plan for using
 
 - Using a server startup `--chat-template` avoids requiring the client to send a
   trusted per-request template.
+- `--enforce-eager` is not known to be a forced-aligner requirement. Treat it as
+  an optional vLLM troubleshooting flag, not part of the backend contract.
 
 ## Client API Shape
 

@@ -12,11 +12,14 @@ not need this repo, `uv`, or any `ja_media_*` Python package.
 ## Files
 
 - `.env.example`: machine-local settings to copy to `.env`
+- `Dockerfile`: local vLLM image layer that installs `vllm[audio]`
 - `compose.yaml`: preferred single-node Docker Compose startup
 - `config/raw_content_chat_template.jinja`: emits only the text item from the
   multimodal user message, which is required by the client-side timestamp-row
   extraction strategy
 - `scripts/run-docker.sh`: plain Docker fallback for hosts without Compose
+- `scripts/start-compose.sh`: build, audio-smoke, and start via Compose
+- `scripts/smoke-image-audio.sh`: import check for vLLM's optional audio deps
 - `scripts/smoke-health.sh`: liveness/model-list smoke check
 
 ## Host Requirements
@@ -39,21 +42,33 @@ $EDITOR .env
 Key settings:
 
 - `MODEL_ID`: defaults to `Qwen/Qwen3-ForcedAligner-0.6B`
-- `VLLM_IMAGE`: defaults to `vllm/vllm-openai:latest`
+- `VLLM_BASE_IMAGE`: defaults to `vllm/vllm-openai:v0.24.0`
+- `VLLM_AUDIO_EXTRA_VERSION`: defaults to `0.24.0`; keep this matched to the
+  base image's vLLM version
+- `VLLM_AUDIO_IMAGE`: local tag for the derived image, defaulting to
+  `qwen3-forced-aligner-vllm:0.24.0-audio`
 - `SERVER_PORT`: host port mapped to vLLM port `8000`
 - `HF_HOME`: host cache directory for model weights
 - `MAX_NUM_SEQS`: start with `1` for proof-of-value validation
 
-If the selected vLLM image does not contain
-`Qwen3ASRForcedAlignerForTokenClassification`, build or pull a patched vLLM
-image and set `VLLM_IMAGE` to that image tag. Do not install ja-media code on the
-GPU host to fix that; the server should remain generic vLLM.
+vLLM's official OpenAI images do not include optional audio dependencies. The
+Dockerfile installs `vllm[audio]` at the matching vLLM version so PyAV, librosa,
+and soundfile are present when `/pooling` receives an audio item.
+
+If the selected vLLM base image does not contain
+`Qwen3ASRForcedAlignerForTokenClassification`, pin `VLLM_BASE_IMAGE` and
+`VLLM_AUDIO_EXTRA_VERSION` to a vLLM release that does. Do not install ja-media
+code on the GPU host to fix that; the server should remain generic vLLM.
 
 ## Start With Compose
 
 ```bash
-docker compose --env-file .env up --pull always
+./scripts/start-compose.sh
 ```
+
+Docker Compose automatically reads `.env` when it runs from this deployment
+directory. The wrapper changes into this directory before calling Compose so the
+same command works even if you launch it from another path.
 
 In another shell:
 
@@ -77,6 +92,9 @@ docker compose down
 
 This uses the same `.env` and mounts the same raw chat template.
 
+`run-docker.sh` always rebuilds the derived image with `--pull` before starting
+the container.
+
 ## Expected vLLM Shape
 
 The startup command is equivalent to:
@@ -84,10 +102,13 @@ The startup command is equivalent to:
 ```bash
 vllm serve Qwen/Qwen3-ForcedAligner-0.6B \
   --runner pooling \
-  --enforce-eager \
   --chat-template /config/raw_content_chat_template.jinja \
   --hf-overrides '{"architectures":["Qwen3ASRForcedAlignerForTokenClassification"]}'
 ```
+
+`--enforce-eager` is not part of the known forced-aligner contract. Add it only
+as a troubleshooting flag if vLLM CUDA graph capture or compilation behavior
+breaks this model/image combination.
 
 The ja-media client will call `/pooling` with `task: "token_classify"`, a single
 text/audio user message, and application-chosen `<timestamp>` markers. The
