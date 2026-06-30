@@ -115,7 +115,12 @@ class SubsyncInteractionMixin:
         if not track.cues:
             return
         shifted_cues = shift_srt_cues(track.cues, offset_s, negative="clamp")
-        self.tracks[self.track_index] = replace(track, cues=shifted_cues, modified=True)
+        self.tracks[self.track_index] = replace(
+            track,
+            cues=shifted_cues,
+            modified=True,
+            timing_offset_s=track.timing_offset_s + offset_s,
+        )
         self.refresh_view()
 
     def page_window(self, pages: float) -> None:
