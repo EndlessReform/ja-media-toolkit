@@ -116,6 +116,21 @@ server owns model loading, audio decoding, feature extraction, and logits
 generation. The client owns span selection, prompt construction, timestamp-row
 extraction, cue correlation, and run serialization.
 
+The upstream Qwen/vLLM example treats forced alignment as word-level timestamp
+classification. The expected prompt body is a sequence of client-chosen text
+tokens followed by two timestamp markers:
+
+```text
+word1<timestamp><timestamp>word2<timestamp><timestamp>
+```
+
+The ja-media inference client uses that shape for its default Qwen policy. It
+segments Japanese text with nagisa, skips punctuation-like `補助記号` tokens by
+default, predicts word timings, and then merges those word timings back into
+caller-owned groups such as SRT/ASS cues, source-text lines, or one untimed text
+blob. Keep the deployment generic: do not install ja-media code into this image
+to implement segmentation or cue reconstruction.
+
 The chat template emits only the text content from the multimodal request. The
 audio item remains in the request body for vLLM's multimodal processor; it just
 must not be rendered into the textual prompt.

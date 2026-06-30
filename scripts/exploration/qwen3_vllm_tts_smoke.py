@@ -31,7 +31,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from transformers import AutoConfig, AutoTokenizer
+from huggingface_hub import hf_hub_download
+from transformers import AutoTokenizer
 
 
 DEFAULT_MODEL = "Qwen/Qwen3-ForcedAligner-0.6B"
@@ -89,7 +90,7 @@ def main() -> int:
     duration_s = wav_duration_s(audio_path)
     print(f"Audio: {audio_path} ({duration_s:.2f}s)")
 
-    prompt = build_prompt(spans)
+    prompt = build_prompt(spans, layout=args.prompt_layout)
     pooling_payload = build_pooling_payload(
         model=args.model,
         prompt=prompt,
@@ -118,6 +119,7 @@ def main() -> int:
         "audio_path": str(audio_path),
         "audio_duration_s": duration_s,
         "elapsed_s": elapsed_s,
+        "prompt_layout": args.prompt_layout,
         "prompt": prompt,
         "ground_truth_text": text,
         "spans": list(spans),
@@ -156,6 +158,12 @@ def parse_args() -> argparse.Namespace:
         "--audio-part",
         choices=("input_audio", "audio_url_object", "audio_url_string"),
         default="input_audio",
+    )
+    parser.add_argument(
+        "--prompt-layout",
+        choices=("after-span", "wrap-span"),
+        default="wrap-span",
+        help="Place timestamp markers after each span or around each span.",
     )
     parser.add_argument(
         "--skip-tts",
@@ -263,8 +271,14 @@ def normalize_wav(input_path: Path, output_path: Path) -> None:
     )
 
 
-def build_prompt(spans: tuple[str, ...]) -> str:
-    return PROMPT_PREFIX + "".join(f"{span}<timestamp><timestamp>" for span in spans)
+def build_prompt(spans: tuple[str, ...], *, layout: str) -> str:
+    if layout == "after-span":
+        body = "".join(f"{span}<timestamp><timestamp>" for span in spans)
+    elif layout == "wrap-span":
+        body = "".join(f"<timestamp>{span}<timestamp>" for span in spans)
+    else:
+        raise ValueError(f"Unsupported prompt layout: {layout}")
+    return PROMPT_PREFIX + body
 
 
 def build_pooling_payload(
@@ -300,6 +314,17 @@ def audio_format_for_path(path: Path) -> tuple[str, str]:
     return "wav", "audio/wav"
 
 
+def load_timestamp_config(model: str) -> tuple[int, float]:
+    model_path = Path(model)
+    config_path = (
+        model_path / "config.json"
+        if model_path.exists()
+        else Path(hf_hub_download(repo_id=model, filename="config.json"))
+    )
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    return config["timestamp_token_id"], config["timestamp_segment_time"]
+
+
 def post_json(url: str, payload: dict[str, Any]) -> dict[str, Any]:
     request = urllib.request.Request(
         url,
@@ -318,9 +343,7 @@ def extract_predictions(
     spans: tuple[str, ...],
 ) -> list[SpanPrediction]:
     tokenizer = AutoTokenizer.from_pretrained(model)
-    config = AutoConfig.from_pretrained(model)
-    timestamp_token_id = config.timestamp_token_id
-    timestamp_segment_time = config.timestamp_segment_time
+    timestamp_token_id, timestamp_segment_time = load_timestamp_config(model)
     logits = pooling_json["data"][0]["data"]
     local_ids = tokenizer(prompt, add_special_tokens=False)["input_ids"]
     timestamp_s: list[float] = []

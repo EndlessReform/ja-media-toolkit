@@ -43,6 +43,7 @@ Recommended initial shape:
 ├── envs/
 │   ├── apple/         # MacBook workflows: MLX, Metal, local experiments
 │   ├── cuda/          # Nvidia workstation workflows: CUDA ASR, VAD, diarization
+│   ├── inference/     # Heavy client-side inference adapters
 │   └── services/      # LXC/server workflows: Kitsunekko API, indexes, plugins
 ├── docs/
 └── pyproject.toml
@@ -174,6 +175,7 @@ This keeps dependency ownership obvious:
 
 - Apple-specific dependencies live in `envs/apple`.
 - CUDA dependencies live in `envs/cuda`.
+- Heavy but platform-neutral inference clients live in `envs/inference`.
 - service dependencies live in `envs/services`.
 - shared packages stay cheap to install.
 

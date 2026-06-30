@@ -6,10 +6,15 @@ This branch has a working first slice in `packages/frontend`:
 
 - `ja-media-srt-clean smoke-test` fetches AniList metadata and Kitsunekko subtitle inventory.
 - `ja-media-srt-clean generate` writes OpenAI-compatible chat-completions JSONL, a manifest, a shard summary, and cached source SRTs.
+- `ja-media-srt-clean run-vllm` wraps the local vLLM batch invocation and handles the expected Docker mount shape.
 - `ja-media-srt-clean reconstruct` consumes unordered OpenAI-style result JSONL and writes cleaned SRTs plus analysis logs.
-- Tests cover window generation, custom IDs, shard limits, result parsing, unordered reconstruction, invalid rows, and source-level blocking errors.
+- `ja-media-srt-clean review` opens the cleaning review surface over source SRTs, cleaned SRTs, decisions, errors, and optional audio.
+- Tests cover window generation, custom IDs, shard limits, local vLLM command construction, result parsing, unordered reconstruction, review loading, invalid rows, and source-level blocking errors.
 
-The branch is not done. The biggest missing piece is the execution surface between generated JSONL and reconstructed output. Today the user still has to hand-run provider-specific commands and remember vLLM/OpenAI quirks, but generated artifacts now live in a predictable workspace.
+The branch is not the final evaluation system. It now proves the cleaning slice
+and gives it a predictable workspace, but cross-machine artifact storage,
+alignment orchestration, grading, and analyst reporting belong to the newer
+evaluation-workbench direction.
 
 The CLI entrypoint has been split into smaller modules. Keep it that way: add future behavior to focused modules under `ja_media_frontend.srt_cleaning`, not to the script entrypoint.
 
@@ -302,10 +307,10 @@ docker run --rm --runtime nvidia --gpus all \
   --max-num-batched-tokens 16384
 ```
 
-Replace that with a small local wrapper, either a root script or a `ja-media-srt-clean run-vllm` subcommand:
+This has been replaced by `ja-media-srt-clean run-vllm`:
 
 ```sh
-uv run scripts/srt_clean_vllm_batch.py \
+uv run ja-media-srt-clean run-vllm \
   --anilist 184591 \
   --model RedHatAI/gemma-4-26B-A4B-it-NVFP4 \
   --max-model-len 96000 \
@@ -417,50 +422,33 @@ Important boundary: SRT cleaning can be service-backed because it depends on Kit
 
 ## What Is Left
 
-1. Add a local vLLM Docker wrapper.
-   This should remove the hand-edited `docker run` command, infer mounts and output names, and make local Gemma the happy path.
-
-2. Add first-class smoke paths for the local path.
-   One command should generate a tiny request set, run vLLM, reconstruct it, and summarize errors without manual path editing.
-
-3. Add the cleaning review TUI.
-   Reuse subsync/audio primitives to compare original vs cleaned text, inspect decisions, and optionally play the matching audio span.
-
-4. Add retry/DLQ ergonomics.
+1. Add retry/DLQ ergonomics.
    Failed provider calls and schema failures should become an obvious rerun input, not a manual JSONL archaeology task.
 
-5. Add model/body override hooks to generation or local execution.
+2. Add model/body override hooks to generation or local execution.
    Some compatible runtimes diverge on structured output support. The workflow needs a clean way to disable strict JSON schema, change temperature, or add provider-specific extra body fields without corrupting the manifest contract.
 
-6. Add local media episode resolution for alignment.
+3. Add local media episode resolution for alignment.
    Start with arbitrary folders and existing filename heuristics. Use services for AniList matching when available, but do not require Docker for local alignment experiments.
 
-7. Define the alignment input manifest.
+4. Define the alignment input manifest.
    It should join `cleaned_srt_path`, source subtitle identity, media path, episode identity, VAD region timings, cue indexes, and aligner settings.
 
-8. Add an end-to-end fixture.
-   Use a small checked-in or generated audio/SRT fixture to prove generate -> rollout smoke -> reconstruct -> alignment manifest creation.
+5. Add an end-to-end real-media fixture.
+   The checked-in TTS forced-alignment fixture proves the Qwen client path. The next useful fixture should use a real episode audio clip plus a candidate SRT to prove cleaning -> alignment input creation -> grading.
 
-9. Keep the generic hosted rollout driver as nice-to-have.
+6. Keep the generic hosted rollout driver as nice-to-have.
    It is still useful for non-cleaning workflows or machines without local GPU, but it is not the current bottleneck.
 
 ## Non-Ergonomic Spots
 
-- Local vLLM execution is disconnected from generation and reconstruction.
-- vLLM batch usage leaks Docker, cache mounts, model flags, and path rewriting into the user's working memory.
-- Output naming does not yet make the next command obvious.
-- There is no single small safe smoke-test path.
 - Error recovery exists as data, but not yet as a pleasant command.
-- There is no pleasant way to review model decisions against original text and audio.
 - The alignment destination is still conceptual, so it is unclear when a cleaned SRT is good enough.
-- The CLI entry module has absorbed too many responsibilities.
+- The local workspace is a folder convention, not a cross-machine artifact registry.
 
 ## Suggestions
 
-- Make local vLLM the short-term happy path.
 - Keep the generic OpenAI-compatible JSONL executor as backlog, not as the next blocker.
-- Wrap vLLM Docker execution directly enough to remove path/caching mistakes.
-- Reuse subsync Textual and audio primitives for cleaning review.
 - Make local folders a first-class alignment input, even if service metadata is used opportunistically.
 - Prefer manifest-driven resumes and reruns everywhere. The user should rarely hand-edit JSONL.
 - Add next-command hints after generation and vLLM execution. The CLI should print the exact reconstruct and review commands for the artifacts it just wrote.

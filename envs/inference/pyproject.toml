@@ -1,0 +1,27 @@
+[project]
+name = "ja-media-inference"
+version = "0.1.0"
+description = "Client-side inference adapters for ja-media-toolkit"
+requires-python = ">=3.13"
+dependencies = [
+    "httpx>=0.28.1",
+    "huggingface-hub>=1.21.0",
+    "ja-media-core",
+    "nagisa>=0.2.12",
+    "transformers>=5.12.1",
+]
+
+[project.scripts]
+qwen3-align-smoke = "ja_media_inference.qwen3_align_smoke:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv.sources]
+ja-media-core = { path = "../../packages/core", editable = true }
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.0",
+]
