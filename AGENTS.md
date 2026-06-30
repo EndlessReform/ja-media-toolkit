@@ -43,14 +43,18 @@ needlessly difficult. Treat line count as an architectural smoke alarm.
   leave it smaller unless the user explicitly scopes the work otherwise.
 - Generated files, lockfiles, vendored code, fixtures, and machine-produced
   migrations are exempt.
+- Quick-and-dirty one-file utilities under `scripts/` are temporarily exempt
+  when they are intentionally exploratory or operational glue. Keep the
+  contract clear at the top of the file, and promote stable behavior into a
+  package module before other code depends on it.
 - Declarative artifacts whose owning tool requires or conventionally exports
   one monolithic document—such as Grafana dashboard JSON—may also exceed these
   limits when splitting the file would make it invalid, non-importable, or
   substantially harder to use. Keep such exceptions narrowly scoped, call
   them out in the handoff, and prefer a composable source format if the
   artifact becomes something humans edit frequently.
-- Hand-written application code, tests, scripts, and ordinary configuration
-  remain subject to the limits.
+- Hand-written application code, tests, ordinary configuration, and scripts
+  outside the temporary `scripts/` exemption remain subject to the limits.
 - Do not game the limit with compressed formatting, giant functions, or
   meaningless file splits. Extract by responsibility and keep the resulting
   interfaces explicit.
@@ -63,14 +67,21 @@ failure, not a harmless style nit.**
 
 The services are typically deployed as a suite of containers coordinated by `compose.yaml` in the root.
 
-- **Remote operations are user-owned.** Under no circumstances should an agent
-  proactively SSH into any machine, connect to a hypervisor or guest, inspect
-  remote containers, alter remote infrastructure, or deploy/restart services.
-  Do not interpret requests to investigate, fix, remediate, or verify a service
-  as authorization for remote access or deployment. Prepare and validate the
-  repository changes locally, then give the user the commands or handoff needed
-  to perform remote operations themselves. This remains in force until these
+- **Remote infrastructure operations are user-owned.** Under no circumstances
+  should an agent proactively SSH into any machine, connect to a hypervisor or
+  guest, inspect remote containers, alter remote infrastructure, or
+  deploy/restart services. Do not interpret requests to investigate, fix,
+  remediate, or verify a service as authorization for remote infrastructure
+  access or deployment. Prepare and validate the repository changes locally,
+  then give the user the commands or handoff needed to perform remote
+  infrastructure operations themselves. This remains in force until these
   repository instructions explicitly say otherwise.
+- **User-requested API smoke tests are allowed.** Agents may make
+  application-level HTTP/API requests to user-specified service URLs for client
+  validation and smoke testing when the user explicitly asks for that test.
+  Keep these calls limited to the documented API behavior under test, and do
+  not treat API access as permission to inspect or operate the remote host
+  itself.
 - **Local Docker is allowed.** Agents may build, run, restart, inspect, and test
   containers on the current development machine when useful for validation.
   Keep local validation clearly distinguished from remote deployment.

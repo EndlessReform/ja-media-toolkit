@@ -9,6 +9,7 @@ dependencies = [
     "ja-media-core>=0.1.0",
     "numpy",
     "parse-torrent-title>=2.8.2",
+    "pydantic>=2.13.4",
     "python-dotenv>=1.2.2",
     "sounddevice>=0.5.5",
     "textual>=8.2.7",
@@ -22,6 +23,8 @@ apple = [
 
 [project.scripts]
 ja-media = "ja_media_frontend.cli:main"
+ja-media-srt-clean = "ja_media_frontend.srt_clean:main"
+srt_clean_vllm_batch = "ja_media_frontend.srt_cleaning.vllm_batch:main"
 
 [build-system]
 requires = ["hatchling"]

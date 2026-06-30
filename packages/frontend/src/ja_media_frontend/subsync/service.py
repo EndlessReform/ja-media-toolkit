@@ -53,6 +53,7 @@ class SubtitleTrack(SubtitleCandidate):
     language_analysis: SubtitleLanguageAnalysis | None = None
     language_error: str | None = None
     modified: bool = False
+    timing_offset_s: float = 0.0
 
     @property
     def label(self) -> str:
@@ -77,6 +78,15 @@ class SubtitleTrack(SubtitleCandidate):
     @property
     def active_s(self) -> float:
         return sum(max(0.0, cue.end_s - cue.start_s) for cue in self.cues)
+
+    @property
+    def timing_offset_label(self) -> str:
+        """Return the cumulative manual cue shift in milliseconds."""
+
+        offset_ms = round(self.timing_offset_s * 1000)
+        if offset_ms == 0:
+            return "0ms"
+        return f"{offset_ms:+d}ms"
 
     @property
     def language_label(self) -> str:

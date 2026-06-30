@@ -81,6 +81,22 @@ class AsrConfig(BackendGroupConfig):
         return super().get_backend_config(name)  # type: ignore[return-value]
 
 
+class ForcedAlignmentBackendConfig(BackendConfig):
+    """Base class for concrete forced-alignment backend config models."""
+
+
+class ForcedAlignmentConfig(BackendGroupConfig):
+    """Forced-alignment config envelope shared by runtime environments."""
+
+    backends: dict[str, ForcedAlignmentBackendConfig] = Field(default_factory=dict)
+
+    def get_backend_config(
+        self,
+        name: str | None = None,
+    ) -> ForcedAlignmentBackendConfig:
+        return super().get_backend_config(name)  # type: ignore[return-value]
+
+
 class MetadataCrosswalkConfig(BaseModel):
     """Client settings for the LAN anime metadata crosswalk service."""
 
@@ -121,6 +137,9 @@ class JaMediaConfig(BaseModel):
     """
 
     asr: AsrConfig = Field(default_factory=AsrConfig)
+    forced_alignment: ForcedAlignmentConfig = Field(
+        default_factory=ForcedAlignmentConfig
+    )
     metadata: MetadataConfig = Field(default_factory=MetadataConfig)
     services: ServicesConfig = Field(default_factory=ServicesConfig)
     subtitles: SubtitleConfig = Field(default_factory=SubtitleConfig)

@@ -258,6 +258,7 @@ class HelpModal(ModalScreen[None]):
                 "[b]Window[/]\n"
                 "  Ctrl-f / b    page forward / back\n"
                 "  Ctrl-d / u    half-page forward / back\n"
+                "  z / x         shift selected SRT -/+100ms\n"
                 "  + / -         zoom in / out",
                 markup=True,
                 classes="help-section",

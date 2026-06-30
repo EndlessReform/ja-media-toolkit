@@ -50,11 +50,13 @@ def register_subsync_parser(subparsers: argparse._SubParsersAction) -> None:
         help="Source media file path. Optional with --anilist and --episode.",
     )
     tui.add_argument(
-        "srt",
-        nargs="*",
+        "--srt",
+        action="append",
+        default=[],
         help=(
-            "SRT/ASS path(s) or quoted glob pattern(s), for example "
-            "'../../subs/*.srt'. Optional when using --fetch-subs or F6 lookup."
+            "SRT/ASS path or quoted glob pattern (repeatable). For example: "
+            "--srt '../../subs/*.srt' --srt extra.ass. "
+            "Optional when using --fetch-subs or F6 lookup."
         ),
     )
     tui.add_argument(

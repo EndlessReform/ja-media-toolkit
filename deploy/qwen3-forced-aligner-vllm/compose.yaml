@@ -1,0 +1,55 @@
+name: qwen3-forced-aligner-vllm
+
+services:
+  vllm:
+    image: ${VLLM_AUDIO_IMAGE:-qwen3-forced-aligner-vllm:0.24.0-audio}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VLLM_BASE_IMAGE: ${VLLM_BASE_IMAGE:-vllm/vllm-openai:v0.24.0}
+        VLLM_AUDIO_EXTRA_VERSION: ${VLLM_AUDIO_EXTRA_VERSION:-0.24.0}
+    restart: unless-stopped
+    ports:
+      - "${SERVER_PORT:-8000}:8000"
+    environment:
+      HF_HOME: /root/.cache/huggingface
+      HUGGING_FACE_HUB_TOKEN: ${HF_TOKEN:-}
+    volumes:
+      - ${HF_HOME:-/var/lib/qwen3-forced-aligner/huggingface}:/root/.cache/huggingface
+      - ./config:/config:ro
+    ipc: host
+    entrypoint: ["vllm", "serve"]
+    command:
+      - ${MODEL_ID:-Qwen/Qwen3-ForcedAligner-0.6B}
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --runner
+      - pooling
+      - --chat-template
+      - /config/raw_content_chat_template.jinja
+      - --hf-overrides
+      - '{"architectures":["Qwen3ASRForcedAlignerForTokenClassification"]}'
+      - --max-num-seqs
+      - ${MAX_NUM_SEQS:-1}
+      - --gpu-memory-utilization
+      - ${GPU_MEMORY_UTILIZATION:-0.90}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          python3 -c "import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).read()"
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 5m

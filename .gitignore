@@ -13,10 +13,15 @@ wheels/
 input
 output
 out
+.ja-media-runs/
 envs/apple/config.local.toml
 envs/services/data
 *.jsonl.gz
 *.srt
+*.batch-*.jsonl
+*.manifest.jsonl
+*.shards.json
+*.sources/
 
 # OS
 *.DS_Store
@@ -26,4 +31,3 @@ docs/repo-symlinks/*
 
 # Secrets
 .env
-

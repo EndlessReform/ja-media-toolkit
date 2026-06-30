@@ -246,6 +246,7 @@ class SubsyncTuiApp(SubsyncInteractionMixin, SubsyncRemoteMixin, App[None]):
         table.add_column("", width=1, no_wrap=True)
         table.add_column("candidate", ratio=1, overflow="ellipsis", no_wrap=True)
         table.add_column("cue", justify="right", no_wrap=True)
+        table.add_column("offset", justify="right", no_wrap=True)
         table.add_column("total", justify="right", no_wrap=True)
         table.add_column("active", justify="right", no_wrap=True)
         table.add_column("span", justify="right", no_wrap=True)
@@ -257,6 +258,7 @@ class SubsyncTuiApp(SubsyncInteractionMixin, SubsyncRemoteMixin, App[None]):
                     style="dim",
                 ),
                 Text("-"),
+                Text("0ms"),
                 Text("0"),
                 Text("0.0s"),
                 Text("0.0s"),
@@ -284,6 +286,10 @@ class SubsyncTuiApp(SubsyncInteractionMixin, SubsyncRemoteMixin, App[None]):
                 Text(">" if selected else " ", style=marker_style),
                 candidate_cell,
                 Text(cue_label, style="bold" if selected else ""),
+                Text(
+                    track.timing_offset_label,
+                    style="bold magenta" if selected and track.timing_offset_s else "dim",
+                ),
                 Text(str(len(track.cues))),
                 Text(format_duration(track.active_s)),
                 Text(format_duration(track.end_s)),
