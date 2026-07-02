@@ -46,7 +46,7 @@ def materialize_episode_subtitles(
                         relative_path=relative_path,
                     )
                 )
-            elif resume:
+            else:
                 verify_subtitle_artifact(destination)
                 records.append(
                     subtitle_artifact_record(

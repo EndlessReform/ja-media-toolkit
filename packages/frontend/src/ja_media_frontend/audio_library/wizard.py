@@ -3,18 +3,15 @@
 from __future__ import annotations
 
 import shutil
-from dataclasses import dataclass, replace
-from datetime import UTC, datetime
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Protocol, Sequence
+from typing import Protocol, Sequence
 
 from ja_media_core.anilist_search import AniListSearchClient, SearchResult
 from ja_media_core.audio_library import (
-    AnimeAudioManifest,
     AnimeAudioSeriesMetadata,
     AudioStreamProbe,
     EpisodeMapping,
-    ManifestEpisode,
     MaterializationPlan,
     PORTABLE_AAC_V1,
     SourceMediaProbe,
@@ -27,23 +24,12 @@ from ja_media_frontend.audio_library.discovery import (
     probe_media,
     text_subtitle_streams,
 )
-from ja_media_frontend.audio_library.manifest import (
-    load_manifest,
-    write_manifest_atomic,
-    write_metadata_atomic,
-)
+from ja_media_frontend.audio_library.executor import IngestSummary, execute_ingest_plan
 from ja_media_frontend.audio_library.mapping import resolve_episode_keys
-from ja_media_frontend.audio_library.materialize import (
-    artifact_filename,
-    materialize_episode,
-    verify_audio_artifact,
-)
 from ja_media_frontend.audio_library.metadata import (
     SELECTED_FIELDS,
-    download_cover,
     normalize_anilist_metadata,
 )
-from ja_media_frontend.audio_library.subtitles import materialize_episode_subtitles
 
 
 class WizardPrompts(Protocol):
@@ -83,15 +69,6 @@ class IngestWizardRequest:
     audio_stream_ordinal: int | None = None
     preferred_languages: tuple[str, ...] = ("jpn", "ja")
     extract_subtitles: bool = True
-
-
-@dataclass(frozen=True)
-class IngestSummary:
-    """Materialization outcome suitable for concise CLI reporting."""
-
-    created: tuple[str, ...]
-    skipped: tuple[str, ...]
-    failed: tuple[str, ...]
 
 
 def build_ingest_plan(request: IngestWizardRequest) -> MaterializationPlan | None:
@@ -144,99 +121,6 @@ def build_ingest_plan(request: IngestWizardRequest) -> MaterializationPlan | Non
     return plan if request.prompts.confirm_plan(plan) else None
 
 
-def execute_ingest_plan(
-    plan: MaterializationPlan,
-    *,
-    resume: bool = False,
-    replace_existing: bool = False,
-    notice: Callable[[str], None] = print,
-) -> IngestSummary:
-    """Materialize a confirmed plan with per-episode manifest checkpoints."""
-
-    series_dir = plan.series_directory
-    series_dir.mkdir(parents=True, exist_ok=True)
-    manifest_path = series_dir / ".ja-media.json"
-    metadata_path = series_dir / "metadata.json"
-    manifest = _initial_manifest(plan, manifest_path)
-    if manifest.series.anilist_id != plan.series.anilist_id:
-        raise ValueError("existing manifest belongs to a different AniList series")
-
-    if plan.series.cover_url and manifest.cover is None:
-        cover_path = series_dir / "cover.jpg"
-        if not cover_path.exists() or replace_existing:
-            try:
-                cover = download_cover(plan.series.cover_url, cover_path)
-                manifest = replace(manifest, cover=cover)
-            except Exception as error:
-                notice(f"Cover download failed; continuing without it: {error}")
-        else:
-            notice("Existing cover.jpg is not in the manifest; leaving it untouched.")
-    write_manifest_atomic(manifest_path, manifest)
-
-    created: list[str] = []
-    skipped: list[str] = []
-    failed: list[str] = []
-    for mapping in plan.mappings:
-        filename = artifact_filename(mapping.episode_key)
-        destination = series_dir / filename
-        existing = _episode_by_key(manifest, mapping.episode_key)
-        try:
-            if _can_resume(existing, mapping, plan, destination, resume):
-                verify_audio_artifact(destination, plan.profile)
-                subtitles = materialize_episode_subtitles(
-                    mapping,
-                    series_dir,
-                    resume=resume,
-                    replace_existing=replace_existing,
-                    notice=notice,
-                )
-                manifest = _with_episode(
-                    manifest,
-                    replace(existing, subtitles=subtitles or existing.subtitles),
-                )
-                write_manifest_atomic(manifest_path, manifest)
-                skipped.append(filename)
-                continue
-            if destination.exists() and not replace_existing:
-                raise FileExistsError(
-                    f"{filename} already exists but is not a matching resumable artifact; "
-                    "use --replace after reviewing it"
-                )
-            artifact = materialize_episode(
-                mapping, destination, plan.series, plan.profile
-            )
-            subtitles = materialize_episode_subtitles(
-                mapping,
-                series_dir,
-                resume=resume,
-                replace_existing=replace_existing,
-                notice=notice,
-            )
-            episode = ManifestEpisode(
-                episode_key=mapping.episode_key,
-                source_relative_path=str(
-                    mapping.source_path.relative_to(plan.source_root)
-                ),
-                source_size_bytes=mapping.source.size_bytes,
-                source_mtime_ns=mapping.source.mtime_ns,
-                global_stream_index=mapping.stream.global_index,
-                audio_stream_ordinal=mapping.stream.audio_ordinal,
-                audio_codec=mapping.stream.codec,
-                audio_language=mapping.stream.language,
-                artifact=artifact,
-                created_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-                subtitles=subtitles,
-            )
-            manifest = _with_episode(manifest, episode)
-            write_manifest_atomic(manifest_path, manifest)
-            created.append(filename)
-        except Exception as error:
-            failed.append(f"{filename}: {error}")
-            notice(f"Failed {filename}: {error}")
-    write_metadata_atomic(metadata_path, manifest)
-    return IngestSummary(tuple(created), tuple(skipped), tuple(failed))
-
-
 def _search_for_identity(request: IngestWizardRequest) -> int | None:
     query = identity_search_query(request.source)
     while True:
@@ -275,52 +159,3 @@ def _validate_environment(source: Path, destination: Path) -> None:
     for executable in ("ffmpeg", "ffprobe"):
         if shutil.which(executable) is None:
             raise ValueError(f"required executable is not available: {executable}")
-
-
-def _initial_manifest(plan: MaterializationPlan, path: Path) -> AnimeAudioManifest:
-    if not path.exists():
-        return AnimeAudioManifest(series=plan.series, profile=plan.profile)
-    manifest = load_manifest(path)
-    if manifest.profile != plan.profile:
-        raise ValueError(
-            "existing manifest uses a different profile; Phase 1 will not "
-            "silently treat it as portable-aac-v1"
-        )
-    return replace(manifest, series=plan.series)
-
-
-def _episode_by_key(
-    manifest: AnimeAudioManifest, episode_key: str
-) -> ManifestEpisode | None:
-    return next(
-        (item for item in manifest.episodes if item.episode_key == episode_key),
-        None,
-    )
-
-
-def _can_resume(
-    existing: ManifestEpisode | None,
-    mapping: EpisodeMapping,
-    plan: MaterializationPlan,
-    destination: Path,
-    resume: bool,
-) -> bool:
-    if not resume or existing is None or not destination.is_file():
-        return False
-    relative = str(mapping.source_path.relative_to(plan.source_root))
-    return (
-        existing.source_relative_path == relative
-        and existing.source_size_bytes == mapping.source.size_bytes
-        and existing.source_mtime_ns == mapping.source.mtime_ns
-        and existing.global_stream_index == mapping.stream.global_index
-        and existing.artifact.relative_path == destination.name
-    )
-
-
-def _with_episode(
-    manifest: AnimeAudioManifest, episode: ManifestEpisode
-) -> AnimeAudioManifest:
-    episodes = [item for item in manifest.episodes if item.episode_key != episode.episode_key]
-    episodes.append(episode)
-    episodes.sort(key=lambda item: int(item.episode_key))
-    return replace(manifest, episodes=tuple(episodes))
