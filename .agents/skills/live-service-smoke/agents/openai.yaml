@@ -1,0 +1,6 @@
+interface:
+  display_name: "Live Service Smoke"
+  short_description: "Smoke-test live LAN services via config"
+  default_prompt: "Use $live-service-smoke to test first-party ja-media services against live LAN/prod using config autodiscovery."
+policy:
+  allow_implicit_invocation: true

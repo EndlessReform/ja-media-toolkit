@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 from ja_media_core.config import load_config
 from ja_media_frontend.audio import materialize_audio
 from ja_media_frontend.subsync.audio_source import resolve_subsync_audio
+from ja_media_frontend.subsync.ground_truth import discover_ground_truth_subtitle
 from ja_media_frontend.subsync.models import initial_remote_lookup_state
 from ja_media_frontend.subsync.service import (
     load_subtitle_track,
@@ -75,20 +76,32 @@ def run_subsync_tui(
             raise SystemExit(f"Could not parse {path}: {exc}") from exc
 
     with tempfile.TemporaryDirectory(prefix="ja-media-subsync-") as tmpdir:
+        download_dir = Path(tmpdir)
         try:
             playback_source = materialize_audio(audio_selection.playback_path)
         except RuntimeError as exc:
             raise SystemExit(str(exc)) from exc
+        ground_truth = discover_ground_truth_subtitle(
+            anilist_id=(
+                remote_state.external_id
+                if remote_state.source == "anilist"
+                else None
+            ),
+            episode_number=remote_state.episode_number,
+            download_dir=download_dir,
+        )
         app = SubsyncTuiApp(
             audio_source=playback_source,
             tracks=tracks,
             initial_window_s=window_s,
             remote_state=remote_state,
-            download_dir=Path(tmpdir),
+            download_dir=download_dir,
             language_id_config=language_id_config,
             sort_by_language=sort_by_language,
             promotion_target=audio_selection.promotion_target,
             audio_status=audio_selection.status,
+            ground_truth_track=ground_truth.track,
+            ground_truth_status=ground_truth.status,
         )
         if fetch_subs:
             app.fetch_remote_tracks_or_exit()

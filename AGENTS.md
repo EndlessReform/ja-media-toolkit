@@ -219,6 +219,13 @@ service-specific override first, then fall back to `[services].root_url` in
 `~/.config/ja-media-toolkit/config.toml`. See
 [site/src/content/docs/setup/config.md](site/src/content/docs/setup/config.md).
 
+When the user asks to test against "live", "prod", "remote", "LAN", or
+"tailnet", use the
+[live-service-smoke skill](.agents/skills/live-service-smoke/SKILL.md). Assume
+the user has already configured the tailnet service root in system config unless
+config discovery proves otherwise. Use SDK clients or derive curl bases from
+config at runtime; never hard-code private service URLs into repo files.
+
 When adding or substantially changing a service, use
 [the add-service skill](.agents/skills/add-service/SKILL.md). It covers the
 complete vertical slice: runtime, core SDK, tests, Compose/Caddy integration,

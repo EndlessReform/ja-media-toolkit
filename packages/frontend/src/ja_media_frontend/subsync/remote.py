@@ -119,7 +119,7 @@ class SubsyncRemoteMixin:
         added_tracks = self.tracks[first_idx:insertion_idx]
         self.sort_tracks_by_language()
         if added_tracks:
-            first_idx = min(self.tracks.index(track) for track in added_tracks)
+            first_idx = self.track_index
         if self.track_index >= len(self.tracks):
             self.track_index = max(0, len(self.tracks) - 1)
         return added, first_idx

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import shutil  # Compatibility seam for an existing promotion regression test.
+import shutil  # noqa: F401 - compatibility seam for promotion tests.
 import tempfile
 from pathlib import Path
 from typing import Callable
@@ -24,21 +24,22 @@ from ja_media_frontend.subsync.models import RemoteLookupState
 from ja_media_frontend.widgets.timeline import TimelineWidget, format_clock
 from ja_media_core.kitsunekko import HttpKitsunekkoSubtitlesClient
 from ja_media_core.subtitle_lid import (
-    SubtitleLanguage,
     SubtitleLanguageIdConfig,
 )
+from ja_media_core.subsync import subtitle_anchor_fit_score
 from ja_media_core.transcripts import SubtitleCue
+from ja_media_frontend.subsync.candidates import render_candidate_table
 from ja_media_frontend.subsync.service import (
     SubtitleTrack,
     build_subtitle_track,
     promote_subtitle,
     sidecar_path,
 )
-from ja_media_frontend.subsync.startup import resolve_srt_inputs, run_subsync_tui
+from ja_media_frontend.subsync.startup import resolve_srt_inputs, run_subsync_tui  # noqa: F401
 from ja_media_frontend.subsync.remote import SubsyncRemoteMixin
 from ja_media_frontend.subsync.interaction import (
     SubsyncInteractionMixin,
-    playback_range,
+    playback_range,  # noqa: F401
     write_clipboard,
 )
 
@@ -119,6 +120,8 @@ class SubsyncTuiApp(SubsyncInteractionMixin, SubsyncRemoteMixin, App[None]):
         sort_by_language: bool = False,
         promotion_target: Path | None | object = _USE_PLAYBACK_PATH,
         audio_status: str = "",
+        ground_truth_track: SubtitleTrack | None = None,
+        ground_truth_status: str = "",
     ) -> None:
         super().__init__()
         self.audio_source = audio_source
@@ -128,6 +131,8 @@ class SubsyncTuiApp(SubsyncInteractionMixin, SubsyncRemoteMixin, App[None]):
             else promotion_target
         )
         self.audio_status = audio_status
+        self.ground_truth_track = ground_truth_track
+        self.ground_truth_status = ground_truth_status
         self.tracks = tracks
         self.track_index = 0
         self.cue_indices = [0 for _ in tracks]
@@ -194,6 +199,12 @@ class SubsyncTuiApp(SubsyncInteractionMixin, SubsyncRemoteMixin, App[None]):
                 duration_s=self.window_s,
                 title=self._timeline_title(),
                 active_span=self.current_cue,
+                reference_spans=(
+                    self.ground_truth_track.cues
+                    if self.ground_truth_track is not None
+                    else ()
+                ),
+                reference_title=self._ground_truth_title(),
             )
         else:
             timeline.set_timeline(
@@ -232,87 +243,46 @@ class SubsyncTuiApp(SubsyncInteractionMixin, SubsyncRemoteMixin, App[None]):
         if self.audio_status:
             text.append("  ")
             text.append(self.audio_status, style="dim")
+        if self.ground_truth_status:
+            text.append("  ")
+            text.append(self.ground_truth_status, style="dim")
         return text
 
     def render_candidates(self) -> Table:
-        table = Table(
-            expand=True,
-            box=None,
-            show_edge=False,
-            pad_edge=False,
-            padding=(0, 2),
-            collapse_padding=True,
+        return render_candidate_table(
+            tracks=self.tracks,
+            cue_indices=self.cue_indices,
+            track_index=self.track_index,
+            ground_truth_track=self.ground_truth_track,
         )
-        table.add_column("", width=1, no_wrap=True)
-        table.add_column("candidate", ratio=1, overflow="ellipsis", no_wrap=True)
-        table.add_column("cue", justify="right", no_wrap=True)
-        table.add_column("offset", justify="right", no_wrap=True)
-        table.add_column("total", justify="right", no_wrap=True)
-        table.add_column("active", justify="right", no_wrap=True)
-        table.add_column("span", justify="right", no_wrap=True)
-        if not self.tracks:
-            table.add_row(
-                Text(" ", style="dim"),
-                Text(
-                    "No subtitles loaded. Press F6 or launch with --fetch-subs.",
-                    style="dim",
-                ),
-                Text("-"),
-                Text("0ms"),
-                Text("0"),
-                Text("0.0s"),
-                Text("0.0s"),
-            )
-            return table
-        for index, track in enumerate(self.tracks):
-            cue_label = "-"
-            if track.cues:
-                cue_label = f"{self.cue_indices[index] + 1}/{len(track.cues)}"
-            selected = index == self.track_index
-            marker_style = "bold yellow" if selected else "dim"
-            candidate_style = "bold cyan" if selected else ""
-            # The LID column was removed to save horizontal real estate; the
-            # only language signal we surface inline is a red NON-JA tag, so
-            # foreign subs are still obvious at a glance without dedicating a
-            # column to the full bucket taxonomy.
-            candidate_cell = Text()
-            if (
-                track.language_analysis is not None
-                and track.language_analysis.language is SubtitleLanguage.NON_JAPANESE
-            ):
-                candidate_cell.append("NON-JA ", style="bold red")
-            candidate_cell.append(track.label, style=candidate_style)
-            table.add_row(
-                Text(">" if selected else " ", style=marker_style),
-                candidate_cell,
-                Text(cue_label, style="bold" if selected else ""),
-                Text(
-                    track.timing_offset_label,
-                    style="bold magenta" if selected and track.timing_offset_s else "dim",
-                ),
-                Text(str(len(track.cues))),
-                Text(format_duration(track.active_s)),
-                Text(format_duration(track.end_s)),
-            )
-        return table
 
-    def sort_tracks_by_language(self) -> None:
-        """Apply opt-in stable LID ordering while retaining track cue state."""
+    def sort_tracks_by_language(self, *, preserve_selection: bool = False) -> None:
+        """Apply opt-in LID ordering, preferring embedded timing fit when present."""
 
-        if not self.sort_by_language or len(self.tracks) < 2:
+        if (not self.sort_by_language and self.ground_truth_track is None) or len(self.tracks) < 2:
             return
 
-        selected_track = self.track if self.tracks else None
+        selected_track = self.track if preserve_selection and self.tracks else None
         cue_by_identity = {
             id(track): self.cue_indices[index]
             for index, track in enumerate(self.tracks)
         }
-        self.tracks.sort(key=lambda track: track.language_sort_key)
+        if self.ground_truth_track is None:
+            self.tracks.sort(key=lambda track: track.language_sort_key)
+        else:
+            self.tracks.sort(
+                key=lambda track: (
+                    -subtitle_anchor_fit_score(self.ground_truth_track.cues, track.cues),
+                    track.language_sort_key,
+                )
+            )
         self.cue_indices = [
             cue_by_identity.get(id(track), 0) for track in self.tracks
         ]
         if selected_track is not None:
             self.track_index = self.tracks.index(selected_track)
+        else:
+            self.track_index = 0
 
     def _timeline_title(self) -> str:
         """Play-window header: stem only, with the SRT UUID prefixed only when
@@ -327,6 +297,11 @@ class SubsyncTuiApp(SubsyncInteractionMixin, SubsyncRemoteMixin, App[None]):
         if collisions > 1 and track.subtitle_id:
             return f"{track.subtitle_id}-{stem}"
         return stem
+
+    def _ground_truth_title(self) -> str:
+        if self.ground_truth_track is None:
+            return "embedded"
+        return f"embedded {self.ground_truth_track.label}"
 
     def render_active_cue(self) -> Panel:
         if not self.tracks:
@@ -352,12 +327,6 @@ class SubsyncTuiApp(SubsyncInteractionMixin, SubsyncRemoteMixin, App[None]):
 
     def render_help(self) -> str:
         pending = "  g..." if self._pending_g else ""
-        # The bottom bar only lists the bindings that are easy to forget.
-        # Vim-style movement (hjkl/gg/G), space, and q are obvious enough to
-        # live in the F1 help modal, and the F-key bindings (F1/F6/F7) are
-        # already auto-rendered by Textual's Footer from BINDINGS, so listing
-        # them here would just duplicate that row. Playback state lives next
-        # to the current cue's timespan (see render_active_cue), not here.
         promote = "p promote" if self.promotion_target is not None else "promotion disabled"
         return (
             "Ctrl-f/b page  Ctrl-d/u half-page  +/- zoom  Ctrl-c copy  "
