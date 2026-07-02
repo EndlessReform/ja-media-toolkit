@@ -44,6 +44,8 @@ from ja_media_core.audio_library import (
     ManifestEpisode,
     MaterializationPlan,
     SourceMediaProbe,
+    SubtitleArtifactRecord,
+    SubtitleStreamProbe,
 )
 from ja_media_core.audio_manifest import (
     MANIFEST_KIND,
@@ -61,6 +63,8 @@ from ja_media_core.anime_audio import (
     AnimeAudioInventorySeries,
     AnimeAudioNotFoundError,
     AnimeAudioSeries,
+    AnimeAudioSubtitle,
+    AnimeAudioSubtitleContent,
     HttpAnimeAudioClient,
 )
 from ja_media_core.config import (
@@ -171,6 +175,8 @@ __all__ = [
     "AnimeAudioNotFoundError",
     "AnimeAudioSeries",
     "AnimeAudioSeriesMetadata",
+    "AnimeAudioSubtitle",
+    "AnimeAudioSubtitleContent",
     "AniListSearchClient",
     "AudioChunk",
     "AudioFormat",
@@ -221,7 +227,9 @@ __all__ = [
     "SCHEMA_VERSION",
     "SpeechSpan",
     "SourceMediaProbe",
+    "SubtitleArtifactRecord",
     "SubtitleCandidate",
+    "SubtitleStreamProbe",
     "SubtitleCue",
     "SubtitleConfig",
     "SubtitleLanguage",

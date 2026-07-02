@@ -1,0 +1,21 @@
+FROM node:20-alpine AS build
+
+ARG METAFLOW_UI_REF=v1.3.13
+
+WORKDIR /src
+RUN apk add --no-cache git
+RUN git clone --depth 1 --branch "${METAFLOW_UI_REF}" https://github.com/Netflix/metaflow-ui.git .
+RUN yarn --frozen-lockfile --network-timeout 1000000
+RUN yarn build
+
+FROM nginx:1.27-alpine
+
+ENV PORT=3000
+ENV METAFLOW_SERVICE=/api
+ENV METAFLOW_HEAD=''
+ENV METAFLOW_BODY_BEFORE=''
+ENV METAFLOW_BODY_AFTER=''
+ENV MF_DEFAULT_TIME_FILTER_DAYS=''
+
+COPY --from=build /src/build /usr/share/nginx/html
+COPY --from=build /src/nginx.conf.template /etc/nginx/templates/default.conf.template

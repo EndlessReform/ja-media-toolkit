@@ -12,6 +12,7 @@ def manifest(
     title: str = "Example",
     artifact_path: str = "S01E001.m4a",
     episode_key: str = "1",
+    subtitles: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     return {
         "schema_version": 1,
@@ -72,6 +73,7 @@ def manifest(
                     "sample_rate_hz": 48000,
                     "sha256": "abc",
                 },
+                "subtitles": subtitles or [],
                 "created_at": "2026-06-01T00:00:00+00:00",
             }
         ],
@@ -91,6 +93,10 @@ def write_series(
     if write_artifact:
         artifact = str(data["episodes"][0]["artifact"]["relative_path"])  # type: ignore[index]
         (series / artifact).write_bytes(b"audio-bytes")
+        for subtitle in data["episodes"][0].get("subtitles", []):  # type: ignore[index, union-attr]
+            path = series / str(subtitle["relative_path"])  # type: ignore[index]
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("1\n00:00:00,000 --> 00:00:01,000\nHello\n", encoding="utf-8")
     path = series / ".ja-media.json"
     path.write_text(json.dumps(data), encoding="utf-8")
     return path

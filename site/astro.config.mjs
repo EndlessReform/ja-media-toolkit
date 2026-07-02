@@ -25,6 +25,13 @@ export default defineConfig({
 					items: [{ autogenerate: { directory: 'guides' } }],
 				},
 				{
+					label: 'Services',
+					items: [
+						{ label: 'Overview', link: '/guides/services/' },
+						{ autogenerate: { directory: 'services' } },
+					],
+				},
+				{
 					label: 'Reference',
 					items: [{ autogenerate: { directory: 'reference' } }],
 				},

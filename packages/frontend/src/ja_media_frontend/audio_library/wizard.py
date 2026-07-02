@@ -25,6 +25,7 @@ from ja_media_frontend.audio_library.discovery import (
     discover_media,
     identity_search_query,
     probe_media,
+    text_subtitle_streams,
 )
 from ja_media_frontend.audio_library.manifest import (
     load_manifest,
@@ -42,6 +43,7 @@ from ja_media_frontend.audio_library.metadata import (
     download_cover,
     normalize_anilist_metadata,
 )
+from ja_media_frontend.audio_library.subtitles import materialize_episode_subtitles
 
 
 class WizardPrompts(Protocol):
@@ -80,6 +82,7 @@ class IngestWizardRequest:
     anilist_id: int | None = None
     audio_stream_ordinal: int | None = None
     preferred_languages: tuple[str, ...] = ("jpn", "ja")
+    extract_subtitles: bool = True
 
 
 @dataclass(frozen=True)
@@ -117,7 +120,17 @@ def build_ingest_plan(request: IngestWizardRequest) -> MaterializationPlan | Non
         if stream is None:
             request.prompts.notice(f"Excluded {source.path.name}: no audio stream selected.")
             continue
-        mappings.append(EpisodeMapping(episode_key=key, source=source, stream=stream))
+        subtitle_streams = (
+            text_subtitle_streams(source) if request.extract_subtitles else ()
+        )
+        mappings.append(
+            EpisodeMapping(
+                episode_key=key,
+                source=source,
+                stream=stream,
+                subtitle_streams=subtitle_streams,
+            )
+        )
     if not mappings:
         raise ValueError("no episodes were approved for ingest")
 
@@ -170,6 +183,18 @@ def execute_ingest_plan(
         try:
             if _can_resume(existing, mapping, plan, destination, resume):
                 verify_audio_artifact(destination, plan.profile)
+                subtitles = materialize_episode_subtitles(
+                    mapping,
+                    series_dir,
+                    resume=resume,
+                    replace_existing=replace_existing,
+                    notice=notice,
+                )
+                manifest = _with_episode(
+                    manifest,
+                    replace(existing, subtitles=subtitles or existing.subtitles),
+                )
+                write_manifest_atomic(manifest_path, manifest)
                 skipped.append(filename)
                 continue
             if destination.exists() and not replace_existing:
@@ -179,6 +204,13 @@ def execute_ingest_plan(
                 )
             artifact = materialize_episode(
                 mapping, destination, plan.series, plan.profile
+            )
+            subtitles = materialize_episode_subtitles(
+                mapping,
+                series_dir,
+                resume=resume,
+                replace_existing=replace_existing,
+                notice=notice,
             )
             episode = ManifestEpisode(
                 episode_key=mapping.episode_key,
@@ -193,6 +225,7 @@ def execute_ingest_plan(
                 audio_language=mapping.stream.language,
                 artifact=artifact,
                 created_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+                subtitles=subtitles,
             )
             manifest = _with_episode(manifest, episode)
             write_manifest_atomic(manifest_path, manifest)

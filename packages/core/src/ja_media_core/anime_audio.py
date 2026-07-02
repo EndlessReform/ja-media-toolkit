@@ -4,9 +4,17 @@ from __future__ import annotations
 
 import os
 import urllib.parse
-from dataclasses import dataclass
 from typing import Any, Protocol
 
+from ja_media_core.anime_audio_models import (
+    AnimeAudioArtifact,
+    AnimeAudioEpisode,
+    AnimeAudioInventory,
+    AnimeAudioInventorySeries,
+    AnimeAudioSeries,
+    AnimeAudioSubtitle,
+    AnimeAudioSubtitleContent,
+)
 from ja_media_core.http import ServiceHttpClient, ServiceHttpError
 from ja_media_core.services import service_base_url
 
@@ -16,121 +24,6 @@ ANIME_AUDIO_GATEWAY_PATH = "/api/v1/audio"
 
 class AnimeAudioNotFoundError(LookupError):
     """The requested indexed anime-audio resource does not exist."""
-
-
-@dataclass(frozen=True)
-class AnimeAudioArtifact:
-    """One verified derived-audio artifact exposed by stable identity."""
-
-    anilist_id: int
-    episode_key: str
-    profile: str
-    filename: str
-    size_bytes: int
-    duration_ms: int
-    codec: str
-    bitrate_bps: int | None
-    channels: int
-    sample_rate_hz: int
-    sha256: str | None
-    created_at: str
-    content_url: str
-
-    @classmethod
-    def from_mapping(cls, data: dict[str, Any]) -> AnimeAudioArtifact:
-        return cls(**data)
-
-
-@dataclass(frozen=True)
-class AnimeAudioEpisode:
-    """One indexed episode and its available profile artifacts."""
-
-    anilist_id: int
-    episode_key: str
-    artifacts: tuple[AnimeAudioArtifact, ...]
-
-    @classmethod
-    def from_mapping(cls, data: dict[str, Any]) -> AnimeAudioEpisode:
-        return cls(
-            anilist_id=int(data["anilist_id"]),
-            episode_key=str(data["episode_key"]),
-            artifacts=tuple(
-                AnimeAudioArtifact.from_mapping(item) for item in data.get("artifacts", ())
-            ),
-        )
-
-
-@dataclass(frozen=True)
-class AnimeAudioSeries:
-    """Indexed series summary derived from its authoritative manifest."""
-
-    anilist_id: int
-    title: str
-    title_english: str | None
-    title_native: str | None
-    title_romaji: str | None
-    profile: str
-    episode_count: int
-    artifact_count: int
-
-    @classmethod
-    def from_mapping(cls, data: dict[str, Any]) -> AnimeAudioSeries:
-        return cls(**data)
-
-
-@dataclass(frozen=True)
-class AnimeAudioInventorySeries:
-    """One series entry in a complete inventory projection."""
-
-    anilist_id: int
-    title: str
-    title_english: str | None
-    title_native: str | None
-    title_romaji: str | None
-    profile: str
-    episode_count: int
-    artifact_count: int
-    episode_keys: tuple[str, ...]
-    artifact_profiles: tuple[str, ...]
-
-    @classmethod
-    def from_mapping(cls, data: dict[str, Any]) -> AnimeAudioInventorySeries:
-        return cls(
-            anilist_id=int(data["anilist_id"]),
-            title=str(data["title"]),
-            title_english=data.get("title_english"),
-            title_native=data.get("title_native"),
-            title_romaji=data.get("title_romaji"),
-            profile=str(data["profile"]),
-            episode_count=int(data["episode_count"]),
-            artifact_count=int(data["artifact_count"]),
-            episode_keys=tuple(str(key) for key in data.get("episode_keys", ())),
-            artifact_profiles=tuple(
-                str(profile) for profile in data.get("artifact_profiles", ())
-            ),
-        )
-
-
-@dataclass(frozen=True)
-class AnimeAudioInventory:
-    """Bounded top-level counts plus every indexed series."""
-
-    series_count: int
-    episode_count: int
-    artifact_count: int
-    series: tuple[AnimeAudioInventorySeries, ...]
-
-    @classmethod
-    def from_mapping(cls, data: dict[str, Any]) -> AnimeAudioInventory:
-        return cls(
-            series_count=int(data["series_count"]),
-            episode_count=int(data["episode_count"]),
-            artifact_count=int(data["artifact_count"]),
-            series=tuple(
-                AnimeAudioInventorySeries.from_mapping(item)
-                for item in data.get("series", ())
-            ),
-        )
 
 
 class AnimeAudioClient(Protocol):
@@ -157,6 +50,23 @@ class AnimeAudioClient(Protocol):
         *,
         profile: str = "portable-aac-v1",
     ) -> bytes: ...
+
+    def subtitles(
+        self, anilist_id: int, episode_key: str
+    ) -> tuple[AnimeAudioSubtitle, ...]: ...
+
+    def subtitle_content(
+        self, anilist_id: int, episode_key: str, subtitle_id: str
+    ) -> bytes: ...
+
+    def subtitle_contents(
+        self,
+        anilist_id: int,
+        episode_key: str,
+        *,
+        subtitle_ids: tuple[str, ...] = (),
+        get_all: bool = False,
+    ) -> tuple[AnimeAudioSubtitleContent, ...]: ...
 
 
 class HttpAnimeAudioClient:
@@ -223,11 +133,61 @@ class HttpAnimeAudioClient:
             self._raise_not_found(exc, anilist_id, episode_key, profile)
             raise
 
+    def subtitles(
+        self, anilist_id: int, episode_key: str
+    ) -> tuple[AnimeAudioSubtitle, ...]:
+        path = self._subtitles_path(anilist_id, episode_key)
+        try:
+            payload = self._http.get_json(path)
+        except ServiceHttpError as exc:
+            self._raise_episode_not_found(exc, anilist_id, episode_key)
+            raise
+        if not isinstance(payload, list):
+            raise RuntimeError("Anime audio subtitles response was not a list")
+        return tuple(AnimeAudioSubtitle.from_mapping(item) for item in payload)
+
+    def subtitle_content(
+        self, anilist_id: int, episode_key: str, subtitle_id: str
+    ) -> bytes:
+        path = (
+            f"{self._subtitles_path(anilist_id, episode_key)}/"
+            f"{urllib.parse.quote(subtitle_id, safe='')}/content"
+        )
+        try:
+            return self._http.get_bytes(path)
+        except ServiceHttpError as exc:
+            self._raise_subtitle_not_found(exc, anilist_id, episode_key, subtitle_id)
+            raise
+
+    def subtitle_contents(
+        self,
+        anilist_id: int,
+        episode_key: str,
+        *,
+        subtitle_ids: tuple[str, ...] = (),
+        get_all: bool = False,
+    ) -> tuple[AnimeAudioSubtitleContent, ...]:
+        query = _subtitle_content_query(subtitle_ids=subtitle_ids, get_all=get_all)
+        path = f"{self._subtitles_path(anilist_id, episode_key)}/content{query}"
+        try:
+            payload = self._http.get_json(path)
+        except ServiceHttpError as exc:
+            self._raise_episode_not_found(exc, anilist_id, episode_key)
+            raise
+        if not isinstance(payload, list):
+            raise RuntimeError("Anime audio subtitle content response was not a list")
+        return tuple(AnimeAudioSubtitleContent.from_mapping(item) for item in payload)
+
     @staticmethod
     def _artifact_path(anilist_id: int, episode_key: str, profile: str) -> str:
         episode = urllib.parse.quote(episode_key, safe="")
         encoded_profile = urllib.parse.quote(profile, safe="")
         return f"/series/{anilist_id}/episodes/{episode}/artifacts/{encoded_profile}"
+
+    @staticmethod
+    def _subtitles_path(anilist_id: int, episode_key: str) -> str:
+        episode = urllib.parse.quote(episode_key, safe="")
+        return f"/series/{anilist_id}/episodes/{episode}/subtitles"
 
     @staticmethod
     def _object(payload: object) -> dict[str, Any]:
@@ -248,3 +208,45 @@ class HttpAnimeAudioClient:
             "No derived anime audio artifact for "
             f"AniList {anilist_id}, episode {episode_key!r}, profile {profile!r}"
         ) from exc
+
+    @staticmethod
+    def _raise_episode_not_found(
+        exc: ServiceHttpError,
+        anilist_id: int,
+        episode_key: str,
+    ) -> None:
+        if exc.status_code != 404:
+            return
+        raise AnimeAudioNotFoundError(
+            f"No indexed anime audio episode for AniList {anilist_id}, "
+            f"episode {episode_key!r}"
+        ) from exc
+
+    @staticmethod
+    def _raise_subtitle_not_found(
+        exc: ServiceHttpError,
+        anilist_id: int,
+        episode_key: str,
+        subtitle_id: str,
+    ) -> None:
+        if exc.status_code != 404:
+            return
+        raise AnimeAudioNotFoundError(
+            "No embedded subtitle for "
+            f"AniList {anilist_id}, episode {episode_key!r}, "
+            f"subtitle {subtitle_id!r}"
+        ) from exc
+
+
+def _subtitle_content_query(
+    *,
+    subtitle_ids: tuple[str, ...],
+    get_all: bool,
+) -> str:
+    if get_all:
+        return "?getall=true"
+    if not subtitle_ids:
+        raise ValueError("Pass at least one subtitle_id or get_all=True")
+    return "?" + urllib.parse.urlencode(
+        [("id", subtitle_id) for subtitle_id in subtitle_ids]
+    )

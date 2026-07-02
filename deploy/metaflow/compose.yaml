@@ -1,0 +1,141 @@
+services:
+  caddy:
+    image: ${CADDY_IMAGE:-caddy:2.8-alpine}
+    restart: unless-stopped
+    ports:
+      - "${CADDY_BIND_ADDR:-0.0.0.0}:${CADDY_UI_PORT:-80}:${CADDY_UI_PORT:-80}"
+      - "${CADDY_BIND_ADDR:-0.0.0.0}:${CADDY_METADATA_PORT:-8080}:${CADDY_METADATA_PORT:-8080}"
+    environment:
+      CADDY_UI_PORT: ${CADDY_UI_PORT:-80}
+      CADDY_METADATA_PORT: ${CADDY_METADATA_PORT:-8080}
+    volumes:
+      - type: bind
+        source: ./Caddyfile
+        target: /etc/caddy/Caddyfile
+        read_only: true
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      metadata:
+        condition: service_healthy
+      ui-backend:
+        condition: service_started
+      ui:
+        condition: service_started
+
+  postgres:
+    image: ${POSTGRES_IMAGE:-postgres:15-alpine}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-metaflow}
+      POSTGRES_USER: ${POSTGRES_USER:-metaflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    command:
+      - postgres
+      - -c
+      - log_statement=none
+      - -c
+      - wal_level=logical
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  migration:
+    image: ${METAFLOW_SERVICE_IMAGE:-metaflow-metadata-service:local}
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+      args:
+        METAFLOW_SERVICE_BASE_IMAGE: ${METAFLOW_SERVICE_BASE_IMAGE:-netflixoss/metaflow_metadata_service:latest}
+    restart: "no"
+    command: ["python3", "/root/run_goose.py"]
+    environment: &metaflow_db_env
+      MF_METADATA_DB_HOST: postgres
+      MF_METADATA_DB_PORT: "5432"
+      MF_METADATA_DB_USER: ${POSTGRES_USER:-metaflow}
+      MF_METADATA_DB_PSWD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      MF_METADATA_DB_NAME: ${POSTGRES_DB:-metaflow}
+      MF_METADATA_PORT: ${MF_METADATA_PORT:-8080}
+      MF_METADATA_HOST: 0.0.0.0
+      MF_MIGRATION_PORT: ${MF_MIGRATION_PORT:-8082}
+      MF_MIGRATION_ENDPOINTS_ENABLED: "1"
+      LOGLEVEL: ${LOGLEVEL:-INFO}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  metadata:
+    image: ${METAFLOW_SERVICE_IMAGE:-metaflow-metadata-service:local}
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+      args:
+        METAFLOW_SERVICE_BASE_IMAGE: ${METAFLOW_SERVICE_BASE_IMAGE:-netflixoss/metaflow_metadata_service:latest}
+    restart: unless-stopped
+    command: ["/opt/latest/bin/metadata_service"]
+    environment:
+      <<: *metaflow_db_env
+      DB_TRIGGER_CREATE: "0"
+    depends_on:
+      migration:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS \"http://localhost:$${MF_METADATA_PORT}/ping\" | grep -q pong"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  ui-backend:
+    image: ${METAFLOW_SERVICE_IMAGE:-metaflow-metadata-service:local}
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+      args:
+        METAFLOW_SERVICE_BASE_IMAGE: ${METAFLOW_SERVICE_BASE_IMAGE:-netflixoss/metaflow_metadata_service:latest}
+    restart: unless-stopped
+    command: ["/opt/latest/bin/ui_backend_service"]
+    environment:
+      <<: *metaflow_db_env
+      MF_UI_METADATA_PORT: ${MF_UI_METADATA_PORT:-8083}
+      MF_UI_METADATA_HOST: 0.0.0.0
+      DB_TRIGGER_CREATE: "1"
+      UI_ENABLED: "0"
+      METAFLOW_DEFAULT_DATASTORE: ${METAFLOW_DEFAULT_DATASTORE:-local}
+      METAFLOW_DATASTORE_SYSROOT_S3: ${METAFLOW_DATASTORE_SYSROOT_S3:-}
+      METAFLOW_S3_ENDPOINT_URL: ${METAFLOW_S3_ENDPOINT_URL:-}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-garage}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      PREFETCH_RUNS_SINCE: ${PREFETCH_RUNS_SINCE:-2592000}
+      PREFETCH_RUNS_LIMIT: ${PREFETCH_RUNS_LIMIT:-25}
+      FEATURE_S3_DISABLE: ${FEATURE_S3_DISABLE:-1}
+      FEATURE_ARTIFACT_SEARCH: "1"
+      FEATURE_FOREACH_VAR_SEARCH: "1"
+      FEATURE_ARTIFACT_TABLE: "1"
+    depends_on:
+      metadata:
+        condition: service_healthy
+
+  ui:
+    image: ${METAFLOW_UI_IMAGE:-metaflow-ui:local}
+    build:
+      context: .
+      dockerfile: Dockerfile.ui
+      args:
+        METAFLOW_UI_REF: ${METAFLOW_UI_REF:-v1.3.13}
+    restart: unless-stopped
+    environment:
+      PORT: ${MF_UI_FRONTEND_PORT:-3000}
+      METAFLOW_SERVICE: /api
+    depends_on:
+      ui-backend:
+        condition: service_started
+
+volumes:
+  caddy-config:
+  caddy-data:
+  postgres-data:

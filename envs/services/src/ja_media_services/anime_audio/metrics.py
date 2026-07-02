@@ -16,6 +16,7 @@ def render_metrics(state: dict[str, Any]) -> bytes:
         ("anime_audio_index_ready", "Whether the index can serve reads.", int(state["ready"])),
         ("anime_audio_series_total", "Indexed anime series.", state["series_count"]),
         ("anime_audio_artifacts_total", "Indexed audio artifacts.", state["artifact_count"]),
+        ("anime_audio_subtitles_total", "Indexed embedded subtitle artifacts.", state["subtitle_count"]),
         (
             "anime_audio_reconciliation_errors",
             "Current manifest or artifact reconciliation errors.",

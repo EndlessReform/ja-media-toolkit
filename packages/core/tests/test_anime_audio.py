@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import unittest
 from unittest.mock import patch
 
@@ -7,6 +8,7 @@ from ja_media_core.anime_audio import (
     AnimeAudioInventory,
     AnimeAudioInventorySeries,
     AnimeAudioNotFoundError,
+    AnimeAudioSubtitleContent,
     HttpAnimeAudioClient,
 )
 from ja_media_core.config import JaMediaConfig, ServicesConfig
@@ -49,6 +51,7 @@ class AnimeAudioClientTest(unittest.TestCase):
                     "profile": "portable-aac-v1",
                     "episode_count": 1,
                     "artifact_count": 1,
+                    "subtitle_count": 2,
                 },
                 {
                     "anilist_id": 1,
@@ -71,6 +74,7 @@ class AnimeAudioClientTest(unittest.TestCase):
             artifact = client.artifact(1, "1")
 
         self.assertEqual(series.title, "Example")
+        self.assertEqual(series.subtitle_count, 2)
         self.assertEqual(artifact.filename, "S01E001.m4a")
 
     def test_content_path_encodes_identity_components(self) -> None:
@@ -81,6 +85,63 @@ class AnimeAudioClientTest(unittest.TestCase):
         self.assertEqual(content, b"audio")
         get_bytes.assert_called_once_with(
             "/series/1/episodes/SP%201/artifacts/portable%2Faac/content"
+        )
+
+    def test_subtitle_paths_and_bulk_content(self) -> None:
+        client = HttpAnimeAudioClient("http://audio")
+        subtitle = {
+            "anilist_id": 1,
+            "episode_key": "SP 1",
+            "subtitle_id": "stream-3",
+            "language": "eng",
+            "title": "English",
+            "codec": "ass",
+            "default": True,
+            "filename": "_subs/S01E001.stream-3.eng.srt",
+            "size_bytes": 10,
+            "source_stream_index": 3,
+            "source_stream_ordinal": 0,
+            "sha256": None,
+            "content_url": "/content",
+        }
+        with patch.object(client._http, "get_json", return_value=[subtitle]) as get_json:
+            subtitles = client.subtitles(1, "SP 1")
+
+        self.assertEqual(subtitles[0].subtitle_id, "stream-3")
+        get_json.assert_called_once_with("/series/1/episodes/SP%201/subtitles")
+
+        with patch.object(client._http, "get_bytes", return_value=b"srt") as get_bytes:
+            content = client.subtitle_content(1, "SP 1", "stream/3")
+
+        self.assertEqual(content, b"srt")
+        get_bytes.assert_called_once_with(
+            "/series/1/episodes/SP%201/subtitles/stream%2F3/content"
+        )
+
+        payload = [
+            {
+                "subtitle": subtitle,
+                "content_base64": base64.b64encode(b"srt").decode("ascii"),
+            }
+        ]
+        with patch.object(client._http, "get_json", return_value=payload) as get_json:
+            bulk = client.subtitle_contents(
+                1,
+                "SP 1",
+                subtitle_ids=("stream-4", "stream-3"),
+            )
+
+        self.assertIsInstance(bulk[0], AnimeAudioSubtitleContent)
+        self.assertEqual(bulk[0].content, b"srt")
+        get_json.assert_called_once_with(
+            "/series/1/episodes/SP%201/subtitles/content?id=stream-4&id=stream-3"
+        )
+
+        with patch.object(client._http, "get_json", return_value=payload) as get_json:
+            client.subtitle_contents(1, "SP 1", get_all=True)
+
+        get_json.assert_called_once_with(
+            "/series/1/episodes/SP%201/subtitles/content?getall=true"
         )
 
     def test_service_errors_remain_meaningful(self) -> None:
@@ -119,6 +180,7 @@ class AnimeAudioClientTest(unittest.TestCase):
             "series_count": 2,
             "episode_count": 3,
             "artifact_count": 4,
+            "subtitle_count": 3,
             "series": [
                 {
                     "anilist_id": 2,
@@ -129,8 +191,10 @@ class AnimeAudioClientTest(unittest.TestCase):
                     "profile": "portable-aac-v1",
                     "episode_count": 2,
                     "artifact_count": 2,
+                    "subtitle_count": 2,
                     "episode_keys": ["1", "10"],
                     "artifact_profiles": ["portable-aac-v1"],
+                    "subtitle_languages": ["eng", "kor"],
                 },
                 {
                     "anilist_id": 10,
@@ -141,11 +205,13 @@ class AnimeAudioClientTest(unittest.TestCase):
                     "profile": "portable-aac-v1",
                     "episode_count": 1,
                     "artifact_count": 2,
+                    "subtitle_count": 1,
                     "episode_keys": ["1"],
                     "artifact_profiles": [
                         "portable-aac-v1",
                         "portable-opus-v1",
                     ],
+                    "subtitle_languages": ["eng"],
                 },
             ],
         }
@@ -156,12 +222,14 @@ class AnimeAudioClientTest(unittest.TestCase):
         self.assertEqual(inventory.series_count, 2)
         self.assertEqual(inventory.episode_count, 3)
         self.assertEqual(inventory.artifact_count, 4)
+        self.assertEqual(inventory.subtitle_count, 3)
         self.assertEqual(len(inventory.series), 2)
         first = inventory.series[0]
         self.assertIsInstance(first, AnimeAudioInventorySeries)
         self.assertEqual(first.anilist_id, 2)
         self.assertEqual(first.episode_keys, ("1", "10"))
         self.assertEqual(first.artifact_profiles, ("portable-aac-v1",))
+        self.assertEqual(first.subtitle_languages, ("eng", "kor"))
         second = inventory.series[1]
         self.assertEqual(second.artifact_profiles, ("portable-aac-v1", "portable-opus-v1"))
 
@@ -170,6 +238,7 @@ class AnimeAudioClientTest(unittest.TestCase):
             {"series_count": 0, "episode_count": 0, "artifact_count": 0, "series": []}
         )
         self.assertEqual(inventory.series, ())
+        self.assertEqual(inventory.subtitle_count, 0)
 
 
 if __name__ == "__main__":

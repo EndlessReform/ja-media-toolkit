@@ -6,7 +6,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = "2"
+SCHEMA_VERSION = "3"
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
@@ -55,6 +55,22 @@ def initialize(db_path: Path) -> sqlite3.Connection:
           created_at TEXT NOT NULL,
           PRIMARY KEY (anilist_id, episode_key, profile)
         );
+        CREATE TABLE IF NOT EXISTS subtitle (
+          anilist_id INTEGER NOT NULL REFERENCES series(anilist_id) ON DELETE CASCADE,
+          episode_key TEXT NOT NULL,
+          subtitle_id TEXT NOT NULL,
+          language TEXT,
+          title TEXT,
+          codec TEXT NOT NULL,
+          is_default INTEGER NOT NULL,
+          relative_path TEXT NOT NULL,
+          size_bytes INTEGER NOT NULL,
+          source_stream_index INTEGER NOT NULL,
+          source_stream_ordinal INTEGER NOT NULL,
+          sha256 TEXT,
+          created_at TEXT NOT NULL,
+          PRIMARY KEY (anilist_id, episode_key, subtitle_id)
+        );
         CREATE TABLE IF NOT EXISTS reconciliation_error (
           manifest_path TEXT NOT NULL,
           error_code TEXT NOT NULL,
@@ -84,6 +100,7 @@ def stats(connection: sqlite3.Connection) -> dict[str, Any]:
         "ready": metadata.get("ready") == "1",
         "series_count": count_rows(connection, "series"),
         "artifact_count": count_rows(connection, "artifact"),
+        "subtitle_count": count_rows(connection, "subtitle"),
         "error_count": count_rows(connection, "reconciliation_error"),
         "last_attempt": metadata.get("last_attempt"),
         "last_success": metadata.get("last_success"),
@@ -96,67 +113,6 @@ def stats(connection: sqlite3.Connection) -> dict[str, Any]:
             metadata.get("incremental_scan_failures", "0")
         ),
         "refresh_failures": int(metadata.get("refresh_failures", "0")),
-    }
-
-
-def fetch_inventory(connection: sqlite3.Connection) -> dict[str, Any]:
-    """Project the complete index as a path-free inventory snapshot.
-
-    Series are ordered by ``anilist_id``; episode keys and artifact profiles
-    within each series preserve the same ordering used by point lookups. The
-    result reuses the same SQLite snapshot as ``fetch_series`` and
-    ``fetch_artifacts`` so consumers see a consistent projection.
-    """
-
-    series_rows = connection.execute(
-        "SELECT * FROM series ORDER BY anilist_id"
-    ).fetchall()
-    artifact_rows = connection.execute(
-        """
-        SELECT anilist_id, episode_key, profile FROM artifact
-        ORDER BY anilist_id, CAST(episode_key AS INTEGER), episode_key, profile
-        """
-    ).fetchall()
-
-    grouped: dict[int, dict[str, Any]] = {}
-    for row in artifact_rows:
-        aid = int(row["anilist_id"])
-        bucket = grouped.setdefault(aid, {"episodes": {}, "profiles": {}, "artifacts": 0})
-        bucket["artifacts"] += 1
-        bucket["episodes"][str(row["episode_key"])] = None
-        bucket["profiles"][str(row["profile"])] = None
-
-    series_list: list[dict[str, Any]] = []
-    total_episodes = 0
-    total_artifacts = 0
-    for row in series_rows:
-        aid = int(row["anilist_id"])
-        bucket = grouped.get(aid)
-        episode_keys = tuple(bucket["episodes"]) if bucket else ()
-        profiles = tuple(bucket["profiles"]) if bucket else ()
-        episode_count = len(episode_keys)
-        artifact_count = bucket["artifacts"] if bucket else 0
-        total_episodes += episode_count
-        total_artifacts += artifact_count
-        series_list.append(
-            {
-                "anilist_id": aid,
-                "title": str(row["title"]),
-                "title_english": row["title_english"],
-                "title_native": row["title_native"],
-                "title_romaji": row["title_romaji"],
-                "profile": str(row["profile"]),
-                "episode_count": episode_count,
-                "artifact_count": artifact_count,
-                "episode_keys": episode_keys,
-                "artifact_profiles": profiles,
-            }
-        )
-    return {
-        "series_count": len(series_list),
-        "episode_count": total_episodes,
-        "artifact_count": total_artifacts,
-        "series": series_list,
     }
 
 
@@ -173,6 +129,10 @@ def fetch_series(connection: sqlite3.Connection, anilist_id: int) -> dict[str, A
         """,
         (anilist_id,),
     ).fetchone()
+    subtitle_count = connection.execute(
+        "SELECT COUNT(*) FROM subtitle WHERE anilist_id = ?",
+        (anilist_id,),
+    ).fetchone()[0]
     return {
         "anilist_id": int(row["anilist_id"]),
         "title": str(row["title"]),
@@ -182,6 +142,7 @@ def fetch_series(connection: sqlite3.Connection, anilist_id: int) -> dict[str, A
         "profile": str(row["profile"]),
         "episode_count": int(counts["episodes"]),
         "artifact_count": int(counts["artifacts"]),
+        "subtitle_count": int(subtitle_count),
     }
 
 

@@ -1,12 +1,14 @@
 ---
 title: Anime Audio Service
-description: Index and retrieve derived anime audio by AniList and episode identity.
+description: Index and retrieve derived anime audio and embedded subtitles by identity.
 ---
 
 The Anime Audio service indexes the `.ja-media.json` manifests produced by the
 audio-library tool. Manifests remain authoritative: the SQLite index is a
 rebuildable lookup cache, and Audiobookshelf remains a consumer of the same
-files rather than a metadata source.
+files rather than a metadata source. Embedded text subtitles extracted during
+ingest are indexed beside the audio artifacts so tools can fetch timing
+references without scanning the media library.
 
 The gateway prefix is `/api/v1/audio`.
 
@@ -43,6 +45,10 @@ GET  /series/{anilist_id}/episodes
 GET  /series/{anilist_id}/episodes/{episode_key}
 GET  /series/{anilist_id}/episodes/{episode_key}/artifacts/{profile}
 GET  /series/{anilist_id}/episodes/{episode_key}/artifacts/{profile}/content
+GET  /series/{anilist_id}/episodes/{episode_key}/subtitles
+GET  /series/{anilist_id}/episodes/{episode_key}/subtitles/{subtitle_id}/content
+GET  /series/{anilist_id}/episodes/{episode_key}/subtitles/content?id=stream-3&id=stream-4
+GET  /series/{anilist_id}/episodes/{episode_key}/subtitles/content?getall=true
 POST /reconcile
 GET  /healthz
 GET  /metrics
@@ -54,9 +60,20 @@ supports ordinary range requests for seeking.
 
 `GET /inventory` projects the complete index in one payload: bounded top-level
 counts plus every indexed series with its episode keys and available artifact
-profiles. Series are ordered by AniList ID; episode keys are sorted numerically
-and profiles alphabetically. The initial library is small enough that
-pagination is unnecessary.
+profiles, subtitle count, and subtitle languages. Series are ordered by AniList
+ID; episode keys are sorted numerically and profiles alphabetically. The
+initial library is small enough that pagination is unnecessary.
+
+Episode responses include a `subtitles` array. Subtitle IDs are stable source
+stream IDs such as `stream-3`, and each subtitle row includes language, title,
+codec, source stream index, size, checksum, and `content_url`. The service
+advertises every extracted text subtitle, including Japanese tracks; clients
+choose their own default policy.
+
+The bulk subtitle content endpoint returns JSON records with the public
+subtitle metadata and `content_base64`. Use repeated `id` query parameters to
+fetch selected tracks, or `getall=true` to fetch every subtitle for the
+episode.
 
 ```sh
 ROOT_URL=http://localhost:8080
@@ -64,6 +81,8 @@ ROOT_URL=http://localhost:8080
 curl -fsS "$ROOT_URL/api/v1/audio/inventory" | jq .
 curl -fsS "$ROOT_URL/api/v1/audio/series/154587" | jq .
 curl -fsS "$ROOT_URL/api/v1/audio/series/154587/episodes" | jq .
+curl -fsS "$ROOT_URL/api/v1/audio/series/154587/episodes/1/subtitles" | jq .
+curl -fsS "$ROOT_URL/api/v1/audio/series/154587/episodes/1/subtitles/content?getall=true" | jq .
 curl -fsS -X POST "$ROOT_URL/api/v1/audio/reconcile" | jq .
 ```
 
@@ -81,8 +100,12 @@ for series in inventory.series:
 
 artifact = client.artifact(154587, "1")
 audio = client.content(154587, "1")
+subtitles = client.subtitles(154587, "1")
+subtitle_payloads = client.subtitle_contents(154587, "1", get_all=True)
 
 print(artifact.filename, artifact.duration_ms, len(audio))
+print([subtitle.language for subtitle in subtitles])
+print([len(payload.content) for payload in subtitle_payloads])
 ```
 
 `ANIME_AUDIO_BASE_URL` is available as a narrow direct-service override.
@@ -101,6 +124,9 @@ atomic publication are debounced. The fallback scan compares each manifest's
 relative identity, modification time, and size with SQLite; it parses only new
 or changed manifests and removes rows only after a complete directory scan.
 It does not read, hash, or probe unchanged audio artifacts.
+Subtitle artifacts are validated when manifests are indexed. A missing
+subtitle degrades the whole manifest in the same way as a missing audio
+artifact, because the manifest is the authoritative contract.
 
 `GET /healthz` returns:
 
@@ -121,6 +147,7 @@ timestamps, but no configured paths.
 anime_audio_index_ready
 anime_audio_series_total
 anime_audio_artifacts_total
+anime_audio_subtitles_total
 anime_audio_reconciliation_errors
 anime_audio_last_reconciliation_timestamp_seconds
 anime_audio_watcher_running

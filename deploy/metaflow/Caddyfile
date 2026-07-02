@@ -1,0 +1,18 @@
+{
+	admin off
+}
+
+:{$CADDY_UI_PORT} {
+	encode zstd gzip
+
+	handle_path /api/* {
+		reverse_proxy ui-backend:8083
+	}
+
+	reverse_proxy ui:3000
+}
+
+:{$CADDY_METADATA_PORT} {
+	encode zstd gzip
+	reverse_proxy metadata:8080
+}

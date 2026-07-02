@@ -1,0 +1,30 @@
+ARG METAFLOW_SERVICE_BASE_IMAGE=netflixoss/metaflow_metadata_service:latest
+FROM ${METAFLOW_SERVICE_BASE_IMAGE}
+
+# Upstream builds PostgreSQL URLs with urllib.parse.quote's default safe="/".
+# Random passwords can contain URL-significant characters; encode every
+# non-alphanumeric byte so psycopg2 never mis-parses password fragments as host
+# or port components during migrations or service startup.
+RUN python3 - <<'PY'
+from pathlib import Path
+
+paths = [
+    Path("/root/run_goose.py"),
+    Path("/root/services/utils/__init__.py"),
+    Path("/opt/latest/lib/python3.11/site-packages/services/utils/__init__.py"),
+]
+
+for path in paths:
+    text = path.read_text()
+    text = text.replace(
+        'quote(os.environ["MF_METADATA_DB_USER"])',
+        'quote(os.environ["MF_METADATA_DB_USER"], safe="")',
+    )
+    text = text.replace(
+        'quote(os.environ["MF_METADATA_DB_PSWD"])',
+        'quote(os.environ["MF_METADATA_DB_PSWD"], safe="")',
+    )
+    text = text.replace("quote(self._user)", "quote(self._user, safe='')")
+    text = text.replace("quote(self._password)", "quote(self._password, safe='')")
+    path.write_text(text)
+PY

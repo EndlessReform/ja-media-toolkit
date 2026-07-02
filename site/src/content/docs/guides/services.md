@@ -24,7 +24,8 @@ The AniList Search service provides BM25 fuzzy search over a local cache of the 
 
 ### Anime Audio
 The Anime Audio service indexes authoritative derived-audio manifests and
-retrieves episode artifacts by AniList ID, episode key, and conversion profile.
+retrieves episode artifacts and extracted embedded subtitles by AniList ID,
+episode key, and conversion profile.
 
 - **Service Guide:** [Anime Audio](/services/anime-audio)
 - **API Documentation:** [/api/v1/audio/docs](/api/v1/audio/docs)
