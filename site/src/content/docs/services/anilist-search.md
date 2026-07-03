@@ -117,6 +117,24 @@ review files, and bulk analysis. The service gzips larger responses when the
 client sends `Accept-Encoding: gzip`; `curl --compressed` handles request and
 decode automatically.
 
+### Full Metadata Export
+`GET /export.jsonl`
+
+Returns one JSON object per local AniList metadata row, ordered by AniList ID.
+The dump covers the public columns from the current DuckDB `anime` table,
+decodes known JSON-shaped columns, and omits service-private fields such as the
+FTS `search_text` column. This is a full table export, unlike bulk search JSONL,
+which returns one result line per requested query.
+
+```sh
+curl --compressed \
+  -OJ "http://localhost:8080/api/v1/anilist/export.jsonl"
+```
+
+The response is `application/x-ndjson` with a download filename shaped like
+`anilist-<YYYY-MM-DD_HH-MM-SS><commit-hash>-export.jsonl`. The timestamp is UTC;
+larger responses are gzipped when the client sends `Accept-Encoding: gzip`.
+
 ### Anime Metadata
 `GET /anime/{anilist_id}`
 

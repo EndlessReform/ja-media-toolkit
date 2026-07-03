@@ -26,6 +26,7 @@ from ja_media_services.anilist_search.exact_fallback import (
     ExactFallbackUnavailable,
     resolve_exact_fallback,
 )
+from ja_media_services.anilist_search.export_routes import register_export_routes
 from ja_media_services.anilist_search.fallback_cache import FallbackTtlPolicy
 from ja_media_services.anilist_search.metadata import (
     anime_metadata_exists,
@@ -197,6 +198,7 @@ def create_app() -> FastAPI:
         return results
 
     register_bulk_routes(app, app_state)
+    register_export_routes(app, app_state)
 
     @app.get("/anime/{anilist_id}")
     async def anime_detail_endpoint(
