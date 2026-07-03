@@ -24,6 +24,7 @@ Returns a list of matching anime entries.
 | `include_ova` | `bool` | `false` | Include OVA entries in search results. |
 | `all_formats` | `bool` | `false` | Include all anime formats (specials, music, etc.). |
 | `force_anilist` | `bool` | `false` | Query AniList GraphQL directly instead of the local BM25 index. |
+| `extraFields` | `string` | None | Comma-separated public metadata fields to add to each candidate. |
 
 **Example Request:**
 ```sh
@@ -65,6 +66,7 @@ preserve input order.
 | `include_movies` | `bool` | `false` | Include movies in search results. |
 | `include_ova` | `bool` | `false` | Include OVA entries in search results. |
 | `all_formats` | `bool` | `false` | Include all anime formats (specials, music, etc.). |
+| `extraFields` | `string[]` or `string` | None | Public metadata fields to add to each candidate. |
 
 **JSON Request:**
 
@@ -116,6 +118,11 @@ Each JSONL line is one input query:
 review files, and bulk analysis. The service gzips larger responses when the
 client sends `Accept-Encoding: gzip`; `curl --compressed` handles request and
 decode automatically.
+
+Search and bulk search candidates always include the default title, format,
+season, and BM25 score fields. `extraFields` can add public metadata columns
+such as `popularity`, `averageScore`, `favourites`, `siteUrl`, or `genres`;
+unknown or private columns return `400`.
 
 ### Full Metadata Export
 `GET /export.jsonl`

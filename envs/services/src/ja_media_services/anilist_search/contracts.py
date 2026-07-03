@@ -16,4 +16,5 @@ class BulkSearchRequest(BaseModel):
     include_movies: bool = False
     include_ova: bool = False
     all_formats: bool = False
+    extra_fields: list[str] | str | None = Field(default=None, alias="extraFields")
     force_anilist: bool | None = Field(default=None, exclude=True)

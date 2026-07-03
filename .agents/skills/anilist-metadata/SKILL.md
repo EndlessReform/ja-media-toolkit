@@ -193,8 +193,9 @@ rg -n '"[^"]+": anime|get\\(".*"\\)|ANILIST_MEDIA_FIELDS' \
   envs/services/src/ja_media_services/anilist_search/anilist_api.py
 ```
 
-Use `GET /anime/{id}?fields=a,b,c` or `client.anime(id, fields=(...))` to probe
-specific columns. If you need every returned key for one row:
+Use `GET /anime/{id}?fields=a,b,c`, `client.anime(id, fields=(...))`, search
+`extraFields=a,b,c`, or `ja-media get-id --field a --field b` to probe public
+metadata columns. If you need every returned key for one row:
 
 ```sh
 PYTHONPATH=packages/core/src uv run python - <<'PY'

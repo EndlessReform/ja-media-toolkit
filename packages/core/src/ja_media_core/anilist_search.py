@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import urllib.parse
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from ja_media_core.http import ServiceHttpClient
@@ -24,9 +24,20 @@ class SearchResult:
     season_year: int | str | None
     format: str | None
     score: float
+    extra_fields: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_mapping(cls, data: dict[str, Any]) -> SearchResult:
+        standard_fields = {
+            "anilist_id",
+            "title_english",
+            "title_native",
+            "title_romaji",
+            "season",
+            "season_year",
+            "format",
+            "score",
+        }
         return cls(
             anilist_id=data.get("anilist_id"),
             title_english=data.get("title_english"),
@@ -36,7 +47,16 @@ class SearchResult:
             season_year=data.get("season_year"),
             format=data.get("format"),
             score=float(data["score"]),
+            extra_fields={
+                key: value
+                for key, value in data.items()
+                if key not in standard_fields
+            },
         )
+
+    def get(self, field_name: str, default: Any = None) -> Any:
+        """Return an extra candidate field requested from the service."""
+        return self.extra_fields.get(field_name, default)
 
 
 @dataclass(frozen=True)
@@ -114,6 +134,7 @@ class AniListSearchClient(Protocol):
         include_ova: bool = False,
         all_formats: bool = False,
         force_anilist: bool = False,
+        extra_fields: tuple[str, ...] | None = None,
     ) -> SearchResponse:
         ...
 
@@ -125,6 +146,7 @@ class AniListSearchClient(Protocol):
         include_movies: bool = False,
         include_ova: bool = False,
         all_formats: bool = False,
+        extra_fields: tuple[str, ...] | None = None,
     ) -> BulkSearchResponse:
         ...
 
@@ -185,15 +207,19 @@ class HttpAniListSearchClient:
         include_ova: bool = False,
         all_formats: bool = False,
         force_anilist: bool = False,
+        extra_fields: tuple[str, ...] | None = None,
     ) -> SearchResponse:
-        params = urllib.parse.urlencode({
+        raw_params = {
             "query": query,
             "k": str(top_k),
             "include_movies": str(include_movies).lower(),
             "include_ova": str(include_ova).lower(),
             "all_formats": str(all_formats).lower(),
             "force_anilist": str(force_anilist).lower(),
-        })
+        }
+        if extra_fields:
+            raw_params["extraFields"] = ",".join(extra_fields)
+        params = urllib.parse.urlencode(raw_params)
         payload = self._get_json(f"/search?{params}")
         return SearchResponse.from_mapping(payload)
 
@@ -205,16 +231,20 @@ class HttpAniListSearchClient:
         include_movies: bool = False,
         include_ova: bool = False,
         all_formats: bool = False,
+        extra_fields: tuple[str, ...] | None = None,
     ) -> BulkSearchResponse:
+        request = {
+            "queries": list(queries),
+            "k": top_k,
+            "include_movies": include_movies,
+            "include_ova": include_ova,
+            "all_formats": all_formats,
+        }
+        if extra_fields:
+            request["extraFields"] = list(extra_fields)
         payload = self._http.post_json(
             "/search/bulk",
-            {
-                "queries": list(queries),
-                "k": top_k,
-                "include_movies": include_movies,
-                "include_ova": include_ova,
-                "all_formats": all_formats,
-            },
+            request,
         )
         return BulkSearchResponse.from_mapping(payload)
 

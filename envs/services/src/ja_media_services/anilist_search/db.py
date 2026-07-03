@@ -11,6 +11,7 @@ from ja_media_services.anilist_search.fallback_schema import (
     copy_fallback_tables,
     ensure_fallback_schema,
 )
+from ja_media_services.anilist_search.metadata import _parse_value
 
 DEFAULT_FORMATS = ("TV", "ONA", "TV_SHORT")
 ALL_FORMATS = DEFAULT_FORMATS + ("MOVIE", "OVA", "SPECIAL", "MUSIC")
@@ -195,13 +196,22 @@ def search(
     query: str,
     top_k: int = 3,
     formats: tuple[str, ...] = DEFAULT_FORMATS,
+    extra_fields: tuple[str, ...] = (),
 ) -> list[dict]:
     """Search anime by name using BM25, filtered to the given formats."""
     format_filter = ", ".join(f"'{f}'" for f in formats)
+    extra_inner = "".join(
+        f', "{field}" AS "__extra_{index}"'
+        for index, field in enumerate(extra_fields)
+    )
+    extra_outer = "".join(
+        f', "__extra_{index}"'
+        for index, _field in enumerate(extra_fields)
+    )
     rows = con.execute(f"""
-        SELECT aid, title_english, title_native, title_romaji, season, seasonYear, format, score
+        SELECT aid, title_english, title_native, title_romaji, season, seasonYear, format, score{extra_outer}
         FROM (
-            SELECT aid, title_english, title_native, title_romaji, season, seasonYear, format,
+            SELECT aid, title_english, title_native, title_romaji, season, seasonYear, format{extra_inner},
                    fts_main_anime.match_bm25(aid, ?) AS score
             FROM anime
             WHERE format IN ({format_filter})
@@ -211,8 +221,9 @@ def search(
         LIMIT ?
     """, [query, top_k]).fetchall()
 
-    return [
-        {
+    results = []
+    for row in rows:
+        result = {
             "anilist_id": int(row[0]) if row[0] else None,
             "title_english": row[1],
             "title_native": row[2],
@@ -222,8 +233,14 @@ def search(
             "format": row[6],
             "score": round(float(row[7]), 4),
         }
-        for row in rows
-    ]
+        result.update(
+            {
+                field: _parse_value(field, value)
+                for field, value in zip(extra_fields, row[8:], strict=True)
+            }
+        )
+        results.append(result)
+    return results
 
 
 def bulk_search(
@@ -231,12 +248,19 @@ def bulk_search(
     queries: list[str],
     top_k: int = 3,
     formats: tuple[str, ...] = DEFAULT_FORMATS,
+    extra_fields: tuple[str, ...] = (),
 ) -> list[dict[str, Any]]:
     """Run ordered local BM25 searches without touching the upstream API."""
     return [
         {
             "query": query,
-            "results": search(con, query, top_k=top_k, formats=formats),
+            "results": search(
+                con,
+                query,
+                top_k=top_k,
+                formats=formats,
+                extra_fields=extra_fields,
+            ),
         }
         for query in queries
     ]

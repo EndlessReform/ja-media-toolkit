@@ -6,6 +6,10 @@ from fastapi import FastAPI, HTTPException, Query
 
 from ja_media_services.anilist_search.contracts import BulkSearchRequest
 from ja_media_services.anilist_search.db import bulk_search, resolve_formats
+from ja_media_services.anilist_search.metadata import (
+    parse_field_list,
+    validate_metadata_fields,
+)
 from ja_media_services.anilist_search.responses import bulk_jsonl_response
 
 
@@ -31,8 +35,21 @@ def register_bulk_routes(app: FastAPI, app_state: Any) -> None:
             request.include_ova,
             request.all_formats,
         )
+        try:
+            extra_fields = validate_metadata_fields(
+                con,
+                parse_field_list(request.extra_fields),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         with app_state._lock:
-            results = bulk_search(con, request.queries, request.k, formats)
+            results = bulk_search(
+                con,
+                request.queries,
+                request.k,
+                formats,
+                extra_fields=extra_fields,
+            )
         if format == "jsonl":
             return bulk_jsonl_response(results)
         return {"results": results}
