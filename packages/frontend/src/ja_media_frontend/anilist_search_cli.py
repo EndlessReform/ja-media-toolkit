@@ -41,7 +41,7 @@ def register_get_id_parser(subparsers: argparse._SubParsersAction) -> None:
     )
     search_parser.add_argument("-f", "--file", help="Parse query from file path")
     search_parser.add_argument(
-        "-n",
+        "-k",
         "--top-k",
         type=int,
         default=3,
