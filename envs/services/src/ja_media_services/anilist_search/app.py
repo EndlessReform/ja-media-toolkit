@@ -10,7 +10,9 @@ import duckdb
 from aiolimiter import AsyncLimiter
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.gzip import GZipMiddleware
 
+from ja_media_services.anilist_search.bulk_routes import register_bulk_routes
 from ja_media_services.anilist_search.db import (
     open_db,
     rebuild_from_cached_csv,
@@ -150,6 +152,7 @@ def create_app() -> FastAPI:
         version="0.1.0",
         lifespan=lifespan,
     )
+    app.add_middleware(GZipMiddleware, minimum_size=1024)
 
     @app.get("/search")
     async def search_endpoint(
@@ -192,6 +195,8 @@ def create_app() -> FastAPI:
         with app_state._lock:
             results = search(con, query, k, formats)
         return results
+
+    register_bulk_routes(app, app_state)
 
     @app.get("/anime/{anilist_id}")
     async def anime_detail_endpoint(

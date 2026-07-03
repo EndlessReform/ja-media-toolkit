@@ -3,7 +3,11 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from ja_media_core.anilist_search import AnimeMetadata, HttpAniListSearchClient
+from ja_media_core.anilist_search import (
+    AnimeMetadata,
+    BulkSearchResponse,
+    HttpAniListSearchClient,
+)
 from ja_media_core.config import JaMediaConfig, ServicesConfig
 
 
@@ -100,6 +104,54 @@ class AniListSearchContractTest(unittest.TestCase):
             "include_ova=false&all_formats=false&force_anilist=true"
         )
         self.assertEqual(response.results, ())
+
+    def test_bulk_search_posts_local_only_batch_contract(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {"ANILIST_SEARCH_BASE_URL": "http://127.0.0.1:8000"},
+            clear=True,
+        ):
+            client = HttpAniListSearchClient()
+
+        with patch.object(
+            client._http,
+            "post_json",
+            return_value={
+                "results": [
+                    {
+                        "query": "Aria",
+                        "results": [
+                            {
+                                "anilist_id": 1,
+                                "title_english": "Aria",
+                                "title_native": "ARIA",
+                                "title_romaji": "Aria",
+                                "season": None,
+                                "season_year": None,
+                                "format": "TV",
+                                "score": 1.2,
+                            }
+                        ],
+                    },
+                    {"query": "missing", "results": []},
+                ]
+            },
+        ) as post_json:
+            response = client.search_bulk(("Aria", "missing"), top_k=1)
+
+        post_json.assert_called_once_with(
+            "/search/bulk",
+            {
+                "queries": ["Aria", "missing"],
+                "k": 1,
+                "include_movies": False,
+                "include_ova": False,
+                "all_formats": False,
+            },
+        )
+        self.assertIsInstance(response, BulkSearchResponse)
+        self.assertEqual(response.results[0].results[0].anilist_id, 1)
+        self.assertEqual(response.results[1].results, ())
 
 
 if __name__ == "__main__":

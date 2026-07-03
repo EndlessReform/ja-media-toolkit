@@ -226,6 +226,22 @@ def search(
     ]
 
 
+def bulk_search(
+    con: duckdb.DuckDBPyConnection,
+    queries: list[str],
+    top_k: int = 3,
+    formats: tuple[str, ...] = DEFAULT_FORMATS,
+) -> list[dict[str, Any]]:
+    """Run ordered local BM25 searches without touching the upstream API."""
+    return [
+        {
+            "query": query,
+            "results": search(con, query, top_k=top_k, formats=formats),
+        }
+        for query in queries
+    ]
+
+
 def resolve_formats(
     include_movies: bool = False,
     include_ova: bool = False,

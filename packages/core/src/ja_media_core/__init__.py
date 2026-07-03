@@ -3,6 +3,8 @@ from ja_media_core.anilist_search import (
     ANILIST_SEARCH_GATEWAY_PATH,
     AnimeMetadata,
     AniListSearchClient,
+    BulkSearchResponse,
+    BulkSearchResult,
     HttpAniListSearchClient,
     SearchResult,
     SearchResponse,

@@ -51,6 +51,38 @@ class SearchResponse:
 
 
 @dataclass(frozen=True)
+class BulkSearchResult:
+    """One input query and its local AniList search candidates."""
+
+    query: str
+    results: tuple[SearchResult, ...]
+
+    @classmethod
+    def from_mapping(cls, data: dict[str, Any]) -> BulkSearchResult:
+        return cls(
+            query=str(data["query"]),
+            results=tuple(
+                SearchResult.from_mapping(item) for item in data.get("results", [])
+            ),
+        )
+
+
+@dataclass(frozen=True)
+class BulkSearchResponse:
+    """Ordered bulk title-search response."""
+
+    results: tuple[BulkSearchResult, ...]
+
+    @classmethod
+    def from_mapping(cls, data: dict[str, Any]) -> BulkSearchResponse:
+        return cls(
+            results=tuple(
+                BulkSearchResult.from_mapping(item) for item in data.get("results", [])
+            )
+        )
+
+
+@dataclass(frozen=True)
 class AnimeMetadata:
     """One AniList metadata row from the local dataset cache."""
 
@@ -83,6 +115,17 @@ class AniListSearchClient(Protocol):
         all_formats: bool = False,
         force_anilist: bool = False,
     ) -> SearchResponse:
+        ...
+
+    def search_bulk(
+        self,
+        queries: list[str] | tuple[str, ...],
+        *,
+        top_k: int = 3,
+        include_movies: bool = False,
+        include_ova: bool = False,
+        all_formats: bool = False,
+    ) -> BulkSearchResponse:
         ...
 
     def anime(
@@ -153,6 +196,27 @@ class HttpAniListSearchClient:
         })
         payload = self._get_json(f"/search?{params}")
         return SearchResponse.from_mapping(payload)
+
+    def search_bulk(
+        self,
+        queries: list[str] | tuple[str, ...],
+        *,
+        top_k: int = 3,
+        include_movies: bool = False,
+        include_ova: bool = False,
+        all_formats: bool = False,
+    ) -> BulkSearchResponse:
+        payload = self._http.post_json(
+            "/search/bulk",
+            {
+                "queries": list(queries),
+                "k": top_k,
+                "include_movies": include_movies,
+                "include_ova": include_ova,
+                "all_formats": all_formats,
+            },
+        )
+        return BulkSearchResponse.from_mapping(payload)
 
     def anime(
         self, anilist_id: int, *, fields: tuple[str, ...] | None = None
