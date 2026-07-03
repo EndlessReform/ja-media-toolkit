@@ -8,6 +8,12 @@ from typing import Any
 
 from dotenv import load_dotenv
 from rich.console import Console
+from rich.progress import (
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    TimeElapsedColumn,
+)
 from rich.table import Table
 
 from ja_media_frontend.anilist_batch import (
@@ -104,7 +110,7 @@ def run_search(
             return
         if is_batch_input(path):
             try:
-                output_path = run_batch_search(
+                output_path = _run_batch_with_spinner(
                     client=client,
                     path=path,
                     top_k=top_k,
@@ -142,6 +148,50 @@ def run_search(
         _print_json(response)
     else:
         _print_table(response)
+
+
+def _run_batch_with_spinner(
+    *,
+    client: HttpAniListSearchClient,
+    path: Path,
+    top_k: int,
+    include_movies: bool,
+    include_ova: bool,
+    all_formats: bool,
+    force_anilist: bool,
+    extra_fields: tuple[str, ...],
+) -> Path:
+    """Run a batch search under a Rich spinner that surfaces elapsed time.
+
+    Bulk resolution is a single long request that can outrun a fixed read
+    timeout; the spinner gives the user visible feedback that the tool is
+    still working instead of hanging silently while the SDK waits on the
+    service. Output goes to stderr so stdout JSON pipelines stay clean.
+    """
+
+    console = Console(stderr=True)
+    description = f"Resolving AniList titles from [bold]{path.name}[/bold]"
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        TimeElapsedColumn(),
+        console=console,
+        transient=True,
+    ) as progress:
+        task = progress.add_task(description, total=None)
+        try:
+            return run_batch_search(
+                client=client,
+                path=path,
+                top_k=top_k,
+                include_movies=include_movies,
+                include_ova=include_ova,
+                all_formats=all_formats,
+                force_anilist=force_anilist,
+                extra_fields=extra_fields,
+            )
+        finally:
+            progress.update(task, completed=1, total=1)
 
 
 def _print_table(response: SearchResponse) -> None:

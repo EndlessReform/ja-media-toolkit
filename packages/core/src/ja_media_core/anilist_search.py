@@ -166,7 +166,13 @@ class HttpAniListSearchClient:
     for downstream crosswalk resolution.
     """
 
-    def __init__(self, base_url: str | None = None, *, timeout_s: float = 5.0) -> None:
+    def __init__(
+        self,
+        base_url: str | None = None,
+        *,
+        timeout_s: float = 5.0,
+        bulk_timeout_s: float | None = None,
+    ) -> None:
         configured_url = service_base_url(
             base_url,
             (
@@ -181,6 +187,11 @@ class HttpAniListSearchClient:
             )
         self.base_url = self._normalize_base_url(configured_url)
         self.timeout_s = timeout_s
+        # Bulk batches resolve arbitrarily many titles in a single POST; a fixed
+        # read timeout trips httpx.ReadTimeout on large analytical inputs. The
+        # default disables the timeout entirely so big jobs are bounded by the
+        # service, not the client. Per-call overrides still go through post_json.
+        self.bulk_timeout_s = bulk_timeout_s
         self._http = ServiceHttpClient(
             self.base_url,
             timeout_s=timeout_s,
@@ -245,6 +256,7 @@ class HttpAniListSearchClient:
         payload = self._http.post_json(
             "/search/bulk",
             request,
+            timeout_s=self.bulk_timeout_s,
         )
         return BulkSearchResponse.from_mapping(payload)
 

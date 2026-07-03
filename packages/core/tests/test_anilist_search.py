@@ -185,6 +185,7 @@ class AniListSearchContractTest(unittest.TestCase):
                 "include_ova": False,
                 "all_formats": False,
             },
+            timeout_s=None,
         )
         self.assertIsInstance(response, BulkSearchResponse)
         self.assertEqual(response.results[0].results[0].anilist_id, 1)
@@ -219,6 +220,34 @@ class AniListSearchContractTest(unittest.TestCase):
                 "all_formats": False,
                 "extraFields": ["popularity", "siteUrl"],
             },
+            timeout_s=None,
+        )
+
+    def test_bulk_timeout_override_propagates_to_post_json(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {"ANILIST_SEARCH_BASE_URL": "http://127.0.0.1:8000"},
+            clear=True,
+        ):
+            client = HttpAniListSearchClient(bulk_timeout_s=120.0)
+
+        with patch.object(
+            client._http,
+            "post_json",
+            return_value={"results": []},
+        ) as post_json:
+            client.search_bulk(("Aria",), top_k=1)
+
+        post_json.assert_called_once_with(
+            "/search/bulk",
+            {
+                "queries": ["Aria"],
+                "k": 1,
+                "include_movies": False,
+                "include_ova": False,
+                "all_formats": False,
+            },
+            timeout_s=120.0,
         )
 
 
