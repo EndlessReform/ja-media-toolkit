@@ -290,6 +290,11 @@ dependencies = [
     { name = "soundfile" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "fasttext-langdetect", specifier = ">=1.0.5" },
@@ -301,6 +306,9 @@ requires-dist = [
     { name = "pysrt", specifier = ">=1.1.2" },
     { name = "soundfile", specifier = ">=0.13.1" },
 ]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=9.1.0" }]
 
 [[package]]
 name = "ja-media-media"

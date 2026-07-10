@@ -589,6 +589,9 @@ requires-dist = [
     { name = "soundfile", specifier = ">=0.13.1" },
 ]
 
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=9.1.0" }]
+
 [[package]]
 name = "ja-media-frontend"
 version = "0.1.0"

@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>AniList Exploratory</title>
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <style>{css}</style>
+    <script>{js}</script>
+</head>
+<body>
+    <div class="container">
+        <h1>AniList Match Explorer</h1>
+        <div class="controls">
+            <form hx-get="/results" hx-target="#results-container" hx-push-url="true" hx-trigger="change">
+                <label>Weights:
+                    Pop <input type="number" step="0.05" name="w_pop" value="{w_pop}" style="width: 60px">
+                    Score <input type="number" step="0.05" name="w_score" value="{w_score}" style="width: 60px">
+                    Spread <input type="number" step="0.05" name="w_spread" value="{w_spread}" style="width: 60px">
+                </label>
+                <label>Pass Gate: <input type="number" step="0.01" name="gate" value="{gate}" style="width: 60px"></label>
+                <label>Page Size: <input type="number" name="page_size" value="{page_size}" style="width: 60px"></label>
+                <label>Subbed only: <input type="checkbox" name="subbed_only" {subbed_attr}></label>
+                <label>Source: <select name="source_filter" class="control-select"><option value="all"{all_sel}>All</option><option value="auto_only"{auto_sel}>Auto Pass Only</option><option value="manual_only"{manual_sel}>Manual Overrides</option></select></label>
+                <input type="hidden" name="page" value="1">
+            </form>
+            <div style="margin-top: 8px; font-size: 0.8em; color: #666; display: flex; align-items: center; gap: 15px;">
+                <span><strong>File:</strong> {file_path}</span>
+                <a class="export-btn" href="{export_url}" download="passing_export.jsonl">Export Passing (JSONL)</a>
+                <span class="export-note">Writes query, series_title, anilist_id, source; deduplicates by AniList ID.</span>
+            </div>
+        </div>
+        <div id="results-container">
+            {results_content}
+        </div>
+    </div>
+</body>
+</html>

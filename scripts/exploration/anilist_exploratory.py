@@ -2,6 +2,7 @@
 # dependencies = [
 #   "fastapi",
 #   "uvicorn",
+#   "python-multipart",
 #   "duckdb",
 #   "pydantic",
 #   "httpx",
@@ -14,8 +15,9 @@ import sys
 import json
 import argparse
 from pathlib import Path
+from html import escape
 
-from fastapi import FastAPI, Request, Query
+from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, Response
 from contextlib import asynccontextmanager
 import duckdb
@@ -47,9 +49,14 @@ FILE_PATH = None
 NORM_CONSTS = {}
 KITSUNEKKO_SUBS: dict[int, bool] = {}
 SIDECAR_PATH: Path | None = None
-MANUAL_INCLUDE: set[int] = set()
-MANUAL_EXCLUDE: set[int] = set()
+MANUAL_INCLUDE: set[str] = set()  # query strings explicitly included
+MANUAL_EXCLUDE: set[str] = set()  # query strings explicitly excluded
 MANUAL_PICKS: dict[str, int] = {}  # query -> anilist_id
+
+ASSET_DIR = Path(__file__).with_name("anilist_exploratory_assets")
+PAGE_TEMPLATE = (ASSET_DIR / "page.html").read_text()
+PAGE_CSS = (ASSET_DIR / "app.css").read_text()
+PAGE_JS = (ASSET_DIR / "app.js").read_text()
 
 def load_data(path: Path):
     global DB, FILE_PATH, NORM_CONSTS
@@ -136,8 +143,8 @@ def load_manual_overrides():
         try:
             with open(SIDECAR_PATH) as f:
                 data = json.load(f)
-            MANUAL_INCLUDE = set(int(v) for v in data.get("include", []))
-            MANUAL_EXCLUDE = set(int(v) for v in data.get("exclude", []))
+            MANUAL_INCLUDE = _load_query_overrides(data.get("include", []))
+            MANUAL_EXCLUDE = _load_query_overrides(data.get("exclude", []))
             MANUAL_PICKS = {str(k): int(v) for k, v in data.get("picks", {}).items()}
             print(f"[anilist_exploratory] Manual overrides loaded: {len(MANUAL_INCLUDE)} included, {len(MANUAL_EXCLUDE)} excluded, {len(MANUAL_PICKS)} picks")
         except Exception as e:
@@ -155,18 +162,79 @@ def save_manual_overrides():
         json.dump({"include": sorted(MANUAL_INCLUDE), "exclude": sorted(MANUAL_EXCLUDE), "picks": MANUAL_PICKS}, f)
     tmp.rename(SIDECAR_PATH)
 
+def _load_query_overrides(values) -> set[str]:
+    query_overrides: set[str] = set()
+    legacy_ids: set[int] = set()
+    for value in values:
+        if isinstance(value, int):
+            legacy_ids.add(value)
+        else:
+            text = str(value)
+            if text.isdigit():
+                legacy_ids.add(int(text))
+            else:
+                query_overrides.add(text)
+
+    if legacy_ids and DB is not None:
+        ids = ",".join(str(value) for value in sorted(legacy_ids))
+        rows = DB.execute(
+            f"SELECT query FROM processed_data WHERE anilist_candidates[1].anilist_id IN ({ids})"
+        ).fetchall()
+        query_overrides.update(str(query) for (query,) in rows)
+
+    return query_overrides
+
 def _quote_qid(query: str) -> str:
     import re
     return re.sub(r'[^a-zA-Z0-9]', '_', query)[:64]
 
 def _html_escape(text: str) -> str:
-    return text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;')
+    return escape(str(text), quote=False)
 
-def _json_escape(text: str) -> str:
-    return text.replace('\\', '\\\\').replace("'", "\\'").replace('\n', '\\n').replace('\r', '\\r')
+def _html_attr(text: str) -> str:
+    return escape(str(text), quote=True)
+
+def _hx_vals(**values) -> str:
+    return _html_attr(json.dumps(values, ensure_ascii=False))
 
 def _sql_escape(text: str) -> str:
     return text.replace("'", "''")
+
+def _candidate_series_title(candidate: dict) -> str:
+    return (
+        candidate.get("title_english")
+        or candidate.get("title_romaji")
+        or candidate.get("title_native")
+        or f"AniList {candidate.get('anilist_id')}"
+    )
+
+def _selected_candidates(candidates: list[dict], query_text: str) -> list[dict]:
+    if query_text not in MANUAL_PICKS:
+        return candidates
+
+    picked_id = MANUAL_PICKS[query_text]
+    picked_cand = next(
+        (candidate for candidate in candidates if candidate.get("anilist_id") == picked_id),
+        None,
+    )
+    if not picked_cand:
+        return candidates
+    return [picked_cand] + [
+        candidate
+        for candidate in candidates
+        if candidate.get("anilist_id") != picked_id
+    ]
+
+def _export_crosswalk_line(query_text: str, candidate: dict, source: str) -> str:
+    return json.dumps(
+        {
+            "query": query_text,
+            "series_title": _candidate_series_title(candidate),
+            "anilist_id": candidate.get("anilist_id"),
+            "source": source,
+        },
+        ensure_ascii=False,
+    )
 
 def get_score_sql(w_pop=0.6, w_score=0.3, w_spread=0.1):
     # Norm pop: lower is better
@@ -178,272 +246,49 @@ def get_score_sql(w_pop=0.6, w_score=0.3, w_spread=0.1):
     
     return f"({w_pop} * {pop_norm}) + ({w_score} * {score_norm}) + ({w_spread} * {spread_norm})"
 
-PHPBB_TEMPLATE = """
-<!DOCTYPE html>
-<html>
-<head>
-    <title>AniList Exploratory</title>
-    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
-    <script>
-        document.body.addEventListener('htmx:configRequest', function(evt) {{
-            if (evt.path === '/toggle' || evt.path === '/pick') {{
-                Object.assign(evt.parameters, Object.fromEntries(new URLSearchParams(window.location.search)));
-            }}
-        }});
-        function togglePicker(qid) {{
-            var row = document.getElementById('picker-' + qid);
-            if (row) {{
-                row.style.display = row.style.display === 'none' ? 'table-row' : 'none';
-            }}
-        }}
-    </script>
-    <style>
-        body {{ 
-            font-family: Verdana, Geneva, sans-serif; 
-            background-color: #F9F9F9; 
-            color: #333; 
-            margin: 20px; 
-        }}
-        h1 {{ color: #107C41; font-size: 1.5em; }}
-        .container {{ max-width: 1200px; margin: 0 auto; }}
-        .controls {{ 
-            background: #E1E1E1; 
-            padding: 10px; 
-            border: 1px solid #CCCCCC; 
-            margin-bottom: 20px; 
-            font-size: 0.9em;
-        }}
-        .controls form {{ display: flex; gap: 15px; align-items: center; flex-wrap: wrap; }}
-        .controls label {{ display: flex; align-items: center; gap: 5px; }}
-        table {{ 
-            width: 100%; 
-            border-collapse: collapse; 
-            border: 1px solid #CCCCCC; 
-            background: white;
-        }}
-        th {{ 
-            background: #C1C1C1; 
-            color: #000; 
-            text-align: left; 
-            padding: 8px; 
-            border: 1px solid #CCCCCC;
-            font-weight: bold;
-            font-size: 0.85em;
-        }}
-        td {{ 
-            padding: 6px 8px; 
-            border: 1px solid #CCCCCC; 
-            font-size: 0.85em; 
-        }}
-        tr:nth-child(even) {{ background: #F2F2F2; }}
-        .score-pill {{ 
-            display: inline-block; 
-            padding: 2px 6px; 
-            border-radius: 4px; 
-            font-weight: bold; 
-            background: #DDD;
-        }}
-        .pass {{ background: #C1E1C1; color: #107C41; }}
-        .fail {{ background: #E1C1C1; color: #B22222; }}
-        .pagination {{ margin-top: 20px; text-align: center; font-size: 0.85em; }}
-        .pagination-info {{ margin-bottom: 10px; }}
-        .btn {{ 
-            padding: 5px 15px; 
-            background: #E1E1E1; 
-            border: 1px solid #999; 
-            cursor: pointer; 
-            text-decoration: none; 
-            color: #333;
-            font-size: 0.85em;
-            margin: 0 2px;
-        }}
-        .btn.active {{ 
-            background: #AAA; 
-            color: white; 
-            font-weight: bold;
-        }}
-        .btn.disabled {{ 
-            color: #999; 
-            cursor: not-allowed; 
-            border-color: #DDD;
-        }}
-        .btn-special {{
-            background: #C1C1C1;
-            border: 2px solid #999;
-            font-weight: bold;
-        }}
-        .hover-title {{
-            border-bottom: 1px dotted #666;
-            cursor: help;
-            color: #666;
-        }}
-        .show-others-wrap {{
-            display: inline-block;
-            position: relative;
-        }}
-        .show-others-trigger {{
-            color: #107C41;
-            cursor: pointer;
-            font-size: 0.8em;
-            margin-left: 4px;
-            text-decoration: underline;
-        }}
-        .show-others-trigger:hover {{
-            color: #0a5c30;
-        }}
-        .hover-tooltip {{
-            display: none;
-            position: absolute;
-            bottom: 100%;
-            left: 0;
-            background: white;
-            border: 1px solid #CCCCCC;
-            padding: 10px;
-            width: 400px;
-            max-height: 300px;
-            overflow-y: auto;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-            z-index: 999;
-            margin-bottom: 4px;
-        }}
-        .show-others-wrap:hover .hover-tooltip {{
-            display: block;
-        }}
-        .hover-tooltip h4 {{
-            margin: 0 0 8px 0;
-            font-size: 0.9em;
-            color: #107C41;
-        }}
-        .tooltip-candidate {{
-            padding: 6px 0;
-            border-bottom: 1px solid #EEE;
-            font-size: 0.85em;
-        }}
-        .tooltip-candidate:last-child {{
-            border-bottom: none;
-        }}
-        .tooltip-candidate a {{
-            color: #107C41;
-            text-decoration: none;
-            font-weight: bold;
-        }}
-        .tooltip-candidate a:hover {{
-            text-decoration: underline;
-        }}
-        .tooltip-meta {{
-            color: #666;
-            font-size: 0.9em;
-        }}
-        .override-manual {{ background: #A3D9A3; color: #107C41; }}
-        .override-excluded {{ background: #F5B7B1; color: #B22222; }}
-        select.control-select {{
-            padding: 4px 8px;
-            font-size: 0.85em;
-            border: 1px solid #999;
-            background: #E1E1E1;
-        }}
-        .export-btn {{
-            display: inline-block;
-            margin-left: 10px;
-            padding: 5px 15px;
-            background: #107C41;
-            color: white;
-            border: 1px solid #0a5c30;
-            cursor: pointer;
-            text-decoration: none;
-            font-size: 0.85em;
-            font-weight: bold;
-        }}
-        .export-btn:hover {{
-            background: #0a5c30;
-        }}
-        .picker-row td {{
-            background: #FFFDE7;
-            padding: 12px 8px 12px 40px;
-            border-left: 3px solid #F9A825;
-        }}
-        .picker-title {{
-            font-weight: bold;
-            color: #E65100;
-            margin-bottom: 8px;
-            font-size: 0.85em;
-        }}
-        .picker-candidate {{
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 4px 6px;
-            margin: 2px 0;
-            border-radius: 4px;
-            cursor: pointer;
-        }}
-        .picker-candidate:hover {{
-            background: #FFF9C4;
-        }}
-        .picker-candidate input[type="radio"] {{
-            accent-color: #107C41;
-            width: 16px;
-            height: 16px;
-            cursor: pointer;
-        }}
-        .picker-candidate label {{
-            cursor: pointer;
-            font-size: 0.85em;
-            flex: 1;
-        }}
-        .picker-meta {{
-            color: #666;
-            font-size: 0.8em;
-            margin-left: 8px;
-        }}
-        .pick-btn {{
-            padding: 2px 8px;
-            background: #FFF9C4;
-            border: 1px solid #F9A825;
-            cursor: pointer;
-            font-size: 0.75em;
-            color: #E65100;
-            border-radius: 3px;
-        }}
-        .pick-btn:hover {{
-            background: #FFF176;
-        }}
-        .picker-current {{
-            display: inline-block;
-            margin-left: 8px;
-            font-size: 0.75em;
-            color: #107C41;
-        }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>AniList Match Explorer</h1>
-        <div class="controls">
-            <form hx-get="/results" hx-target="#results-container" hx-push-url="true" hx-trigger="change">
-                <label>Weights: 
-                    Pop <input type="number" step="0.05" name="w_pop" value="{w_pop}" style="width: 60px"> 
-                    Score <input type="number" step="0.05" name="w_score" value="{w_score}" style="width: 60px"> 
-                    Spread <input type="number" step="0.05" name="w_spread" value="{w_spread}" style="width: 60px">
-                </label>
-                <label>Pass Gate: <input type="number" step="0.01" name="gate" value="{gate}" style="width: 60px"></label>
-                <label>Page Size: <input type="number" name="page_size" value="{page_size}" style="width: 60px"></label>
-                <label>Subbed only: <input type="checkbox" name="subbed_only" {subbed_attr}></label>
-                <label>Source: <select name="source_filter" class="control-select"><option value="all"{all_sel}>All</option><option value="auto_only"{auto_sel}>Auto Pass Only</option><option value="manual_only"{manual_sel}>Manual Overrides</option></select></label>
-                <input type="hidden" name="page" value="1">
-            </form>
-            <div style="margin-top: 8px; font-size: 0.8em; color: #666; display: flex; align-items: center; gap: 15px;">
-                <span><strong>File:</strong> {file_path}</span>
-                <a class="export-btn" href="{export_url}" hx-get="{export_url}" hx-target="_top">Export Passing (JSONL)</a>
-            </div>
-        </div>
-        <div id="results-container">
-            {results_content}
-        </div>
-    </div>
-</body>
-</html>
-"""
+def get_score_value(pop, score, spread, w_pop=0.6, w_score=0.3, w_spread=0.1):
+    def norm(value, min_value, max_value, invert=False):
+        if value is None or max_value == min_value:
+            return 0.0
+        raw = (value - min_value) / (max_value - min_value)
+        return 1.0 - raw if invert else raw
+
+    pop_norm = norm(pop, NORM_CONSTS["min_pop"], NORM_CONSTS["max_pop"], invert=True)
+    score_norm = norm(score, NORM_CONSTS["min_score"], NORM_CONSTS["max_score"])
+    spread_norm = norm(spread, NORM_CONSTS["min_spread"], NORM_CONSTS["max_spread"])
+    return (w_pop * pop_norm) + (w_score * score_norm) + (w_spread * spread_norm)
+
+def _render_page(
+    *,
+    results_content: str,
+    page_size: int,
+    gate: float,
+    w_pop: float,
+    w_score: float,
+    w_spread: float,
+    subbed_only: bool,
+    source_filter: str,
+) -> str:
+    export_params = f"gate={gate}&w_pop={w_pop}&w_score={w_score}&w_spread={w_spread}"
+    if subbed_only:
+        export_params += "&subbed_only=1"
+
+    return PAGE_TEMPLATE.format(
+        css=PAGE_CSS,
+        js=PAGE_JS,
+        file_path=_html_escape(FILE_PATH or ""),
+        w_pop=w_pop,
+        w_score=w_score,
+        w_spread=w_spread,
+        gate=gate,
+        page_size=page_size,
+        subbed_attr="checked" if subbed_only else "",
+        export_url=f"/export?{export_params}",
+        all_sel=" selected" if source_filter == "all" else "",
+        auto_sel=" selected" if source_filter == "auto_only" else "",
+        manual_sel=" selected" if source_filter == "manual_only" else "",
+        results_content=results_content,
+    )
 
 TABLE_HEADER = """
 <table>
@@ -464,7 +309,7 @@ TABLE_HEADER = """
 
 TABLE_ROW = """
         <tr>
-            <td><label style="white-space:nowrap"><input type="checkbox" hx-post="/toggle" hx-vals='{{"anilist_id": {anilist_id}}}' hx-push-url="false" hx-target="#results-container" {checked_attr}><span class="score-pill {status_class}">{status_label}</span></label></td>
+            <td><label style="white-space:nowrap"><input type="checkbox" hx-post="/toggle" hx-vals='{toggle_vals}' hx-push-url="false" hx-target="#results-container" {checked_attr}><span class="score-pill {status_class}">{status_label}</span></label></td>
             <td>{query}</td>
             <td>{display_title}{others_trigger}{picker_btn}</td>
             <td>{pop}</td>
@@ -488,33 +333,27 @@ TABLE_FOOTER = "</tbody></table>"
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    gate = float(request.query_params.get("gate", "0.5"))
+    gate = float(request.query_params.get("gate", "0.6"))
     page = int(request.query_params.get("page", "1"))
     page_size = int(request.query_params.get("page_size", "50"))
-    w_pop = float(request.query_params.get("w_pop", "0.5"))
-    w_score = float(request.query_params.get("w_score", "0.25"))
-    w_spread = float(request.query_params.get("w_spread", "0.25"))
+    w_pop = float(request.query_params.get("w_pop", "0.6"))
+    w_score = float(request.query_params.get("w_score", "0.3"))
+    w_spread = float(request.query_params.get("w_spread", "0.1"))
     subbed_only = request.query_params.get("subbed_only", "").lower() in ("1", "on", "true")
     source_filter = request.query_params.get("source_filter", "all")
 
-    results_content = await get_results_html(page, page_size, gate, w_pop, w_score, w_spread, subbed_only, source_filter)
-
-    export_params = f"gate={gate}&w_pop={w_pop}&w_score={w_score}&w_spread={w_spread}"
-    if subbed_only:
-        export_params += "&subbed_only=1"
-    export_url = f"/export?{export_params}"
-
-    return PHPBB_TEMPLATE.format(
-        file_path=FILE_PATH,
-        w_pop=w_pop, w_score=w_score, w_spread=w_spread,
-        gate=gate,
-        page_size=page_size,
-        subbed_attr="checked" if subbed_only else "",
-        export_url=export_url,
-        all_sel=" selected" if source_filter == "all" else "",
-        auto_sel=" selected" if source_filter == "auto_only" else "",
-        manual_sel=" selected" if source_filter == "manual_only" else "",
+    results_content = await get_results_html(
+        page, page_size, gate, w_pop, w_score, w_spread, subbed_only, source_filter
+    )
+    return _render_page(
         results_content=results_content,
+        page_size=page_size,
+        gate=gate,
+        w_pop=w_pop,
+        w_score=w_score,
+        w_spread=w_spread,
+        subbed_only=subbed_only,
+        source_filter=source_filter,
     )
 
 async def get_results_html(page: int, page_size: int, gate: float, w_pop=0.6, w_score=0.3, w_spread=0.1, subbed_only=False, source_filter="all"):
@@ -540,8 +379,8 @@ async def get_results_html(page: int, page_size: int, gate: float, w_pop=0.6, w_
         if all_manual or pick_queries:
             conditions = []
             if all_manual:
-                manual_ids_str = ",".join(str(x) for x in sorted(all_manual))
-                conditions.append(f"anilist_candidates[1].anilist_id IN ({manual_ids_str})")
+                escaped_manual = ",".join(f"'{_sql_escape(q)}'" for q in sorted(all_manual))
+                conditions.append(f"query IN ({escaped_manual})")
             if pick_queries:
                 escaped_queries = ",".join(f"'{_sql_escape(q)}'" for q in pick_queries)
                 conditions.append(f"query IN ({escaped_queries})")
@@ -600,15 +439,26 @@ async def get_results_html(page: int, page_size: int, gate: float, w_pop=0.6, w_
             rom = c.get('title_romaji')
             nat = c.get('title_native') or "N/A"
             anilist_id = c.get('anilist_id')
+            display_pop = c.get('popularity') or 0
+            display_score = c.get('score') or 0
+            next_best_score = max(
+                (candidate.get('score') or 0)
+                for candidate in cand_dicts
+                if candidate.get('anilist_id') != anilist_id
+            ) if len(cand_dicts) > 1 else display_score
+            display_spread = display_score - next_best_score
+            display_metric = get_score_value(
+                display_pop, display_score, display_spread, w_pop, w_score, w_spread
+            )
             link_prefix = f'<a href="https://anilist.co/anime/{anilist_id}" target="_blank" style="color: #107C41; text-decoration: none; font-weight: bold;">' if anilist_id else ''
             link_suffix = '</a>' if anilist_id else ''
 
             if eng and rom:
-                display_title = f'{link_prefix}{eng}{link_suffix}<br><span class="hover-title" title="{nat}">{rom}</span>'
+                display_title = f'{link_prefix}{_html_escape(eng)}{link_suffix}<br><span class="hover-title" title="{_html_attr(nat)}">{_html_escape(rom)}</span>'
             elif eng:
-                display_title = f'{link_prefix}{eng}{link_suffix}<br><span class="hover-title" title="{nat}">N/A</span>'
+                display_title = f'{link_prefix}{_html_escape(eng)}{link_suffix}<br><span class="hover-title" title="{_html_attr(nat)}">N/A</span>'
             elif rom:
-                display_title = f'{link_prefix}<span class="hover-title" title="{nat}">{rom}</span>{link_suffix}'
+                display_title = f'{link_prefix}<span class="hover-title" title="{_html_attr(nat)}">{_html_escape(rom)}</span>{link_suffix}'
             else:
                 display_title = "N/A"
 
@@ -624,20 +474,21 @@ async def get_results_html(page: int, page_size: int, gate: float, w_pop=0.6, w_
                     oc_nat = oc.get('title_native', '')
                     oc_score = oc.get('score', 0)
                     oc_pop = oc.get('popularity', 0)
-                    title_text = oc_eng or oc_rom or "Unknown"
+                    title_text = _html_escape(oc_eng or oc_rom or "Unknown")
                     link_tag = f'<a href="https://anilist.co/anime/{oc_id}" target="_blank">{title_text}</a>' if oc_id else title_text
                     subtitle = []
                     if oc_eng and oc_rom and oc_eng != oc_rom:
-                        subtitle.append(oc_rom)
+                        subtitle.append(_html_escape(oc_rom))
                     if oc_nat:
-                        subtitle.append(oc_nat)
+                        subtitle.append(_html_escape(oc_nat))
                     subtitle_html = f'<br><span class="tooltip-meta">{" | ".join(subtitle)}</span>' if subtitle else ''
-                    others_html_parts.append(f'<div class="tooltip-candidate">{link_tag}{subtitle_html}<br><span class="tooltip-meta">Score: {oc_score:.2f} | Pop: {oc_pop}</span></div>')
+                    pick_btn = f'<button class="pick-btn" hx-post="/pick" hx-vals=\'{_hx_vals(query=query_text, anilist_id=oc_id)}\' hx-target="#results-container" hx-push-url="false">Pick</button>' if oc_id else ''
+                    others_html_parts.append(f'<div class="tooltip-candidate">{link_tag}{subtitle_html}<br><span class="tooltip-meta">Score: {oc_score:.2f} | Pop: {oc_pop}</span> {pick_btn}</div>')
                 others_trigger = f'''<br><span class="show-others-wrap">({len(other_candidates)} others)<span class="hover-tooltip"><h4>Other Candidates</h4>{" ".join(others_html_parts)}</span></span>'''
 
-            auto_pass = row['metric'] >= gate
-            is_manually_included = anilist_id in MANUAL_INCLUDE
-            is_manually_excluded = anilist_id in MANUAL_EXCLUDE
+            auto_pass = display_metric >= gate
+            is_manually_included = query_text in MANUAL_INCLUDE
+            is_manually_excluded = query_text in MANUAL_EXCLUDE
             effective = (not is_manually_excluded) and (auto_pass or is_manually_included)
             status = "pass" if effective else "fail"
             has_subs = KITSUNEKKO_SUBS.get(anilist_id, False)
@@ -655,31 +506,34 @@ async def get_results_html(page: int, page_size: int, gate: float, w_pop=0.6, w_
             else:
                 status_label, status_class = "fail", "fail"
 
-            # Picker button for failed rows without a pick
+            # Picker button for rows without a pick, unpick button for picked rows
             picker_btn = ""
-            if not auto_pass and not has_pick and len(candidates) > 1:
+            if not has_pick and len(candidates) > 1:
                 qid = _quote_qid(query_text)
                 picker_btn = f'<button class="pick-btn" onclick="togglePicker(&apos;{qid}&apos;)">Pick Match</button>'
+            elif has_pick:
+                picker_btn = f'<button class="pick-btn" hx-post="/pick" hx-vals=\'{_hx_vals(query=query_text, anilist_id=0)}\' hx-target="#results-container" hx-push-url="false">Unpick</button>'
 
             html += TABLE_ROW.format(
-                query=query_text,
+                query=_html_escape(query_text),
                 display_title=display_title,
                 others_trigger=others_trigger,
                 picker_btn=picker_btn,
-                pop=row['pop'],
-                score=row['top_score'],
-                spread=row['spread'],
+                pop=display_pop,
+                score=display_score,
+                spread=display_spread,
                 subs_indicator=subs_indicator,
-                metric=row['metric'],
+                metric=display_metric,
                 status=status,
+                toggle_vals=_hx_vals(query=query_text, anilist_id=anilist_id or 0),
                 anilist_id=anilist_id or 0,
                 checked_attr=checked_attr,
                 status_label=status_label,
                 status_class=status_class
             )
 
-            # Picker row for failed rows without a pick
-            if not auto_pass and not has_pick and len(candidates) > 1:
+            # Picker row for rows without a pick
+            if not has_pick and len(candidates) > 1:
                 qid = _quote_qid(query_text)
                 picker_candidates = candidates
                 cands_html = []
@@ -694,11 +548,11 @@ async def get_results_html(page: int, page_size: int, gate: float, w_pop=0.6, w_
                     title_display = pc_eng or pc_rom or "Unknown"
                     meta_parts = []
                     if pc_rom and pc_rom != pc_eng:
-                        meta_parts.append(pc_rom)
+                        meta_parts.append(_html_escape(pc_rom))
                     if pc_nat:
-                        meta_parts.append(pc_nat)
+                        meta_parts.append(_html_escape(pc_nat))
                     if pc_type:
-                        meta_parts.append(pc_type)
+                        meta_parts.append(_html_escape(pc_type))
                     if pc_score:
                         meta_parts.append(f"Score: {pc_score:.2f}")
                     if pc_pop:
@@ -706,8 +560,8 @@ async def get_results_html(page: int, page_size: int, gate: float, w_pop=0.6, w_
                     meta_str = " | ".join(meta_parts)
                     radio_id = f"radio-{qid}-{pc_id}"
                     cands_html.append(f'''<div class="picker-candidate">
-                        <input type="radio" name="pick-{qid}" id="{radio_id}" value="{pc_id}" hx-post="/pick" hx-vals='{{"query": {_json_escape(query_text)}, "anilist_id": {pc_id}}}' hx-target="#results-container" hx-push-url="false">
-                        <label for="{radio_id}">{title_display}</label>
+                        <input type="radio" name="pick-{qid}" id="{radio_id}" value="{pc_id}" hx-post="/pick" hx-vals='{_hx_vals(query=query_text, anilist_id=pc_id)}' hx-target="#results-container" hx-push-url="false">
+                        <label for="{radio_id}">{_html_escape(title_display)}</label>
                         <span class="picker-meta">{meta_str}</span>
                     </div>''')
                 html += PICKER_ROW.format(
@@ -760,72 +614,92 @@ async def get_results_html(page: int, page_size: int, gate: float, w_pop=0.6, w_
     return f'<div id="results-table">{table_html}</div>{pagination_html}'
 
 @app.get("/results")
-async def results(request: Request, page: int = 1, page_size: int = 50, gate: float = 0.5, w_pop: float = 0.5, w_score: float = 0.25, w_spread: float = 0.25, subbed_only: str = "", source_filter: str = "all"):
-    html = await get_results_html(page, page_size, gate, w_pop, w_score, w_spread, subbed_only.lower() in ("1", "on", "true"), source_filter)
-    return HTMLResponse(content=html)
+async def results(request: Request, page: int = 1, page_size: int = 50, gate: float = 0.6, w_pop: float = 0.6, w_score: float = 0.3, w_spread: float = 0.1, subbed_only: str = "", source_filter: str = "all"):
+    subbed = subbed_only.lower() in ("1", "on", "true")
+    html = await get_results_html(page, page_size, gate, w_pop, w_score, w_spread, subbed, source_filter)
+    if request.headers.get("HX-Request", "").lower() == "true":
+        return HTMLResponse(content=html)
+    return HTMLResponse(
+        content=_render_page(
+            results_content=html,
+            page_size=page_size,
+            gate=gate,
+            w_pop=w_pop,
+            w_score=w_score,
+            w_spread=w_spread,
+            subbed_only=subbed,
+            source_filter=source_filter,
+        )
+    )
 
 @app.post("/pick")
 async def pick_candidate(request: Request):
-    body = await request.json()
-    query_text = body.get("query", "")
-    aid = int(body.get("anilist_id", 0))
-    if not query_text or not aid:
+    form = await request.form()
+    query_text = form.get("query", "")
+    aid = int(form.get("anilist_id", 0))
+    if not query_text:
         return Response(status_code=400)
-    MANUAL_PICKS[query_text] = aid
+    if aid:
+        MANUAL_PICKS[query_text] = aid
+    else:
+        MANUAL_PICKS.pop(query_text, None)
     save_manual_overrides()
-    gate = float(body.get("gate", "0.5"))
-    w_pop = float(body.get("w_pop", "0.5"))
-    w_score = float(body.get("w_score", "0.25"))
-    w_spread = float(body.get("w_spread", "0.25"))
-    page = int(body.get("page", "1"))
-    page_size = int(body.get("page_size", "50"))
-    subbed_only = body.get("subbed_only", "").lower() in ("1", "on", "true")
-    source_filter = body.get("source_filter", "all")
+    gate = float(form.get("gate", "0.6"))
+    w_pop = float(form.get("w_pop", "0.6"))
+    w_score = float(form.get("w_score", "0.3"))
+    w_spread = float(form.get("w_spread", "0.1"))
+    page = int(form.get("page", "1"))
+    page_size = int(form.get("page_size", "50"))
+    subbed_only = form.get("subbed_only", "").lower() in ("1", "on", "true")
+    source_filter = form.get("source_filter", "all")
     html = await get_results_html(page, page_size, gate, w_pop, w_score, w_spread, subbed_only, source_filter)
     return HTMLResponse(content=html)
 
 @app.post("/toggle")
 async def toggle_override(request: Request):
-    body = await request.json()
-    aid = int(body.get("anilist_id", 0))
-    if not aid:
+    form = await request.form()
+    query_text = form.get("query", "")
+    aid = int(form.get("anilist_id", 0))
+    if not query_text or not aid:
         return Response(status_code=400)
-    gate = float(body.get("gate", "0.5"))
-    w_pop = float(body.get("w_pop", "0.5"))
-    w_score = float(body.get("w_score", "0.25"))
-    w_spread = float(body.get("w_spread", "0.25"))
+    gate = float(form.get("gate", "0.6"))
+    w_pop = float(form.get("w_pop", "0.6"))
+    w_score = float(form.get("w_score", "0.3"))
+    w_spread = float(form.get("w_spread", "0.1"))
     score_sql = get_score_sql(w_pop, w_score, w_spread)
-    row = DB.execute(f"SELECT {score_sql} as metric FROM processed_data WHERE anilist_candidates[1].anilist_id = {aid} LIMIT 1").fetchone()
+    row = DB.execute(
+        f"SELECT {score_sql} as metric FROM processed_data WHERE query = '{_sql_escape(query_text)}' LIMIT 1"
+    ).fetchone()
     auto_pass = row[0] >= gate if row else False
-    is_manually_included = aid in MANUAL_INCLUDE
-    is_manually_excluded = aid in MANUAL_EXCLUDE
+    is_manually_included = query_text in MANUAL_INCLUDE
+    is_manually_excluded = query_text in MANUAL_EXCLUDE
     effective = (not is_manually_excluded) and (auto_pass or is_manually_included)
     if effective:
         # Toggle OFF: create exclusion (or remove inclusion)
-        MANUAL_INCLUDE.discard(aid)
+        MANUAL_INCLUDE.discard(query_text)
         if not auto_pass:
             pass  # Was manually included, now just removed — falls back to auto (fail)
         else:
-            MANUAL_EXCLUDE.add(aid)  # Auto passes, user wants to exclude
+            MANUAL_EXCLUDE.add(query_text)  # Auto passes, user wants to exclude
     else:
         # Toggle ON: create inclusion (or remove exclusion)
-        MANUAL_EXCLUDE.discard(aid)
+        MANUAL_EXCLUDE.discard(query_text)
         if not auto_pass:
-            MANUAL_INCLUDE.add(aid)  # Auto fails, user wants to include
+            MANUAL_INCLUDE.add(query_text)  # Auto fails, user wants to include
     save_manual_overrides()
-    page = int(body.get("page", "1"))
-    page_size = int(body.get("page_size", "50"))
-    subbed_only = body.get("subbed_only", "").lower() in ("1", "on", "true")
-    source_filter = body.get("source_filter", "all")
+    page = int(form.get("page", "1"))
+    page_size = int(form.get("page_size", "50"))
+    subbed_only = form.get("subbed_only", "").lower() in ("1", "on", "true")
+    source_filter = form.get("source_filter", "all")
     html = await get_results_html(page, page_size, gate, w_pop, w_score, w_spread, subbed_only, source_filter)
     return HTMLResponse(content=html)
 
 @app.get("/export")
 async def export_passing(request: Request):
-    gate = float(request.query_params.get("gate", "0.5"))
-    w_pop = float(request.query_params.get("w_pop", "0.5"))
-    w_score = float(request.query_params.get("w_score", "0.25"))
-    w_spread = float(request.query_params.get("w_spread", "0.25"))
+    gate = float(request.query_params.get("gate", "0.6"))
+    w_pop = float(request.query_params.get("w_pop", "0.6"))
+    w_score = float(request.query_params.get("w_score", "0.3"))
+    w_spread = float(request.query_params.get("w_spread", "0.1"))
     subbed_only = request.query_params.get("subbed_only", "").lower() in ("1", "on", "true")
     score_sql = get_score_sql(w_pop, w_score, w_spread)
     base_table = "processed_data"
@@ -840,13 +714,13 @@ async def export_passing(request: Request):
         WHERE ({score_sql}) >= {gate}
         ORDER BY metric DESC
     """).fetchall()
-    manual_ids = sorted(MANUAL_INCLUDE)
-    if manual_ids:
-        manual_ids_str = ",".join(str(x) for x in manual_ids)
+    manual_queries = sorted(MANUAL_INCLUDE)
+    if manual_queries:
+        manual_queries_str = ",".join(f"'{_sql_escape(q)}'" for q in manual_queries)
         manual_rows = DB.execute(f"""
             SELECT query, anilist_candidates, ({score_sql}) as metric
             FROM {base_table}
-            WHERE anilist_candidates[1].anilist_id IN ({manual_ids_str}) AND ({score_sql}) < {gate}
+            WHERE query IN ({manual_queries_str}) AND ({score_sql}) < {gate}
             ORDER BY metric DESC
         """).fetchall()
     else:
@@ -856,28 +730,27 @@ async def export_passing(request: Request):
     for row in rows:
         query_text = row[0]
         candidates = list(row[1]) if row[1] else []
-        if query_text in MANUAL_PICKS and candidates:
-            picked_id = MANUAL_PICKS[query_text]
-            picked_cand = next((c for c in candidates if c.get("anilist_id") == picked_id), None)
-            if picked_cand:
-                candidates = [picked_cand] + [c for c in candidates if c.get("anilist_id") != picked_id]
+        candidates = _selected_candidates(candidates, query_text)
         aid = candidates[0].get("anilist_id") if candidates else None
-        if aid and aid not in exported_ids and aid not in MANUAL_EXCLUDE:
+        if aid and aid not in exported_ids and query_text not in MANUAL_EXCLUDE:
             exported_ids.add(aid)
-            output_lines.append(json.dumps({"query": query_text, "candidates": candidates, "metric": row[2], "source": "auto"}))
+            output_lines.append(_export_crosswalk_line(query_text, candidates[0], "auto"))
     for row in manual_rows:
         query_text = row[0]
         candidates = list(row[1]) if row[1] else []
-        if query_text in MANUAL_PICKS and candidates:
-            picked_id = MANUAL_PICKS[query_text]
-            picked_cand = next((c for c in candidates if c.get("anilist_id") == picked_id), None)
-            if picked_cand:
-                candidates = [picked_cand] + [c for c in candidates if c.get("anilist_id") != picked_id]
+        candidates = _selected_candidates(candidates, query_text)
         aid = candidates[0].get("anilist_id") if candidates else None
-        if aid and aid not in exported_ids:
+        if aid and aid not in exported_ids and query_text not in MANUAL_EXCLUDE:
             exported_ids.add(aid)
-            output_lines.append(json.dumps({"query": query_text, "candidates": candidates, "metric": row[2], "source": "manual"}))
-    return Response(content="\n".join(output_lines) + "\n", media_type="application/x-ndjson", headers={"Content-Disposition": 'attachment; filename="passing_export.jsonl"'})
+            output_lines.append(_export_crosswalk_line(query_text, candidates[0], "manual"))
+    return Response(
+        content="\n".join(output_lines) + "\n",
+        media_type="application/x-ndjson",
+        headers={
+            "Content-Disposition": 'attachment; filename="passing_export.jsonl"',
+            "X-Deduplicated-By": "anilist_id",
+        },
+    )
 
 if __name__ == "__main__":
     import os
@@ -889,9 +762,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="AniList Exploratory Dashboard")
     parser.add_argument("path", type=Path, help="Path to the input JSONL file")
     parser.add_argument("--reload", action="store_true", help="Enable uvicorn reload")
+    parser.add_argument("--port", type=int, default=8000, help="Local port to bind")
     args = parser.parse_args()
     
     if args.reload:
-        uvicorn.run("scripts.exploration.anilist_exploratory:app", host="0.0.0.0", port=8000, reload=True)
+        uvicorn.run("scripts.exploration.anilist_exploratory:app", host="0.0.0.0", port=args.port, reload=True)
     else:
-        uvicorn.run(app, host="0.0.0.0", port=8000)
+        uvicorn.run(app, host="0.0.0.0", port=args.port)
