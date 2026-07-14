@@ -96,7 +96,8 @@ packages/core/src/ja_media_core/bronze/
 ```
 
 The S3 implementation belongs in `envs/services` because it owns credentials,
-pagination, retries, Range reads, and the rebuildable SQLite index:
+pagination, retries, Range reads, and its rebuildable service-local SQLite
+content index:
 
 ```text
 envs/services/src/ja_media_services/anime_audio/
@@ -109,9 +110,10 @@ The local ingest writer can use a separate S3 adapter in the frontend package
 or a later write-focused core module. Do not make the read-only service
 credentials capable of writing.
 
-The same parser and records later feed orchestration source partitions. Dagster
-or Prefect must adapt these domain contracts rather than introduce a second
-interpretation of bronze manifests.
+That SQLite file serves the anime-audio HTTP process only. It is not the shared
+episode-binding ledger. The same parser and records feed Dagster external source
+partitions and the PostgreSQL `bronze_captures` index without introducing a
+second interpretation of bronze manifests.
 
 ## API shape
 
@@ -150,10 +152,10 @@ should notify the catalog/orchestration adapter after committing a manifest.
 An incremental cursor/ETag scan remains a low-frequency repair path. No CLI or
 ordinary API request rescans the corpus.
 
-Store ETag/version and last-modified values as scan tokens in SQLite, not as
-public integrity claims. A service-computed hash only proves later bytes match
-the bytes it observed; do not require one until a silver or gold consumer needs
-content identity.
+The anime-audio service stores ETag/version and last-modified scan tokens in its
+SQLite index. Dagster records the manifest ETag as the external asset data
+version, and the shared data layer indexes the same header in PostgreSQL. An
+ETag is an observation token, not a portable content-integrity claim.
 
 Health reports the filesystem-derived and bronze providers separately. A prior
 usable index plus a failed S3 scan is `degraded`; no usable bronze index is

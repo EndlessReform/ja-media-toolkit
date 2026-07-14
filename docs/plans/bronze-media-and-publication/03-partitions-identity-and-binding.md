@@ -1,179 +1,181 @@
-# Partitions, identity, and episode binding
+# Partitions, identity, and PostgreSQL ledger
 
-Status: proposed domain model independent of the orchestrator selection.
+Status: approved shape; migrations and repository code not yet implemented.
 
-## A partition in this system
+## Identity boundary
 
-A partition is one independently tracked instance of an asset/flow output
-family. It is not necessarily an object-store prefix, database partition,
-WebDataset shard, or compute worker.
+Before acceptance, work is keyed by evidence:
 
 ```text
 bronze_capture[capture-01J...]
 episode_hint[capture-01J...]
-aligned_subtitles[anilist-15451/e003]
+binding_candidate[capture-01J...]
 ```
 
-The asset name answers "what kind of product?" The partition key answers
-"which independently buildable instance?"
-
-## Two identity spaces
-
-### Evidence-keyed work
-
-Before trusted episode identity exists, key work by stable evidence:
+After acceptance, consumer-oriented work is keyed by a locator:
 
 ```text
-bronze_capture[capture ID]
-bronze_subtitle[provider + track ID]
-episode_hint[capture ID]
-subtitle_normalization[track ID]
-```
-
-An episode hint is still a result about a capture:
-
-```json
-{
-  "capture_id": "capture-01J...",
-  "candidate": {"namespace": "anilist", "id": "15451", "episode": "3"},
-  "method": "filename-hints-v2",
-  "confidence": 0.94
-}
-```
-
-It does not rename or mutate bronze.
-
-### Episode-keyed work
-
-An accepted binding creates a logical locator:
-
-```text
-anilist-15451/e003
-```
-
-The binding contains the evidence selected for that locator:
-
-```json
-{
-  "schema_version": 1,
-  "kind": "episode-binding",
-  "binding_id": "binding-01J...",
-  "locator": {"namespace": "anilist", "id": "15451", "episode": "3"},
-  "audio_capture_id": "capture-01J...",
-  "subtitle_track_ids": ["bronze:track-01J..."],
-  "evidence_result_ids": ["hint-01J..."],
-  "decision": {"method": "human-confirmed", "decided_at": "..."}
-}
-```
-
-After this boundary, assets intended for episode consumers may share the
-logical partition:
-
-```text
-episode_audio[anilist-15451/e003]
-audio_language[anilist-15451/e003]
-aligned_subtitles[anilist-15451/e003]
+episode_binding[anilist-15451/e003]
 portable_aac[anilist-15451/e003]
+display_bundle[anilist-15451/e003]
 ```
 
-## The bridge is explicit
+Titles are metadata, never keys. Episode components are stored as text so
+special-numbering policy is not accidentally constrained by an integer column.
 
-The binding materialization depends on capture-keyed hints/evidence. Downstream
-episode assets depend on the binding and follow the capture/track references
-stored in it.
+## Database and configuration
 
-An orchestrator can show the asset-family graph automatically once declared.
-The exact runtime mapping from `capture-01J...` to `e003` is domain data and must
-be emitted as binding metadata. Do not expect the orchestrator to infer it from
-S3 paths or filenames.
+Use database `ja_media_data` and a dedicated least-privilege principal on the
+shared PostgreSQL server. The server's persistent volume must be flash-backed.
 
-If the selected framework cannot express data-dependent partition mapping
-cleanly, the acceptable fallback is:
-
-- keep exact capture/track inputs in the binding artifact;
-- declare asset-level dependency on the binding/evidence family;
-- emit exact input IDs and versions in materialization metadata;
-- use the binding as the source of truth for downstream loading.
-
-Do not invent a graph database merely to represent this bridge.
-
-## Corrections and conflicts
-
-Bindings are immutable assertions. A correction writes another binding that
-supersedes the old one. It does not rewrite bronze or past datasets.
-
-Resolution rules:
-
-- one accepted unsuperseded binding: current;
-- multiple accepted heads: explicit conflict, never latest-wins silently;
-- no accepted binding: unresolved;
-- rejected binding: historical evidence only.
-
-A previous dataset remains reproducible because it pins the binding ID it used,
-even if the logical locator later resolves differently.
-
-## Dynamic partition discovery
-
-Initial bronze bootstrap:
-
-1. list committed metadata markers once;
-2. parse them through the core bronze contract;
-3. register capture IDs as dynamic source partitions;
-4. record manifest ETag/hash as the observed source data version;
-5. checkpoint listing progress.
-
-Normal expansion should be notification-driven where possible:
+The data code location receives:
 
 ```text
-bronze writer commits manifest
-  -> registers/notifies capture ID
-  -> orchestration source partition becomes visible
+JA_MEDIA_DATA_DATABASE_URL=postgresql+psycopg://<principal>:<password>@<host>:5432/ja_media_data
 ```
 
-A low-frequency incremental scan using cursor and ETag is the repair path. No
-CLI or content request performs a full S3 scan.
+The value belongs in the code-location environment or local ignored `.env`, not
+in repository files. SQLAlchemy owns connections and transactions; Alembic owns
+schema migrations. Dagster's `DAGSTER_PG_*` settings point to a different
+database and principal.
 
-Accepted bindings similarly register logical episode partitions. Registering a
-partition is metadata-only; downstream materialization happens separately.
+## Common provenance columns
 
-## Partition-key design
+Every derived claim includes enough information to reproduce or invalidate it:
 
-Use stable machine-readable keys:
+| Column | Meaning |
+| --- | --- |
+| `input_data_version` | ETag/hash/version of the exact upstream evidence |
+| `recipe_version` | Version of parser, resolver, policy, or model |
+| `created_at` | UTC commit time (`timestamptz`) |
+| `dagster_run_id` | Nullable diagnostic only; never identity |
+
+Domain IDs are generated outside PostgreSQL and stored as text so exports and
+reimports preserve identity.
+
+## `bronze_captures`
+
+Hot index over canonical Garage manifests:
 
 ```text
-capture-01J...
-kitsunekko:{file_ref}
-anilist-15451/e003
-dataset:ja-anime-eval-v1
+capture_id              text primary key
+series_namespace        text not null
+series_id               text not null
+manifest_bucket         text not null
+manifest_key            text not null
+manifest_etag           text not null
+manifest_schema_version integer not null
+first_observed_at       timestamptz not null
+last_observed_at        timestamptz not null
+unique (manifest_bucket, manifest_key)
 ```
 
-Attach human metadata separately:
+This table is rebuildable. The Garage manifest remains the bronze contract.
+
+## `episode_hints`
+
+Immutable resolver claims:
 
 ```text
-series title
-episode display label
-provider
-recipe/model version
-content URL
-quality summary
+hint_id                 text primary key
+capture_id              text references bronze_captures
+candidate_namespace     text not null
+candidate_series_id     text not null
+candidate_episode       text not null
+method                  text not null
+confidence              double precision
+evidence                jsonb not null
+input_data_version      text not null
+recipe_version          text not null
+created_at              timestamptz not null
+dagster_run_id          text
 ```
 
-Avoid putting mutable English titles into partition identity. Avoid one asset
-definition per episode. Asset definitions are transformation families; episodes
-are partitions.
+The idempotency key covers capture, input version, recipe version, method, and
+candidate locator. A capture may have zero, one, or several hints.
 
-## Core package boundary
+## `episode_bindings`
 
-`packages/core` should provide the records and pure validation/resolution rules.
-Framework adapters belong in a separate runtime environment/package after the
-spike. Importing core must not require Dagster or Prefect.
+Immutable accepted or rejected decisions:
 
-## Acceptance
+```text
+binding_id              text primary key
+namespace               text not null
+series_id               text not null
+episode                 text not null
+audio_capture_id        text references bronze_captures
+decision                text not null       -- accepted or rejected
+decision_method         text not null       -- automatic or human-confirmed
+decision_evidence       jsonb not null
+input_data_version      text not null
+recipe_version          text not null
+supersedes_binding_id   text references episode_bindings
+created_at              timestamptz not null
+dagster_run_id          text
+```
 
-- zero/one/multiple-subtitle captures remain valid before episode binding;
-- a capture may receive several hints without changing identity;
-- one accepted binding creates an episode partition;
-- correction creates a new binding and preserves old dataset reproducibility;
-- conflicts are visible and block implicit consumer resolution;
-- downstream materialization records the exact binding and capture/track input
-  versions it used.
+Rows are never rewritten to correct history.
+
+## `current_episode_bindings`
+
+Small mutable projection updated in the same transaction that accepts or
+supersedes a binding:
+
+```text
+namespace               text not null
+series_id               text not null
+episode                 text not null
+binding_id              text unique references episode_bindings
+audio_capture_id        text unique references bronze_captures
+updated_at              timestamptz not null
+primary key (namespace, series_id, episode)
+```
+
+The primary key prevents two current captures for one locator. The unique audio
+capture constraint enforces the initial one-capture/one-episode policy. Inputs
+that need multi-episode semantics are quarantined until that policy is designed
+from real corpus evidence.
+
+## `episode_resolution_issues`
+
+Inspectable review queue, not merely failed Dagster runs:
+
+```text
+issue_id                text primary key
+capture_id              text references bronze_captures
+hint_id                 text references episode_hints
+kind                    text not null       -- conflict, overlap, ambiguous, invalid
+details                 jsonb not null
+status                  text not null       -- open, resolved, ignored
+created_at              timestamptz not null
+resolved_at             timestamptz
+resolution_note         text
+```
+
+Infrastructure failures fail and retry the Dagster run. A legitimate ambiguous
+mapping commits an open issue and is a successful, inspectable domain outcome.
+
+## Subtitle tracks
+
+When binding subtitles becomes part of the spike, use a child table rather
+than a JSON array:
+
+```text
+episode_binding_tracks(binding_id, provider, track_id, role)
+```
+
+No subtitle table is required for the first audio-only binding gate.
+
+## Snapshot location
+
+PostgreSQL is the live ledger. A separate Dagster asset exports consistent,
+versioned snapshots after database commits:
+
+```text
+audio/anime/silver/catalog/{table}/versions/{data_version}/
+  data.parquet
+  manifest.json        # written last
+```
+
+Snapshots support recovery and corpus analytics. They are not the point-lookup
+path used by incremental processing.

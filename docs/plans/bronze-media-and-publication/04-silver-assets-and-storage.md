@@ -32,10 +32,8 @@ remain in the worker workspace.
 
 ## Transformation registry
 
-If Dagster is selected, asset definitions in checked-in code are the registry.
-If Prefect is selected, flows/tasks plus a small shared asset descriptor layer
-serve the same role. Do not create a CRUD endpoint or SQL table containing every
-operation before the spike.
+Dagster asset definitions in checked-in code are the transformation registry.
+Do not create a CRUD endpoint or SQL table containing every operation.
 
 Each durable definition declares:
 
@@ -49,6 +47,20 @@ Each durable definition declares:
 
 Adding a new transformation should normally add one definition and tests, not a
 new microservice, API route family, and catalog schema.
+
+## Row claims and byte artifacts
+
+Silver has two storage shapes because it has two access patterns:
+
+| Shape | Examples | Live location |
+| --- | --- | --- |
+| Small indexed claims | capture headers, hints, bindings, conflicts | `ja_media_data` PostgreSQL database |
+| Large immutable outputs | normalized subtitles, AAC, stems, clips | Garage silver prefix |
+
+PostgreSQL runs on flash-backed server storage and serves incremental point
+lookups. It never stores audio or subtitle payloads. A Dagster snapshot asset
+exports ledger tables to versioned Parquet under
+`audio/anime/silver/catalog/`; routine lookups do not read those snapshots.
 
 ## Storage adapter
 
@@ -161,8 +173,9 @@ the graph: trim-then-Demucs is not Demucs-then-trim.
 
 Losing the orchestration database may lose convenient run history, but it must
 not make committed artifacts unreadable. Generic envelopes and published
-bundles provide recovery evidence. Re-importing historical materializations is
-optional; consumer services only require stable artifact/bundle contracts.
+bundles provide media recovery evidence. PostgreSQL backups plus immutable
+Parquet ledger snapshots preserve episode decisions. Consumer services require
+stable gold artifact/bundle contracts, not either internal database.
 
 ## Acceptance
 

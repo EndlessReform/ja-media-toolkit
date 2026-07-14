@@ -123,6 +123,9 @@ One recorded production of an asset partition at a data/code version. Its bytes
 may live in Garage; the orchestration control plane records the event, metadata,
 checks, lineage, and run logs.
 
+For an external asset such as `bronze_capture`, the event means Dagster observed
+a materialization produced by ingest. Dagster cannot execute that source asset.
+
 ### Asset check
 
 Versioned validation such as audio language, referenced-object presence, or
@@ -160,10 +163,25 @@ Owns definitions and operational state:
 
 It does not decide episode semantics or provide the stable media API.
 
+### PostgreSQL domain ledger
+
+The `ja_media_data` database owns the live, indexed capture-to-episode decision
+state:
+
+- normalized capture headers;
+- immutable hints and binding decisions;
+- the transactionally current binding projection;
+- conflicts and human review state.
+
+It runs on the shared always-on PostgreSQL service with flash-backed storage.
+It is separate from Dagster's operational database. Versioned Parquet exports
+in Garage preserve an open analytical and recovery representation.
+
 ### Garage
 
-Owns bytes, immutable artifact versions, commit markers, and coarse prefix
-lifecycle rules. It does not answer semantic completeness queries by itself.
+Owns media bytes, immutable artifact versions, commit markers, ledger snapshots,
+and coarse prefix lifecycle rules. It is not the point-lookup path for normal
+episode resolution.
 
 ### Compute
 

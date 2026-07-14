@@ -1,160 +1,84 @@
-# Orchestration options and spike
+# Dagster proof of value
 
-Status: required evaluation before silver implementation. No candidate is yet
-selected.
+Status: active evaluation. Dagster is the selected candidate for the identity
+spike, not yet approved as the final orchestrator for every media workflow.
 
-## Goal
+## Question being tested
 
-Determine whether an existing system can own the generic transformation
-registry, lineage, checks, materialization history, stale detection, retries,
-and backfills while leaving Japanese-media semantics and Garage storage under
-our control.
-
-## Field of candidates
-
-| Candidate | Strength | Main mismatch | Burden |
-| --- | --- | --- | --- |
-| Dagster OSS | Assets, partitions, checks, versions, graph UI, and backfills | Intermittent heterogeneous workers need launcher/submission design | Light–medium |
-| Prefect OSS | Simple Python flows, retries, UI, and pull workers on arbitrary machines | Run-centric; weaker durable asset/version model | Light–medium |
-| DVC + Snakemake | Reproducible file DAGs, caching, and no service | Weak live application/catalog integration | Very low |
-| Metaflow | Excellent ML-research flows, artifacts, resume, and local mode | Run-centric; shared/on-prem scaling becomes infrastructure work | Low locally, higher shared |
-| Airflow | Mature scheduled operations | Many components; task/schedule-centric rather than asset-centric | Medium–high |
-| Pachyderm | Versioned data, pipelines, provenance, and incremental processing | Kubernetes/storage-platform commitment | High |
-
-Airflow and Pachyderm are not finalists. DVC/Snakemake is the fallback if an
-always-on control plane does not earn its keep. Metaflow remains useful for
-individual large research flows even if it does not own the maintained corpus.
-
-Useful references:
-
-- [Dagster asset versioning](https://docs.dagster.io/guides/build/assets/asset-versioning-and-caching)
-- [Dagster partitions and backfills](https://docs.dagster.io/guides/build/partitions-and-backfills/backfilling-data)
-- [Dagster run launchers](https://docs.dagster.io/deployment/execution/run-launchers)
-- [Dagster instance configuration](https://docs.dagster.io/deployment/oss/oss-instance-configuration)
-- [Prefect self-hosted server](https://docs.prefect.io/v3/concepts/server)
-- [Prefect workers](https://docs.prefect.io/v3/concepts/workers)
-- [DVC workflow](https://dvc.org/doc/command-reference/)
-- [Metaflow architecture](https://docs.metaflow.org/internals/technical-overview)
-
-## Timebox
-
-Spend at most one weekend on this phase. Use the same fixtures and thin domain
-functions in both candidates; do not build two polished implementations.
-
-The spike may use ugly local configuration, one worker, and manual triggers.
-It must not add production service routes, migrate existing data, deploy remote
-infrastructure, or solve every executor. The purpose is to expose the hard
-parts with working code and choose a direction.
-
-If one candidate is clearly adequate halfway through and the other has already
-failed a must-have criterion, stop early. If neither passes by the end, record
-why and select DVC/Snakemake rather than extending the evaluation indefinitely.
-
-## Required spike workflow
-
-Use a tiny sanitized corpus with at least:
-
-- two bronze captures that resolve to episodes;
-- one audio track that passes Japanese LID;
-- one dub that fails the Japanese policy;
-- one subtitle needing normalization/alignment;
-- one portable AAC output;
-- one published `display-v1` episode bundle.
-
-Model:
+Can Dagster make this bridge visible, rebuildable, and understandable?
 
 ```text
-bronze_capture[capture ID]
-  -> episode_hint[capture ID]
-  -> episode_binding[episode locator]
-  -> episode_audio[episode locator]
-  -> audio_language[episode locator]
-  -> portable_aac[episode locator]
-  -> display_bundle[episode locator]
+external capture identity                 accepted episode identity
+bronze_capture[capture ID] -> ... -> episode_binding[anilist-{id}/e{episode}]
 ```
 
-Add a blocking Japanese-audio check. Change the LID model/recipe version and
-show which partitions become affected. Rebuild only the affected series.
+Garage and PostgreSQL retain the durable domain data. Dagster owns execution,
+lineage, partition state, checks, retries, logs, and backfills.
 
-## Storage acceptance
+## Concrete workflow
 
-The candidate must support an adapter that:
+```text
+bronze_capture[capture ID]       external; manifest already exists in Garage
+  -> episode_hint[capture ID]    PostgreSQL rows
+  -> binding_candidate[capture ID]
+  -> episode_binding[locator]    accepted transaction in PostgreSQL
+  -> binding_snapshot            versioned Parquet in Garage
+```
 
-- stores large bytes directly in Garage;
-- passes `MediaArtifactRef` values through orchestration rather than audio
-  blobs;
-- selects deterministic keys from asset/flow identity, partition, and data
-  version;
-- writes an immutable generic artifact envelope;
-- verifies content before recording a successful materialization;
-- can observe an externally committed bronze manifest;
-- leaves artifacts intelligible if orchestration state is lost.
+A conflicting candidate writes an inspectable resolution issue and does not
+create or replace a current binding.
 
-Dagster calls this an I/O manager. Prefect would use shared task/result/storage
-helpers. The contract belongs in core and must not expose either framework's
-internal run IDs as artifact identity.
+## Process and storage locations
 
-## Compute acceptance
+| Component | Execution/storage location |
+| --- | --- |
+| Webserver and daemon | Always-on control-plane VM |
+| Code location | Container on that VM; stateless except logs/scratch |
+| Dagster metadata | Dedicated `dagster` database |
+| Domain ledger | Dedicated `ja_media_data` database on flash-backed PostgreSQL storage |
+| Bronze and snapshots | Garage; bulk capacity may be HDD-backed |
+| Heavy transformations | Separate Mac, CUDA host, guest, or external job |
 
-Run the control plane on a Proxmox-hosted VM or the existing Metaflow VM in an
-isolated environment/container. Execute at least one transformation elsewhere:
+Workers receive capture, binding, and artifact references. They do not maintain
+private DuckDB/SQLite copies of the episode lookup table.
 
-- an intermittently available workstation;
-- a separate LAN/tailnet guest;
-- or a lightweight job submitted to an external compute API.
+## Phase 1: external bronze registration
 
-Record what happens while the target machine is offline:
+Define `bronze_capture` as a partitioned external asset. The stopped-by-default
+repair sensor:
 
-- Does the job remain queued?
-- Does it fail immediately?
-- Can it be retried without duplicate output?
-- Must a code server or agent remain running on the compute machine?
-- Can one select Mac, CUDA, CPU, and ephemeral queues/resources clearly?
+1. lists only committed `metadata/*.json` markers;
+2. derives or reads the stable capture ID;
+3. registers unseen dynamic partitions;
+4. reports an external materialization for each new capture ID/ETag pair;
+5. records the ETag as `dagster/data_version`;
+6. records manifest location, size, schema, series hint, and track count as
+   event metadata.
 
-This is where Prefect may beat Dagster even if Dagster has the better asset
-model.
+There is no `bronze_capture_job`: Dagster did not create the capture.
 
-## Human discoverability acceptance
+## Ledger gate
 
-At 3 a.m., the UI must make it possible to answer without SQL:
+The next phase must show:
 
-- What transformation families exist?
-- What is upstream/downstream of LID or subtitle alignment?
-- Which episode partitions are missing, failed, blocked, or stale?
-- Which check rejected one episode?
-- Which run/log produced an artifact?
-- Can the affected series be selected and rebuilt?
+- indexed lookup by capture ID and logical episode locator;
+- immutable hints with input and recipe versions;
+- transactional acceptance of one binding;
+- a uniqueness/conflict rule that survives concurrent writers;
+- an open issue for ambiguous or overlapping mappings;
+- a versioned Parquet snapshot written after the PostgreSQL commit;
+- recovery of domain meaning without querying Dagster tables.
 
-Use human partition keys such as `anilist-15451/e003` and attach titles,
-provider, model/recipe, content URLs, counts, and quality summaries as metadata.
-Do not create one asset definition per episode.
+## Acceptance
 
-## Operational acceptance
+Continue with Dagster only if the UI and code make it easy to answer:
 
-For Dagster, evaluate both:
+- Which captures have no hint or binding?
+- Why did this capture resolve to this episode?
+- Which locator or capture is in conflict?
+- Which input and recipe version produced the decision?
+- What becomes stale after a resolver-version change?
+- Can selected partitions be rebuilt without scanning or rebuilding everything?
 
-1. `dg dev` with persistent `DAGSTER_HOME` and SQLite for the spike;
-2. the likely always-on shape: webserver, daemon, code location, persistent
-   SQLite, and process or external-job execution.
-
-Postgres, per-run containers, Kubernetes, automatic schedules, and public
-internet exposure are not part of the initial acceptance bar.
-
-For Prefect, evaluate one server with SQLite plus a process worker on another
-machine. Redis/Postgres and multi-server mode are out of scope.
-
-## Decision record
-
-The spike ends with a short comparison containing:
-
-- code/config added for the same workflow;
-- number of persistent processes and volumes;
-- offline-worker behavior;
-- graph/partition/check UI screenshots or observations;
-- storage adapter complexity;
-- rebuild behavior after an input/model change;
-- recovery behavior after deleting orchestration metadata;
-- limitations requiring custom domain code.
-
-Only then amend this plan to select a framework. If both fail, use
-DVC/Snakemake and implement only the small application catalog that remains.
+Compute placement remains a later acceptance item. PostgreSQL persistence does
+not prove that intermittently available Mac/CUDA workers are pleasant to run.

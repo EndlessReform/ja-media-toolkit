@@ -70,7 +70,7 @@ current pointer.
 
 ## Service relationship to orchestration
 
-Services do not query Dagster/Prefect event tables. They index/read published
+Services do not query orchestrator event tables. They index/read published
 bundles and artifact references. This keeps:
 
 - public media contracts stable across orchestrator replacement;
@@ -146,5 +146,5 @@ If a bundle resolver/catalog service becomes necessary, it must include:
 - old Kitsunekko and filesystem-derived audio routes remain compatible;
 - current pointers never affect pinned historical datasets;
 - bundle conflicts or missing referenced objects are visible/degraded;
-- services do not need Dagster/Prefect packages or database access;
+- services do not need Dagster packages or internal database access;
 - application responses do not expose storage credentials or orchestration IDs.

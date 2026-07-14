@@ -29,6 +29,108 @@ Infrastructure and APIs that facilitate the tools and coordinate data:
     - Explain _why_ key decisions were made
     - Ensure config has nontrivial examples
 
+## Data lake
+
+The repository is evolving from a collection of direct input-to-application
+tools and narrow services into a proper data layer built around **compiled data
+products** and a pragmatic **medallion architecture**. This is a gradual
+migration, not a requirement to rewrite every existing component at once.
+
+Use these layers consistently:
+
+- **Bronze** is immutable or append-oriented captured evidence: source media,
+  extracted streams, provider files, source manifests, and provenance. Bronze
+  may contain strong hints such as an AniList ID without claiming that inferred
+  episode identity, language, timing, or quality is correct.
+- **Silver** is normalized, enriched, validated, or joined data compiled from
+  bronze: normalized inventories, measured LID, episode hints and bindings,
+  aligned subtitles, portable audio, and selected audio/subtitle pairs. Silver
+  results must retain exact input and recipe/model versions.
+- **Gold** is a consumer-ready projection with an explicit policy: episode
+  bundles, Audiobookshelf inputs, application indexes, pinned datasets, and
+  publication layouts. Gold is the normal boundary consumed by human-facing
+  applications and services.
+
+The default direction is therefore:
+
+```text
+bronze evidence -> silver compilation/enrichment -> gold projection -> application
+```
+
+Audiobookshelf and similar consumers should eventually consume gold products,
+not independently repeat `input -> application output` transformations. Avoid
+pushing durable work such as LID, episode resolution, alignment, or selection
+policy into application request paths merely because that is where the first
+caller appeared. Put reusable compilation in the data layer and let consumers
+read stable gold contracts.
+
+### Data products, orchestration, and storage
+
+- Dagster or another orchestrator owns execution, lineage, partitions,
+  versions, retries, checks, and materialization history. Its internal event
+  database is not itself a durable domain artifact or application API.
+- Durable tables, manifests, and media artifacts belong in the data lake in
+  open, inspectable forms. For tabular intermediates, immutable Parquet backed
+  by lightweight manifests is a strong default/DMZ; an embedded engine such as
+  DuckDB may query or compile those artifacts without making a DuckDB database
+  file the sole durable contract. This is a recommendation to evaluate, not an
+  automatic technology mandate.
+- The episode-identity workflow is an approved exception to direct Parquet
+  lookup: its frequent point reads, concurrent decisions, uniqueness rules, and
+  shared callers require the flash-backed `ja_media_data` PostgreSQL ledger.
+  Export versioned Parquet snapshots to Garage for recovery and analysis; do
+  not make HDD-backed object storage the normal per-episode lookup path.
+- Partitioning should reflect a semantically useful recomputation and backfill
+  boundary. Keep lower-granularity IDs as row-level provenance when making them
+  partitions would harm navigation or create needless orchestration overhead.
+- Preserve strong known grouping hints such as AniList ID in keys or metadata
+  when doing so improves operation and does not falsely promote an inference to
+  accepted identity.
+
+### Resist service and API sprawl
+
+The API surface is already large enough that adding another microservice is no
+longer a neutral choice. Do not create a service merely to make internal bronze
+or silver data queryable to another repository component. Prefer data-layer
+assets, durable lake artifacts, shared contracts, and embedded/local query
+engines unless there is a concrete application or operational requirement for
+an always-on API.
+
+Existing narrow mirrors and metadata bridges—such as Kitsunekko and anime ID
+crosswalk wrappers—may remain as-is while they are useful. Consolidate them only
+when a real migration benefit justifies the disruption. New human-facing APIs
+should normally expose gold contracts rather than raw lake internals.
+
+Escape hatches are allowed. Interactive tools, experiments, latency-sensitive
+paths, and one-off workflows may temporarily perform direct transformations or
+read lower layers. Keep the boundary visible, document why it is an exception,
+and promote stable reusable behavior into the data layer before multiple
+callers depend on it.
+
+### Architectural decision protocol
+
+The user wants strong architectural recommendations, not automatic deference,
+but consequential data-layer choices require informed sign-off. Before treating
+a high-level choice as settled, explain:
+
+1. the concrete user/domain problem being solved;
+2. the proposed end-to-end data flow and ownership boundaries;
+3. where each unit of computation executes;
+4. which durable artifacts it produces and where they live;
+5. how later steps query, join, or consume those artifacts;
+6. operational and maintenance costs;
+7. credible alternatives and why the recommendation wins; and
+8. which conclusions come from measured corpus evidence versus assumptions.
+
+Lead with the recommendation and work backward from the problem. Clearly label
+repository facts, existing proposals, new recommendations, and approved
+decisions. Proposed plan documents provide context; they are not automatically
+approved architecture. Do not respond to disagreement by reflexively abandoning
+a recommendation: reassess the evidence, then defend it concretely or explain
+why another choice is better. The user is learning parts of this stack, so
+define framework concepts in terms of this media pipeline before relying on
+framework jargon.
+
 ## File Size Limits — This Must Never Be Allowed to Happen Again™
 
 Large files conceal missing boundaries and make review, testing, and reuse
@@ -125,7 +227,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the durable ASR/config/back
 
 This repo uses Astral uv.
 
-**Always work from an environment that provides the dependencies required for your task.** 
+**Always work from an environment that provides the dependencies required for your task.**
 
 #### 1. Lightweight / Frontend Tools
 For TUI surfaces, simple file management, or subtitle alignment, use the `packages/frontend` environment. These tools do not require ML dependencies.

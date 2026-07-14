@@ -1,0 +1,25 @@
+[project]
+name = "ja-media-data"
+version = "0.1.0"
+description = "Dagster asset definitions for the ja-media data layer"
+requires-python = ">=3.13"
+dependencies = [
+    "boto3>=1.43.46",
+    "dagster==1.13.12",
+    "dagster-dg-cli==1.13.12",
+    "dagster-webserver==1.13.12",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ja_media_data"]
+
+[tool.dg]
+directory_type = "project"
+
+[tool.dg.project]
+root_module = "ja_media_data"
+defs_module = "ja_media_data.definitions"
