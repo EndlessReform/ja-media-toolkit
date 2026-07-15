@@ -4,11 +4,18 @@ version = "0.1.0"
 description = "Dagster asset definitions for the ja-media data layer"
 requires-python = ">=3.13"
 dependencies = [
+    "alembic>=1.16,<2",
     "boto3>=1.43.46",
     "dagster==1.13.12",
     "dagster-dg-cli==1.13.12",
     "dagster-webserver==1.13.12",
+    "ja-media-core",
+    "psycopg[binary]>=3.2,<4",
+    "sqlalchemy>=2.0,<3",
 ]
+
+[project.scripts]
+ja-media-data = "ja_media_data.cli:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -23,3 +30,6 @@ directory_type = "project"
 [tool.dg.project]
 root_module = "ja_media_data"
 defs_module = "ja_media_data.definitions"
+
+[tool.uv.sources]
+ja-media-core = { workspace = true }

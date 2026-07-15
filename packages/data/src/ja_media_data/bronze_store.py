@@ -28,6 +28,14 @@ class BronzeMarker:
     last_modified: str
 
 
+@dataclass(frozen=True)
+class BronzeDocument:
+    """A marker and manifest read together for bounded analytical batches."""
+
+    marker: BronzeMarker
+    manifest: dict[str, Any]
+
+
 class BronzeStore:
     """List and read bronze commit markers through the S3 API."""
 
@@ -97,6 +105,38 @@ class BronzeStore:
                 f"read {observed_etag!r}"
             )
         return json.loads(response["Body"].read())
+
+    def scan_documents(self, *, limit: int) -> Iterator[BronzeDocument]:
+        """Read at most ``limit`` markers once each, including legacy IDs.
+
+        The repair sensor's cursor makes its marker-only scan efficient after
+        bootstrap.  A one-shot resolver has no cursor, so this separate path
+        avoids reading every legacy manifest once for identity and again for
+        its contents.
+        """
+
+        if limit < 1:
+            return
+        paginator = self._client.get_paginator("list_objects_v2")
+        yielded = 0
+        for page in paginator.paginate(Bucket=self.bucket, Prefix=self.prefix):
+            for item in page.get("Contents", []):
+                key = item["Key"]
+                if not _is_manifest_key(key):
+                    continue
+                etag = item.get("ETag", "").strip('"')
+                manifest = self.read_manifest(key, expected_etag=etag)
+                marker = BronzeMarker(
+                    capture_id=_capture_id(manifest, self.bucket, key),
+                    key=key,
+                    etag=etag,
+                    size=item["Size"],
+                    last_modified=item["LastModified"].isoformat(),
+                )
+                yield BronzeDocument(marker=marker, manifest=manifest)
+                yielded += 1
+                if yielded >= limit:
+                    return
 
 
 def _is_manifest_key(key: str) -> bool:

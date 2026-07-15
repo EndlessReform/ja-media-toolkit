@@ -70,6 +70,8 @@ def test_sensor_registers_partition_and_reports_event(monkeypatch) -> None:
     )
 
     class FakeStore:
+        bucket = "media"
+
         def scan(self, cached):
             assert cached == {}
             return iter([marker])
@@ -81,10 +83,24 @@ def test_sensor_registers_partition_and_reports_event(monkeypatch) -> None:
                 "schema_version": 2,
                 "capture_id": marker.capture_id,
                 "series": {"namespace": "anilist", "id": "15451"},
+                "source_hint": "episode-03.mkv",
+                "audio": {
+                    "key": "episode-03.flac",
+                    "stream_index": 1,
+                    "codec": "flac",
+                },
                 "subtitles": [],
             }
 
+    class FakeLedger:
+        observations = []
+
+        def observe_capture(self, observation):
+            self.observations.append(observation)
+
     monkeypatch.setattr(bronze_module, "bronze_store_from_env", FakeStore)
+    ledger = FakeLedger()
+    monkeypatch.setattr(bronze_module, "ledger_repository_from_env", lambda: ledger)
     instance = dg.DagsterInstance.ephemeral()
     context = dg.build_sensor_context(instance=instance)
 
@@ -94,3 +110,5 @@ def test_sensor_registers_partition_and_reports_event(monkeypatch) -> None:
     assert [event.partition for event in result.asset_events] == ["capture-01J"]
     assert len(result.dynamic_partitions_requests) == 1
     assert result.dynamic_partitions_requests[0].partition_keys == ["capture-01J"]
+    assert [item.capture_id for item in ledger.observations] == ["capture-01J"]
+    assert ledger.observations[0].manifest_bucket == "media"

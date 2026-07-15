@@ -1,6 +1,7 @@
 # Ownership and vocabulary
 
-Status: proposed terminology and boundaries. No implementation is authorized.
+Status: terminology updated after the Phase 3 proof. Storage ownership is
+approved; the orchestrator remains under evaluation.
 
 This document exists because "asset," "result," "locator," "partition," and
 "episode" were being used for several different ideas.
@@ -93,29 +94,37 @@ completeness rules for one research use.
 
 ### Asset definition
 
-A named family of durable data products, usually defined in code:
+A named durable data product, usually a collection backed by a PostgreSQL
+relation, an artifact catalog/prefix, or a published manifest family:
 
 ```text
-bronze_capture
-episode_hint
-episode_binding
-audio_language
-aligned_subtitles
-dialogue_clips
+bronze_media_inventory
+episode_identity_ledger
+stable_episode_inventory
+audio_language_results
+subtitle_alignments
+dialogue_clip_dataset
 ```
 
-It is a transformation/product type, not one file or episode.
+It is not one row, one task invocation, or a transient list of IDs. A large
+asset may use a graph of mapped tasks to update many independently fingerprinted
+rows or artifacts.
 
 ### Partition
 
-One independently tracked instance of an asset family:
+One independently tracked slice of an asset when that slice has a stable,
+operationally useful meaning:
 
 ```text
 bronze_capture[capture-01J...]
-aligned_subtitles[anilist-15451/e003]
+ledger_snapshot[2026-07-14T00:00:00Z]
 ```
 
 A partition is not necessarily an S3 prefix, DB partition, shard, or worker.
+Do not create a Dagster partition merely because a PostgreSQL table has a row.
+In particular, do not dynamically mirror every accepted locator, media pair,
+or clip into Dagster unless independent UI selection/backfill is a measured
+requirement worth the synchronization cost.
 
 ### Materialization
 
@@ -130,6 +139,18 @@ a materialization produced by ingest. Dagster cannot execute that source asset.
 
 Versioned validation such as audio language, referenced-object presence, or
 alignment quality. A blocking check may prevent downstream materialization.
+
+Checks validate a durable collection or a meaningful partition. Row-level
+eligibility and human-review status belong in typed domain results and the
+PostgreSQL ledger; they are not represented by omitting an asset
+materialization.
+
+### Task
+
+One execution step inside an asset update, such as parsing a capture, invoking
+LID, running ALASS, hashing an output, or committing an artifact. Tasks may map
+over a bounded PostgreSQL selection and retry independently. Their parameters
+are typed domain references, not IDs copied manually between scripts.
 
 ## Plane ownership
 
@@ -156,9 +177,9 @@ or run-history database.
 Owns definitions and operational state:
 
 - declared asset/flow graph;
-- code/data versions;
-- runs, retries, logs, checks, and materializations;
-- partition status and backfills;
+- code/data versions at durable product boundaries;
+- runs, mapped-task retries, logs, checks, and materializations;
+- coarse partition status and backfills where partitions are useful;
 - dispatch to compute.
 
 It does not decide episode semantics or provide the stable media API.

@@ -1,22 +1,25 @@
 # Bronze media, episode identity, and publication
 
-Status: Dagster proof of value in progress. PostgreSQL ledger design approved;
-table implementation remains gated after external bronze registration.
+Status: Phases 1-3 were implemented as a Dagster proof of value. The
+PostgreSQL ledger and external bronze registration remain approved. The
+capture-to-locator partition-promotion design is rejected and must be removed
+before the first downstream silver vertical slice.
 
 ## Recommendation
 
-Use Dagster to orchestrate compilation from immutable bronze evidence into
-silver claims and gold bundles. Use the shared PostgreSQL server for the live,
-indexed episode-identity ledger. Keep media and versioned open snapshots in
-Garage.
+Continue evaluating Dagster as the orchestrator for a small graph of durable
+collection-level products. Use Dagster tasks inside those products for bounded
+per-capture, per-episode, or per-pair work. PostgreSQL, not Dagster partitions,
+owns row-level eligibility, fingerprints, current decisions, and review state.
+Keep media and versioned open snapshots in Garage.
 
 ```text
 Garage bronze manifests/media
-  -> external bronze_capture[capture ID]
-  -> PostgreSQL episode hints and binding decisions
-  -> validated episode_binding[anilist-{id}/e{episode}]
-  -> silver media artifacts in Garage
-  -> versioned gold episode bundle
+  -> external bronze inventory
+  -> episode identity ledger (PostgreSQL collection)
+  -> stable episode inventory (PostgreSQL collection keyed by locator)
+  -> silver artifact collections in Garage plus PostgreSQL catalogs
+  -> versioned gold bundle collections
   -> application or publication
 ```
 
@@ -38,21 +41,43 @@ PostgreSQL and Dagster use separate databases and principals. Consumer services
 must not query Dagster's database. Normal applications eventually consume gold
 bundle contracts rather than the internal silver ledger.
 
-## Current proof boundary
+## Result of the first proof
 
-The next gates are deliberately small:
+The completed proof established:
 
-1. Represent committed bronze captures as external Dagster assets. A repair
+1. Committed bronze captures can be observed as external Dagster assets. A repair
    sensor registers capture partitions and reports manifest ETags as data
    versions; it never launches a job that pretends to create bronze.
-2. Add the PostgreSQL schema and repository boundary described in
+2. The PostgreSQL schema and repository boundary described in
    `03-partitions-identity-and-binding.md`.
-3. Produce capture-keyed episode hints and accept one binding transactionally.
-4. Quarantine one conflicting mapping and expose the result in Dagster.
-5. Change a resolver recipe version and rebuild only affected partitions.
+3. Capture-keyed resolution can produce idempotent hints, accepted bindings,
+   and durable review issues.
+4. A 100-capture development slice accepted 52 bindings and quarantined 48
+   with useful reasons.
 
-Do not begin LID, alignment, portable AAC, or consumer integration until these
-gates show that the identity bridge is understandable and operable.
+It also disproved the proposed `validated_episode_mapping` boundary. Giving a
+capture-partitioned downstream asset an optional output makes rejected domain
+outcomes look missing, while registering a second locator partition namespace
+duplicates PostgreSQL state and complicates data-dependent fan-in. Do not
+continue that model.
+
+## Next proof boundary
+
+1. Remove `validated_episode_mapping` and its `stable_episode_mapping` asset
+   check from the executable graph. Preserve the resolver, ledger, diagnostics,
+   and tests of domain policy.
+2. Define one collection-level `episode_identity_ledger` asset whose internal
+   task graph selects a bounded set of unresolved or stale captures, maps the
+   resolver over them, and commits bindings/issues idempotently.
+3. Expose `stable_episode_inventory` as a PostgreSQL-backed durable collection,
+   not a dynamically synchronized locator partition registry.
+4. Prove task-level retry behavior: committed successes are adopted, an
+   operational failure can be retried without recomputing them, and domain
+   ambiguity remains review state rather than a failed run.
+5. Use the first real `portable_audio` plus `audio_lid` slice to decide whether
+   Dagster's run UI, task retries, and collection lineage justify keeping it.
+
+Do not add per-locator or per-clip Dagster partitions as part of this proof.
 
 ## Durable identity rules
 
@@ -80,3 +105,4 @@ gates show that the identity bridge is understandable and operable.
 - [Ingest and publication](bronze-media-and-publication/07-ingest-and-publication.md)
 - [Packed datasets](bronze-media-and-publication/08-packed-datasets.md)
 - [Implementation roadmap](bronze-media-and-publication/09-implementation-roadmap.md)
+- [Phase 3 spike report](bronze-media-and-publication/10-phase3-spike-report.md)

@@ -31,14 +31,16 @@ def parse_media_filename(filename_stem: str) -> ParsedMediaFilename:
     )
 
 
-def suggest_ordinary_episode(filename_stem: str) -> int | None:
+def suggest_ordinary_episode(
+    filename_stem: str, *, parsed: ParsedMediaFilename | None = None
+) -> int | None:
     """Return one unambiguous positive integer episode suggestion.
 
     Multi-episode, fractional, special, and otherwise ambiguous values return
     ``None`` so an interactive caller can request an explicit mapping.
     """
 
-    values = parse_media_filename(filename_stem).episode_values
+    values = (parsed or parse_media_filename(filename_stem)).episode_values
     if len(values) != 1:
         return None
     candidate = _positive_int(values[0])

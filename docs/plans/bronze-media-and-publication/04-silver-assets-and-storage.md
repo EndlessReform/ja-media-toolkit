@@ -1,28 +1,28 @@
 # Silver assets and storage
 
-Status: proposed domain/storage contract; orchestration implementation is gated
-on the spike.
+Status: proposed domain/storage contract, revised after the Phase 3 spike to
+use collection-level assets with internal mapped tasks.
 
 ## What silver means
 
 Silver is a reusable claim or derived byte stream with explicit input and
 recipe provenance. It is not a single quality level or one monolithic schema.
 
-Candidate asset families include:
+Candidate durable collection assets include:
 
 ```text
-episode_hint
-episode_binding
-audio_language
-subtitle_normalization
-subtitle_language
-subtitle_alignment
-subtitle_cleaning
-portable_aac
-demucs_stems
-trimmed_audio
-dialogue_clips
-encodec_features
+episode_identity_ledger
+stable_episode_inventory
+audio_language_results
+normalized_subtitles
+subtitle_language_results
+subtitle_alignments
+cleaned_subtitles
+portable_audio
+stem_artifacts
+trimmed_audio_artifacts
+dialogue_clip_dataset
+encodec_feature_dataset
 ```
 
 Only persist a boundary if it is expensive, reusable, independently selectable,
@@ -30,12 +30,18 @@ decision-bearing, shared across workflows, or part of a published dataset.
 Scratch WAVs, temporary resamples, partial tensors, and parser intermediates
 remain in the worker workspace.
 
+A collection asset may contain thousands of independently fingerprinted rows
+or immutable artifacts. Per-capture parsing, per-episode LID, per-pair ALASS,
+hashing, validation, and upload are tasks inside the asset update; they are not
+automatically separate software-defined assets or partitions.
+
 ## Transformation registry
 
-Dagster asset definitions in checked-in code are the transformation registry.
-Do not create a CRUD endpoint or SQL table containing every operation.
+Dagster asset and internal task definitions in checked-in code are the
+transformation registry. Do not create a CRUD endpoint or SQL table containing
+every operation.
 
-Each durable definition declares:
+Each durable asset definition declares:
 
 - stable asset/operation name;
 - input asset families and partition relationship;
@@ -45,8 +51,14 @@ Each durable definition declares:
 - checks and blocking policy;
 - storage adapter/I/O manager.
 
-Adding a new transformation should normally add one definition and tests, not a
-new microservice, API route family, and catalog schema.
+Its internal task graph may additionally declare bounded selection, mapping,
+concurrency, retry, and commit behavior. PostgreSQL supplies typed domain
+references for selected work; large media never becomes a task return value.
+
+Adding a new durable product should normally add one asset definition and
+tests, not one asset per row and not a new microservice/API route family. A
+helper step used by only one product remains a task or ordinary typed Python
+function.
 
 ## Row claims and byte artifacts
 
@@ -154,16 +166,16 @@ is adopted; partial output never becomes current.
 
 ## Concrete sidecar outputs
 
-| Asset | Inputs | Durable outputs/checks |
+| Collection asset | Inputs | Durable outputs/checks |
 | --- | --- | --- |
-| `subtitle_normalization` | one raw track | canonical UTF-8 SRT, cue JSON, parser/rule version, cue counts |
-| `subtitle_language` | normalized cues | language evidence, model/version, sampling policy |
-| `subtitle_alignment` | subtitle, target audio, optional reference | aligned SRT/cues, offsets, unmatched cues, timing summary |
-| `subtitle_cleaning` | normalized/aligned cues | cleaned SRT/cues and changed/removed counts |
-| `portable_aac` | episode audio | AAC plus verified media facts |
-| `demucs_stems` | audio | named stems plus model/checkpoint |
-| `trimmed_audio` | audio and edit decision | audio plus explicit edit list |
-| `dialogue_clips` | selected audio/subtitles | sample manifest and clips or a packed clip artifact |
+| `normalized_subtitles` | raw track inventory | canonical UTF-8 SRT, cue JSON, parser/rule version, cue counts |
+| `subtitle_language_results` | normalized cues | language evidence, model/version, sampling policy |
+| `subtitle_alignments` | selected pairs and optional reference | aligned SRT/cues, offsets, unmatched cues, timing summary |
+| `cleaned_subtitles` | normalized/aligned cues | cleaned SRT/cues and changed/removed counts |
+| `portable_audio` | stable episode inventory | AAC plus verified media facts |
+| `stem_artifacts` | selected audio | named stems plus model/checkpoint |
+| `trimmed_audio_artifacts` | audio and edit decision | audio plus explicit edit list |
+| `dialogue_clip_dataset` | selected audio/subtitles | sample manifest and clips or packed clip artifacts |
 
 Measured language never overwrites a bronze declared-language hint. Aligned or
 cleaned subtitles never overwrite captured tracks. Order remains explicit in

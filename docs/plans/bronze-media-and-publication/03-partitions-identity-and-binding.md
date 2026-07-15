@@ -1,24 +1,34 @@
 # Partitions, identity, and PostgreSQL ledger
 
-Status: approved shape; migrations and repository code not yet implemented.
+Status: PostgreSQL identity and provenance schemas are approved and implemented
+through the Phase 3 development spike. The proposed locator-keyed Dagster
+projection is rejected; locator-keyed domain rows remain approved.
 
 ## Identity boundary
 
-Before acceptance, work is keyed by evidence:
+Before acceptance, row-level work is keyed by evidence:
 
 ```text
-bronze_capture[capture-01J...]
-episode_hint[capture-01J...]
-binding_candidate[capture-01J...]
+capture-01J...
 ```
 
-After acceptance, consumer-oriented work is keyed by a locator:
+After acceptance, consumer-oriented domain records are keyed by a locator:
 
 ```text
-episode_binding[anilist-15451/e003]
-portable_aac[anilist-15451/e003]
-display_bundle[anilist-15451/e003]
+anilist-15451/e003
 ```
+
+This is a domain identity boundary, not a requirement to create a second
+Dagster dynamic partition definition. PostgreSQL relations and Garage artifact
+manifests carry capture, locator, pair, and result IDs. Collection-level
+Dagster assets may update many such rows or artifacts with internal mapped
+tasks.
+
+The rejected Phase 3 projection gave `validated_episode_mapping` the complete
+capture partition namespace while conditionally omitting quarantined outputs.
+That made "missing" ambiguous. Synchronizing only accepted locator keys into a
+new Dagster registry would duplicate the ledger. Remove that executable asset
+and check; preserve the resolver and schemas below.
 
 Titles are metadata, never keys. Episode components are stored as text so
 special-numbering policy is not accidentally constrained by an integer column.
@@ -179,3 +189,21 @@ audio/anime/silver/catalog/{table}/versions/{data_version}/
 
 Snapshots support recovery and corpus analytics. They are not the point-lookup
 path used by incremental processing.
+
+## Incremental work selection
+
+Executable collection assets select a bounded delta from PostgreSQL using
+input fingerprints, recipe/model versions, and current-result joins. For
+example, episode resolution selects captures with no outcome for the current
+manifest ETag and resolver recipe. Alignment selects accepted media pairs with
+no committed result for the current aligner recipe.
+
+The selected rows become typed task inputs inside the Dagster run. Users launch
+work with semantic filters such as AniList series, episode range, issue kind,
+or a bounded `limit`; repository code resolves internal IDs. Manual copy/paste
+of binding or result IDs is not an operating procedure.
+
+Successful tasks commit deterministic results as they finish. Retrying a
+partially failed collection update adopts already committed results and selects
+only missing or stale work. PostgreSQL provides record-level cache truth;
+Dagster provides run/task retry history.

@@ -170,20 +170,51 @@ failure, not a harmless style nit.**
 The services are typically deployed as a suite of containers coordinated by `compose.yaml` in the root.
 
 - **Remote infrastructure operations are user-owned.** Under no circumstances
-  should an agent proactively SSH into any machine, connect to a hypervisor or
-  guest, inspect remote containers, alter remote infrastructure, or
-  deploy/restart services. Do not interpret requests to investigate, fix,
-  remediate, or verify a service as authorization for remote infrastructure
-  access or deployment. Prepare and validate the repository changes locally,
-  then give the user the commands or handoff needed to perform remote
-  infrastructure operations themselves. This remains in force until these
-  repository instructions explicitly say otherwise.
+  should an agent proactively open an administrative shell/session on a host,
+  hypervisor, or guest; inspect remote containers; alter host or cluster
+  configuration; or deploy/restart services. Do not interpret requests to
+  investigate, fix, remediate, or verify an application as authorization for
+  host-level access or deployment. Prepare and validate repository changes
+  locally, then give the user the commands or handoff needed for remote
+  infrastructure operations. Connecting to a configured application or data
+  service is not, by itself, a host-level infrastructure operation; the
+  data-plane rules below govern those connections.
 - **User-requested API smoke tests are allowed.** Agents may make
   application-level HTTP/API requests to user-specified service URLs for client
   validation and smoke testing when the user explicitly asks for that test.
   Keep these calls limited to the documented API behavior under test, and do
   not treat API access as permission to inspect or operate the remote host
   itself.
+- **Configured data-plane reads are allowed.** Agents may use repository clients
+  and configured credentials to perform non-mutating reads against development
+  or production application data services when relevant to the task. This
+  includes PostgreSQL connection checks and `SELECT`/catalog queries, and
+  S3-compatible `LIST`, `HEAD`, and `GET` operations. These reads do not require
+  separate live-smoke authorization merely because the service runs on another
+  machine. Continue to avoid sensitive system catalogs, credential tables,
+  private user data unrelated to the task, and unnecessarily broad result
+  dumps. Use bounded projections/counts instead of `SELECT *` when output could
+  expose sensitive or voluminous data.
+- **Additive development migrations are allowed.** When implementation work
+  includes a schema change, agents may run checked-in, non-destructive migrations
+  against the configured development database. Allowed operations include
+  creating new application tables, indexes, constraints, and adding compatible
+  columns. Review the rendered migration first. Production migrations always
+  remain user-owned unless the user separately and explicitly authorizes that
+  exact production migration.
+- **Remote data writes are not implied.** Read access and additive development
+  migration permission do not authorize application `INSERT`, `UPDATE`,
+  `DELETE`, `COPY FROM`, object upload/overwrite/delete, remote file edits,
+  destructive or compatibility-breaking DDL, or test fixtures written to a
+  shared database. `DROP`, `TRUNCATE`, destructive `ALTER`, database resets, and
+  bulk rewrites require separate explicit authorization even in development.
+  Database/role/principal creation, grants, credential creation/rotation, and
+  secret inspection remain user-owned. Passing an existing configured secret
+  opaquely to its intended client is allowed; printing, parsing for disclosure,
+  or modifying the secret is not.
+- These remote-data restrictions do not prohibit ordinary edits to repository
+  files when the user asks to build or change code; they govern external data
+  services and remote machine state.
 - **Local Docker is allowed.** Agents may build, run, restart, inspect, and test
   containers on the current development machine when useful for validation.
   Keep local validation clearly distinguished from remote deployment.

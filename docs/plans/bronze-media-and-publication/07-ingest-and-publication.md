@@ -32,20 +32,23 @@ Audiobookshelf projection as transformation history.
 4. store text sidecars with source/stored format provenance;
 5. upload objects;
 6. commit bronze manifest last;
-7. notify/register the new capture partition.
+7. notify/observe the new capture in the bronze inventory.
 
 Manual episode choice is not written into bronze.
 
 ### Bind
 
-Run hints and human confirmation, then publish immutable `EpisodeBinding`.
-Register the logical episode partition only after acceptance.
+Run hints and human confirmation, then publish immutable `EpisodeBinding` rows
+and refresh `stable_episode_inventory`. Do not synchronize accepted locators
+into a second Dagster dynamic partition registry.
 
 ### Derive and check
 
-Materialize selected assets such as `portable_aac`, LID, normalization, and
-alignment. A local run may reuse already-open source bytes, but every committed
-result still records the bronze/binding versions it represents.
+Update selected collection assets such as `portable_audio`, LID results,
+normalized subtitles, and alignments. Each update selects a bounded eligible
+set from PostgreSQL and maps typed tasks over it. A local run may reuse
+already-open source bytes, but every committed result still records the
+bronze/binding versions it represents.
 
 ### Bundle
 
@@ -61,17 +64,17 @@ separate durable commit.
 ## CLI responsibility
 
 `ja-media` remains the user-facing command and domain client. It does not
-maintain the orchestration database or scan all S3 objects. Depending on the
-selected framework, it launches a materialization/flow or performs direct
-capture/human-review actions.
+maintain the orchestration database or scan all S3 objects. It launches a named
+collection update with semantic selectors, or performs direct capture and
+human-review actions. Repository code resolves internal IDs.
 
 Compatibility commands may remain:
 
 ```text
 ja-media media capture <source-dir> --anilist-id 15451
-ja-media media bind --capture-id ... --episode 3
+ja-media media bind --capture ... --episode anilist-15451/e003
 ja-media media materialize display-v1 --episode anilist-15451/e003
-ja-media media publish audiobookshelf --bundle-id ...
+ja-media media publish audiobookshelf --episode anilist-15451/e003
 ```
 
 `audio-library ingest --capture-to-bronze` may orchestrate these stages during
@@ -112,7 +115,7 @@ publication record and `metadata.json`.
 ## Acceptance
 
 - each stage runs/resumes independently;
-- normal flow commits capture before binding, binding before episode assets,
+- normal flow commits capture before binding, binding before episode products,
   and bundle before publication;
 - the legacy filesystem library remains playable/indexable;
 - publication can be rebuilt from a pinned bundle;

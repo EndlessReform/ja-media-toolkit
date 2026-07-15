@@ -11,7 +11,7 @@ Do not reduce every problem to `valid=false`.
 | --- | --- | --- |
 | Missing | Never materialized or physically absent | Build or repair |
 | Failed | Attempt did not commit a valid result | Retry after diagnosis |
-| Stale/unsynced | Inputs, definition, model, or policy changed | Rebuild selected partitions |
+| Stale/unsynced | Inputs, definition, model, or policy changed | Rebuild selected records/artifacts |
 | Superseded | A newer binding/result replaced it | Preserve for history; do not select as current |
 | Quarantined/rejected | Known unfit for a policy | Block consumers/downstream work |
 | Deleted | Bytes intentionally reaped | Preserve tombstone/metadata where useful |
@@ -27,26 +27,30 @@ The orchestrator only knows what is declared and observed:
 - external bronze changes must be observed or notified;
 - dependencies must be declared rather than hidden S3 reads.
 
-In Dagster, changing an asset code version marks that asset unsynced. When it is
-rematerialized and produces a different data version, downstream materializations
-that used the old upstream version become unsynced. This is useful but not magic:
-external storage mutation is invisible until observed.
+Dagster records code and collection materialization versions, but PostgreSQL
+and artifact manifests own item-level staleness. A result is current only when
+its complete input fingerprint and recipe/model version match. Collection
+updates query for missing or stale records and map tasks over that bounded
+selection. External storage mutation remains invisible until observed.
 
 ## LID failure example
 
 Suppose `audio-lid-v1` incorrectly accepted dubbed audio for two series.
 
 1. Publish `audio-lid-v2` including model/checkpoint/config identity.
-2. Select episode partitions for the affected AniList IDs.
-3. Rematerialize LID for that selection.
-4. Record blocking check failures for non-Japanese audio.
+2. Launch the LID collection update with the affected AniList IDs as a semantic
+   selector.
+3. Repository code selects only rows missing `audio-lid-v2` for the exact input
+   audio version.
+4. Record policy decisions for non-Japanese audio.
 5. Rebuild downstream assets whose input data version changed.
 6. Publish new bundles/dataset versions.
 7. Mark old datasets stale or quarantined, but retain their pinned inputs until
    lifecycle policy permits removal.
 
-The orchestrator manages selection, runs, checks, history, and backfills. Domain
-code identifies the affected series and defines the Japanese-audio threshold.
+The orchestrator manages the collection update, mapped tasks, retries, logs,
+history, and coarse backfills. Domain code and PostgreSQL identify the affected
+records and define the Japanese-audio threshold.
 
 ## Manual quarantine
 
@@ -63,18 +67,19 @@ available for audit unless explicitly reaped.
 
 ## Rebuild selection
 
-At minimum support:
+At minimum support semantic work selectors for:
 
-- one partition;
+- one locator, capture, pair, or result reference;
 - all episodes in one AniList series;
-- missing partitions for one asset;
-- failed or blocked partitions;
-- an asset plus selected downstream closure;
+- missing or stale records for one collection asset;
+- operationally failed work and domain review issues;
+- a collection asset plus selected downstream products;
 - all members of one pinned dataset;
-- explicit force-rematerialization despite an unchanged version.
+- explicit force-rebuild despite an unchanged fingerprint.
 
-Human-friendly series title metadata should make the selection understandable,
-but stable partition keys remain numeric/machine-readable.
+Users select by stable domain locators and human-friendly metadata. Internal
+binding/result IDs are resolved by repository code and are not copied manually
+between scripts.
 
 ## S3 lifecycle tiers
 
@@ -147,7 +152,7 @@ rebuildable:
 
 ## Acceptance
 
-- model/config changes identify selected stale partitions;
+- model/config changes identify selected stale records/artifacts;
 - blocking LID prevents new downstream consumer bundles;
 - old bundles/datasets remain reproducible and visibly superseded/quarantined;
 - a missing Garage object is detected rather than trusted from orchestration

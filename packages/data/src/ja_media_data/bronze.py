@@ -7,10 +7,18 @@ changed commit manifests as external materializations.
 
 import json
 import os
+from datetime import UTC, datetime
+from functools import lru_cache
 
 import dagster as dg
+from ja_media_core.bronze import parse_bronze_manifest
 
 from ja_media_data.bronze_store import BronzeMarker, BronzeStore
+from ja_media_data.database import create_ledger_engine, create_session_factory
+from ja_media_data.repository import (
+    CaptureObservation,
+    LedgerRepository,
+)
 
 
 BRONZE_CAPTURE_PARTITIONS = dg.DynamicPartitionsDefinition(name="bronze_capture_ids")
@@ -37,6 +45,14 @@ def bronze_store_from_env() -> BronzeStore:
     )
 
 
+@lru_cache(maxsize=1)
+def ledger_repository_from_env() -> LedgerRepository:
+    """Build one pooled PostgreSQL repository for the code-location process."""
+
+    engine = create_ledger_engine()
+    return LedgerRepository(create_session_factory(engine))
+
+
 bronze_capture = dg.AssetSpec(
     key="bronze_capture",
     group_name="bronze",
@@ -58,6 +74,7 @@ def bronze_scan_sensor(context: dg.SensorEvaluationContext) -> dg.SensorResult:
     """Register partitions and report one external materialization per ETag."""
 
     store = bronze_store_from_env()
+    ledger = ledger_repository_from_env()
     state = (
         json.loads(context.cursor)
         if context.cursor
@@ -96,15 +113,36 @@ def bronze_scan_sensor(context: dg.SensorEvaluationContext) -> dg.SensorResult:
         dynamic_partitions_requests=(
             [BRONZE_CAPTURE_PARTITIONS.build_add_request(new_keys)] if new_keys else []
         ),
-        asset_events=[
-            _external_materialization(
-                marker,
-                store.read_manifest(marker.key, expected_etag=marker.etag),
-            )
-            for marker in selected
-        ],
+        asset_events=[_register_marker(store, ledger, marker) for marker in selected],
         cursor=json.dumps(next_state, separators=(",", ":"), sort_keys=True),
     )
+
+
+def _register_marker(
+    store: BronzeStore, ledger: LedgerRepository, marker: BronzeMarker
+) -> dg.AssetMaterialization:
+    """Index one manifest header, then construct its external Dagster event."""
+
+    manifest = store.read_manifest(marker.key, expected_etag=marker.etag)
+    event = _external_materialization(marker, manifest)
+    typed_manifest = parse_bronze_manifest(
+        manifest,
+        capture_id=marker.capture_id,
+        manifest_key=marker.key,
+    )
+    ledger.observe_capture(
+        CaptureObservation(
+            capture_id=marker.capture_id,
+            series_namespace=typed_manifest.series.namespace,
+            series_id=typed_manifest.series.identifier,
+            manifest_bucket=store.bucket,
+            manifest_key=marker.key,
+            manifest_etag=marker.etag,
+            manifest_schema_version=typed_manifest.schema_version,
+            observed_at=datetime.now(UTC),
+        )
+    )
+    return event
 
 
 def _external_materialization(
