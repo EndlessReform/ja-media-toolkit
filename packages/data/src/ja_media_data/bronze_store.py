@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Iterator
@@ -89,7 +90,7 @@ class BronzeStore:
     ) -> dict[str, Any]:
         """Read one manifest and optionally require the listed object version.
 
-        The repair scan uses the listing ETag as Dagster's source data version.
+        The repair scan uses the listing ETag as the source data version.
         Rejecting a changed object prevents a scan/read race from attaching old
         version metadata to new manifest contents; the next sensor tick retries
         the newly listed version.
@@ -137,6 +138,22 @@ class BronzeStore:
                 yielded += 1
                 if yielded >= limit:
                     return
+
+
+def bronze_store_from_env() -> BronzeStore:
+    """Build the read-only Garage adapter from the shared bronze settings."""
+
+    bucket = os.environ.get("JA_MEDIA_BRONZE_BUCKET")
+    if not bucket:
+        raise RuntimeError("JA_MEDIA_BRONZE_BUCKET must name the bronze bucket")
+    return BronzeStore(
+        endpoint_url=os.environ.get(
+            "JA_MEDIA_S3_ENDPOINT_URL", "http://magi06-storage:3900"
+        ),
+        bucket=bucket,
+        prefix=os.environ.get("JA_MEDIA_BRONZE_PREFIX", "audio/anime/bronze"),
+        addressing_style=os.environ.get("JA_MEDIA_S3_ADDRESSING_STYLE", "path"),
+    )
 
 
 def _is_manifest_key(key: str) -> bool:

@@ -1,16 +1,15 @@
-"""End-to-end resolver service tests over the transactional ledger."""
+"""End-to-end compiler tests over PostgreSQL-cataloged DuckLake products."""
+
+import os
+import uuid
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
 
 from ja_media_data.bronze_store import BronzeDocument, BronzeMarker
-from ja_media_data.database import create_session_factory
 from ja_media_data.episode_metadata import SeriesEpisodeMetadata
-from ja_media_data.models import Base
-from ja_media_data.repository import LedgerRepository
-from ja_media_data.resolution_service import resolve_document
+from ja_media_data.lakehouse import CatalogConfig, apply_schema, connect_catalog
+from ja_media_data.lakehouse.repository import DuckLakeRepository
+from ja_media_data.resolution_service import resolve_batch
 
 
 class FakeStore:
@@ -29,15 +28,22 @@ class FakeMetadata:
 
 
 @pytest.fixture
-def repository() -> LedgerRepository:
-    engine = create_engine(
-        "sqlite+pysqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
+def repository(tmp_path) -> DuckLakeRepository:
+    postgres_url = os.environ.get(
+        "JA_MEDIA_PHASE_B_TEST_DATABASE_URL",
+        "postgresql://ja_media_lakehouse_test:ja_media_lakehouse_test"
+        "@127.0.0.1:55432/ja_media_lakehouse_test",
     )
-    Base.metadata.create_all(engine)
-    sessions: sessionmaker[Session] = create_session_factory(engine)
-    return LedgerRepository(sessions)
+    connection = connect_catalog(
+        CatalogConfig(
+            postgres_url=postgres_url,
+            metadata_schema="phase_c2_resolver_" + uuid.uuid4().hex,
+            data_path=str(tmp_path / "ducklake"),
+        )
+    )
+    apply_schema(connection)
+    yield DuckLakeRepository(connection)
+    connection.close()
 
 
 def document(
@@ -66,77 +72,78 @@ def document(
     )
 
 
-def test_apply_is_idempotent_and_overlap_becomes_issue(
-    repository: LedgerRepository,
+def test_batch_quarantines_overlap_and_identical_replay_is_zero_write(
+    repository: DuckLakeRepository,
 ) -> None:
-    first = resolve_document(
-        document("capture-1"),
+    documents = (document("capture-1"), document("capture-2"))
+    first = resolve_batch(
+        documents,
         store=FakeStore(),
         metadata_provider=FakeMetadata(),
         repository=repository,
     )
-    repeated = resolve_document(
-        document("capture-1"),
-        store=FakeStore(),
-        metadata_provider=FakeMetadata(),
-        repository=repository,
-    )
-    overlap = resolve_document(
-        document("capture-2"),
+    repeated = resolve_batch(
+        documents,
         store=FakeStore(),
         metadata_provider=FakeMetadata(),
         repository=repository,
     )
 
-    assert first.classification == "accepted"
-    assert repeated.classification == "accepted"
-    assert overlap.classification == "quarantined"
-    assert overlap.issue_kind == "overlap"
-    issue = repository.get_latest_open_issue("capture-2")
-    assert issue is not None
-    assert issue.kind == "overlap"
+    assert [item.classification for item in first.results] == [
+        "accepted",
+        "quarantined",
+    ]
+    assert first.results[1].issue_kind == "overlap"
+    assert first.bronze_write is not None and first.bronze_write.written is True
+    assert first.resolution_write is not None
+    assert first.resolution_write.written is True
+    assert repeated.bronze_write is not None
+    assert repeated.bronze_write.written is False
+    assert repeated.resolution_write is not None
+    assert repeated.resolution_write.written is False
+    assert repository.summary()["episode_bindings_auto"] == 1
+    assert repository.summary()["resolution_issues_auto"] == 1
 
 
-def test_invalid_manifest_is_written_to_review_queue(
-    repository: LedgerRepository,
+def test_invalid_manifest_is_in_rebuilt_review_product(
+    repository: DuckLakeRepository,
 ) -> None:
     invalid = document("capture-bad")
     invalid = BronzeDocument(marker=invalid.marker, manifest={"not": "a manifest"})
 
-    result = resolve_document(
-        invalid,
+    batch = resolve_batch(
+        (invalid,),
         store=FakeStore(),
         metadata_provider=FakeMetadata(),
         repository=repository,
     )
 
-    assert result.reason == "invalid_manifest"
+    assert batch.results[0].reason == "invalid_manifest"
     issue = repository.get_latest_open_issue("capture-bad")
     assert issue is not None
     assert issue.kind == "invalid"
 
 
-def test_new_input_version_safely_supersedes_same_locator(
-    repository: LedgerRepository,
+def test_changed_input_replaces_automatic_binding_without_supersession(
+    repository: DuckLakeRepository,
 ) -> None:
-    resolve_document(
-        document("capture-1", etag="etag-v1"),
+    first = resolve_batch(
+        (document("capture-1", etag="etag-v1"),),
         store=FakeStore(),
         metadata_provider=FakeMetadata(),
         repository=repository,
     )
-    first = repository.get_current_binding_for_capture("capture-1")
-    assert first is not None
-
-    result = resolve_document(
-        document("capture-1", etag="etag-v2"),
+    first_binding = repository.get_current_binding_for_capture("capture-1")
+    changed = resolve_batch(
+        (document("capture-1", etag="etag-v2"),),
         store=FakeStore(),
         metadata_provider=FakeMetadata(),
         repository=repository,
     )
 
     current = repository.get_current_binding_for_capture("capture-1")
-    assert result.classification == "accepted"
-    assert current is not None
-    assert current.binding_id != first.binding_id
-    assert current.supersedes_binding_id == first.binding_id
+    assert first.resolution_write is not None
+    assert changed.resolution_write is not None and changed.resolution_write.written
+    assert first_binding is not None and current is not None
+    assert current.binding_id != first_binding.binding_id
+    assert repository.summary()["episode_bindings_auto"] == 1

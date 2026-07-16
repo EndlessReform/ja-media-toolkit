@@ -1,0 +1,187 @@
+"""PostgreSQL binding decisions composed over automatic DuckLake output."""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+import os
+import uuid
+
+import psycopg
+import pytest
+from psycopg import sql
+
+from ja_media_data.binding_overrides import (
+    BindingOverrideRepository,
+    apply_postgres_schema,
+    postgres_url_for_psycopg,
+)
+from ja_media_data.lakehouse import CatalogConfig, apply_schema, connect_catalog
+from ja_media_data.lakehouse.repository import DuckLakeRepository
+from ja_media_data.resolution_types import (
+    AutomaticBinding,
+    BindingConflictError,
+    CaptureObservation,
+    ResolutionBatch,
+)
+
+
+@pytest.fixture
+def repository(tmp_path):
+    postgres_url = os.environ.get(
+        "JA_MEDIA_PHASE_B_TEST_DATABASE_URL",
+        "postgresql://ja_media_lakehouse_test:ja_media_lakehouse_test"
+        "@127.0.0.1:55432/ja_media_lakehouse_test",
+    )
+    token = uuid.uuid4().hex
+    control_schema = "override_test_" + token
+    catalog = connect_catalog(
+        CatalogConfig(
+            postgres_url=postgres_url,
+            metadata_schema="override_catalog_" + token,
+            data_path=str(tmp_path / "ducklake"),
+        )
+    )
+    control = psycopg.connect(
+        postgres_url_for_psycopg(postgres_url), autocommit=True
+    )
+    apply_schema(catalog)
+    assert apply_postgres_schema(control, control_schema=control_schema) == [
+        "001_binding_overrides.sql"
+    ]
+    assert apply_postgres_schema(control, control_schema=control_schema) == []
+    yield DuckLakeRepository(
+        catalog,
+        BindingOverrideRepository(control, control_schema=control_schema),
+    )
+    catalog.close()
+    with control.transaction():
+        control.execute(
+            sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(control_schema))
+        )
+    control.close()
+
+
+def index(repository: DuckLakeRepository, *capture_ids: str) -> None:
+    observations = [
+        CaptureObservation(
+            capture_id=capture_id,
+            series_namespace="anilist",
+            series_id="15451",
+            manifest_bucket="bronze",
+            manifest_key=f"metadata/{capture_id}.json",
+            manifest_etag="etag-1",
+            manifest_schema_version=1,
+            observed_at=datetime(2026, 7, 15, tzinfo=UTC),
+        )
+        for capture_id in capture_ids
+    ]
+    repository.replace_bronze_captures(
+        observations, "bronze-" + "-".join(capture_ids)
+    )
+
+
+def test_override_and_unbind_are_immediately_effective(repository) -> None:
+    index(repository, "capture-1", "capture-2")
+    repository.replace_resolution_tables(
+        ResolutionBatch(
+            hints=(),
+            issues=(),
+            bindings=(AutomaticBinding(
+            binding_id="automatic-binding",
+            namespace="anilist",
+            series_id="15451",
+            episode="3",
+            audio_capture_id="capture-1",
+            decision_method="resolver",
+            decision_evidence={"source": "test"},
+            input_data_version="etag-1",
+            recipe_version="resolver-v1",
+            ),),
+        ),
+        "automatic-v1",
+    )
+
+    override_id = repository.append_override(
+        namespace="anilist",
+        series_id="15451",
+        episode="3",
+        audio_capture_id="capture-2",
+        decision_note="manual correction",
+    )
+    current = repository.get_current_binding("anilist", "15451", "3")
+    assert current is not None
+    assert current.binding_id == override_id
+    assert current.audio_capture_id == "capture-2"
+    assert repository.get_current_binding_for_capture("capture-1") is None
+
+    repository.append_override(
+        namespace="anilist",
+        series_id="15451",
+        episode="3",
+        audio_capture_id=None,
+        decision_note="not episode 3",
+    )
+    assert repository.get_current_binding("anilist", "15451", "3") is None
+    assert repository.get_current_binding_for_capture("capture-2") is None
+
+
+def test_postgres_rejects_one_capture_under_two_override_heads(repository) -> None:
+    index(repository, "capture-2")
+    repository.append_override(
+        namespace="anilist",
+        series_id="15451",
+        episode="2",
+        audio_capture_id="capture-2",
+    )
+
+    with pytest.raises(BindingConflictError):
+        repository.append_override(
+            namespace="anilist",
+            series_id="15451",
+            episode="4",
+            audio_capture_id="capture-2",
+        )
+
+
+def test_findings_report_override_whose_capture_vanished(repository) -> None:
+    index(repository, "capture-3")
+    repository.append_override(
+        namespace="anilist",
+        series_id="15451",
+        episode="3",
+        audio_capture_id="capture-3",
+    )
+    repository.replace_bronze_captures([], "bronze-empty")
+
+    assert [item.finding_type for item in repository.list_consistency_findings()] == [
+        "override_missing_capture"
+    ]
+
+
+def test_findings_report_later_auto_collision_with_override(repository) -> None:
+    index(repository, "capture-4")
+    repository.append_override(
+        namespace="anilist",
+        series_id="15451",
+        episode="3",
+        audio_capture_id="capture-4",
+    )
+    automatic = AutomaticBinding(
+        binding_id="automatic-collision",
+        namespace="anilist",
+        series_id="15451",
+        episode="4",
+        audio_capture_id="capture-4",
+        decision_method="resolver",
+        decision_evidence={"source": "test"},
+        input_data_version="etag-2",
+        recipe_version="resolver-v1",
+    )
+    repository.replace_resolution_tables(
+        ResolutionBatch(hints=(), bindings=(automatic,), issues=()),
+        "automatic-collision-v1",
+    )
+
+    assert [item.finding_type for item in repository.list_consistency_findings()] == [
+        "override_automatic_capture_collision"
+    ]

@@ -64,22 +64,23 @@ policy into application request paths merely because that is where the first
 caller appeared. Put reusable compilation in the data layer and let consumers
 read stable gold contracts.
 
-### Data products, orchestration, and storage
+### Data products, execution, and storage
 
-- Dagster or another orchestrator owns execution, lineage, partitions,
-  versions, retries, checks, and materialization history. Its internal event
-  database is not itself a durable domain artifact or application API.
+- The data layer owns a small explicit execution kernel: target dependencies,
+  input fingerprints, materialization history, retries through idempotent
+  commits, and operator-visible status. Manual dispatch is intentional; do not
+  introduce an orchestrator, scheduler, sensor, or work queue without a new
+  measured requirement and architectural review.
 - Durable tables, manifests, and media artifacts belong in the data lake in
-  open, inspectable forms. For tabular intermediates, immutable Parquet backed
-  by lightweight manifests is a strong default/DMZ; an embedded engine such as
-  DuckDB may query or compile those artifacts without making a DuckDB database
-  file the sole durable contract. This is a recommendation to evaluate, not an
-  automatic technology mandate.
-- The episode-identity workflow is an approved exception to direct Parquet
-  lookup: its frequent point reads, concurrent decisions, uniqueness rules, and
-  shared callers require the flash-backed `ja_media_data` PostgreSQL ledger.
-  Export versioned Parquet snapshots to Garage for recovery and analysis; do
-  not make HDD-backed object storage the normal per-episode lookup path.
+  open, inspectable forms. DuckLake tables are Parquet on Garage with their
+  transactional catalog in PostgreSQL; DuckDB is the query/compiler process,
+  not a durable database file or separate copy of the data.
+- Automatic episode identity is a replaceable DuckLake product. Human binding
+  decisions are the approved transactional exception: the small
+  `binding_overrides` relation lives directly in PostgreSQL so partial unique
+  indexes can enforce active locator and capture heads. Effective reads prefer
+  an active override (including an explicit unbind), then fall back to the
+  automatic DuckLake binding.
 - Partitioning should reflect a semantically useful recomputation and backfill
   boundary. Keep lower-granularity IDs as row-level provenance when making them
   partitions would harm navigation or create needless orchestration overhead.

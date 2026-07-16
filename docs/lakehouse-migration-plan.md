@@ -1,12 +1,20 @@
 # Lakehouse migration: DuckLake on Garage, retire Dagster
 
-Status: proposed. Awaiting review before implementation.
+Status: accepted and in progress; Phases A–C2 validated. Amended 2026-07-14
+after Phase B/C review and 2026-07-15 to restore PostgreSQL ownership of human
+binding decisions. The amendments
+correct the write shape (derivations are recomputed and replaced, not
+event-sourced), retain database-enforced decision invariants, and relocate the
+operator surface to `packages/data`. See
+"Binding product" and "Operator surfaces" below, and Phase C2 in the phases
+document.
 
-This plan replaces the Dagster + Alembic + PostgreSQL-domain-tables model from
-`docs/plans/bronze-media-and-publication/` with a single-substrate lakehouse:
-DuckLake tables on Garage with the existing PostgreSQL instance as the DuckLake
-catalog, a small explicit execution kernel, and CLI + Textual surfaces for the
-operator. dbt is an optional later phase, not a prerequisite.
+This plan replaces the retired Dagster + Alembic + PostgreSQL-domain-tables
+spike with DuckLake tables on Garage, the
+existing PostgreSQL instance as both DuckLake catalog and a deliberately tiny
+binding-decision control plane, a small explicit execution kernel, and CLI +
+Textual surfaces for the operator. dbt is an optional later phase, not a
+prerequisite.
 
 ## Decision summary
 
@@ -25,9 +33,16 @@ operator. dbt is an optional later phase, not a prerequisite.
 - **Own a small, explicit execution kernel** (staleness computation, run log,
   idempotent stage commits) instead of hiding it inside UI actions. No leases,
   no heartbeats, no scheduler — manual dispatch is the design, not a gap.
-- **Binding invariants move from enforced to detected-and-repaired**, with a
-  documented one-table Postgres fallback if detection ever proves
-  insufficient in practice.
+- **Machine output is recomputed, not accumulated.** Resolver results are
+  derived DuckLake tables replaced wholesale under an input fingerprint.
+- **Human binding decisions live in ordinary PostgreSQL.** The small
+  `binding_overrides` relation retains decision history and uses partial unique
+  indexes for active locator/capture heads. Automatic-output uniqueness is
+  enforced by the whole-corpus batch writer; operator decisions use the
+  transactional substrate already chosen for point consistency.
+- **The operator surface is `ja-data` in `packages/data`**, next to its
+  dependencies. `ja-media` (`packages/frontend`) remains the consumer CLI for
+  media tools and never grows pipeline verbs.
 
 ## The problem being solved
 
@@ -57,7 +72,7 @@ data lake, across several machines:
 
 Honest labeling, per the architectural decision protocol:
 
-**Measured (Phase 1–3 spike, `10-phase3-spike-report.md`):**
+**Measured:**
 
 - The resolver works: 100 captures → 96 hints, 52 accepted bindings, 48
   quarantined with informative reasons. This is the behavioral baseline.
@@ -66,15 +81,19 @@ Honest labeling, per the architectural decision protocol:
   quarantines into failed runs; partition mappings could not express the
   data-dependent capture→locator fan-in without duplicating Postgres
   eligibility state into a second registry. Both repairs were rejected.
-- Postgres uniqueness and row locking correctly enforced the tested identity
-  and idempotency rules.
+- The C2 compiler reproduced 100 captures → 96 hints, 52 automatic bindings,
+  and 48 quarantines; an identical second run performed zero table writes.
+- PostgreSQL partial unique indexes atomically enforced competing active human
+  binding decisions, while an override became visible without a DuckLake
+  rebuild.
+- DuckLake catalog recovery, schema evolution, time travel, and file cleanup
+  worked against Garage. See `lakehouse-phase-a-spike-report.md` for the
+  substrate evidence.
 
 **Assumed (not yet measured):**
 
-- DuckLake behavior against Garage specifically (Phase A exists to measure
-  this before anything else is built).
 - The real size of the execution kernel and TUI (budgeted conservatively
-  below, with a vertical-slice gate before the TUI is built).
+  below, with an operator-visibility slice before stage execution is built).
 - Corpus-scale query performance in either substrate. Note that performance
   is *not* the argument for this migration; at this corpus size Postgres
   would also be fast. The argument is single-copy storage and the removal of
@@ -114,13 +133,13 @@ vertical-slice gate (Phase D).
 | Stale detection via code versions | Explicit fingerprint/recipe staleness query (Phase D, prototyped first) |
 | Retries | Idempotent stage commits + the operator pressing `r` again |
 | Asset lineage graph | ~12 tables whose lineage fits in one diagram in this document; optional dbt docs later |
-| Web UI | Textual TUI + `ja-media status` (Phase E) |
+| Web UI | Read-only Textual status surface (Phase D0) + `ja-data status` (Phase D) |
 
 ## Why the substrate changes: one copy of the data
 
-The existing plan stores silver collections as Postgres rows managed by
-Alembic, **and** exports versioned Parquet snapshots to Garage for recovery
-and analytics (`03-partitions-identity-and-binding.md`). That is two copies of
+The retired design stored silver collections as Postgres rows managed by
+Alembic, **and** exported versioned Parquet snapshots to Garage for recovery
+and analytics. That is two copies of
 every table plus a synchronization pipeline between them — export jobs,
 snapshot manifests, and a permanent "which copy is current" question.
 
@@ -136,9 +155,10 @@ same collapse:
   framework, and the env.py apparatus, not review.
 - **Time travel and snapshot expiry are built in**, replacing hand-rolled
   snapshot versioning.
-- **Small appends are cheap.** DuckLake's data inlining stores small inserts
-  in the catalog and flushes them to Parquet later, which fits this
-  workload's one-binding-row-at-a-time writes without tiny-file sprawl.
+- **Small metadata writes remain practical.** DuckLake can inline small
+  inserts in the catalog and flush them to Parquet later. Automatic identity
+  products are nevertheless compiled and replaced as whole batches; human
+  point decisions belong in PostgreSQL, not row-at-a-time DuckLake writes.
 - **The boilerplate goes away.** `models.py` (196 lines), `repository.py`
   (290 lines), and the Alembic directory exist to give Postgres an ORM
   surface over data that is almost entirely append-only. The DuckLake write
@@ -179,99 +199,112 @@ Garage (S3, tailnet)                      Postgres (flash, tailnet)
 bronze manifests + media bytes            DuckLake catalog database
 silver artifacts (portable audio, ...)      (schemas, snapshots, file
 gold bundles + published projections         lists — pg_dump'd)
-DuckLake Parquet data files
+DuckLake Parquet data files                binding_overrides (ordinary PG)
 worker scratch (lifecycle-reaped)
 
 DuckLake tables (Parquet on Garage, catalog in Postgres)
 ────────────────────────────────────────────────────────
-bronze_captures            rebuildable index over bronze manifests
-episode_hints              append-only resolver claims
-episode_bindings           append-only decisions = the audit log
-episode_resolution_issues  append + rare status update
-audio_language_results     append-only, recipe-versioned
-subtitle_alignments        append-only, recipe-versioned
-episode_bundles            append-only, policy-versioned
+bronze_captures            rebuildable index, rescanned and replaced
+episode_hints_auto         derived resolver claims, replaced per recompute
+episode_bindings_auto      derived resolver decisions, replaced per recompute
+resolution_issues_auto     derived quarantine reasons, replaced per recompute
+audio_language_results     derived, recipe-versioned
+subtitle_alignments        derived, recipe-versioned
+episode_bundles            derived, policy-versioned
+materializations           fingerprint per (target, scope) = what is current
 run_log                    append-only execution history
-current_bindings           VIEW (derived, never stored)
-consistency_findings       VIEW (invariant checks, surfaced as issues)
+consistency_findings       VIEW (read-side data-quality checks, in status)
 
-Execution kernel (packages/data)          Operator surfaces (packages/frontend)
-────────────────────────────────          ─────────────────────────────────────
-staleness/eligibility queries             ja-media status --series <id>
-stage runners (resolve, LID, align,       ja-media run --through <stage> ...
-  transcode, bundle) with idempotent      ja-media lakehouse   (Textual TUI:
-  commits and run_log entries               status matrix, detail panel,
-                                            issue browser, light actions)
+Composed query projections (packages/data)
+──────────────────────────────────────────
+current_bindings           active PG override, else DuckLake auto row
+
+Execution kernel (packages/data)          Operator surface (packages/data)
+────────────────────────────────          ────────────────────────────────
+target DAG + fingerprint staleness        ja-data status [--series <id>]
+stage runners (resolve, LID, align,       ja-data run <target> [--series|--set]
+  transcode, bundle) with replace-        ja-data bind / issues / targets
+  or-append commits and run_log           (Textual TUI optional, after Phase D)
 ```
 
 ### Ownership boundaries
 
 - **Garage owns bytes**: bronze media and manifests, silver media artifacts,
   gold bundles, DuckLake Parquet, large logs, scratch.
-- **Postgres owns exactly one thing**: the DuckLake catalog. The operator
-  never writes DDL against Postgres directly; DuckLake owns its catalog
-  schema. (The documented fallback in "Invariant posture" is the sole
-  potential exception, and it is not built now.)
-- **DuckLake tables own facts and decisions**: what exists, what was
-  claimed, what was decided, what ran.
+- **Postgres owns transactional metadata and decisions**: the DuckLake catalog
+  in its guarded schema and `binding_overrides` in a separate,
+  application-owned schema. Checked-in SQL owns the latter; DuckLake never
+  writes it.
+- **DuckLake tables own facts and derivations**: what exists, what the resolver
+  claimed, what automatic result was computed, and what ran.
 - **The execution kernel owns semantics**: what is stale, what is eligible,
   what running a stage means, how results commit.
 - **CLI and TUI own presentation and dispatch only.** They are two views
   over the same kernel functions and contain no pipeline logic.
 
-### Binding currency semantics
+### Binding product: derived table plus human overrides
 
-This section replaces both the mutable `current_episode_bindings` table and
-the naive "latest accepted row" view, which mishandles revocation.
+*(Amended 2026-07-14. The original design ported the Postgres ledger's
+event-sourced shape — monotonic binding IDs, supersession pointers, a
+window-function currency view, and write-time head checks — into DuckLake.
+Phases B–C implemented it faithfully and the reports repeatedly observed it
+"cuts against the grain": the shape re-implements, in application code,
+guarantees the old substrate gave for free. The amendment replaces the shape
+with one that matches what the data actually is.)*
 
-`episode_bindings` is append-only. Every row is a decision with `binding_id`
-(monotonic, generated outside the database), `decision` (`accepted` |
-`rejected`), `supersedes_binding_id`, method, evidence JSON, and provenance
-columns. The table **is** the audit log: rollback is a superseding row,
-human override is a row with `method='human'`.
+All 52 accepted bindings in the 100-capture baseline are machine outputs, not
+human decisions: they are the output of a **pure function** of (bronze
+manifests, AniList metadata, recipe version) — Phase C proved determinism by
+exact replay. Pure functions are recomputed, not event-sourced:
 
-`current_bindings` is a view defined as: *for each locator, take the single
-latest decision (ordered by `binding_id`, which is monotonic and unique — no
-timestamp ties); the locator is currently bound if and only if that latest
-decision is an acceptance.* This handles the case the naive view gets wrong:
+- **`episode_bindings_auto` is a derivation.** Each resolver run recomputes
+  the full result and replaces the table in one DuckLake transaction,
+  recording the input fingerprint in `materializations`. Re-running with
+  unchanged inputs is a no-op by fingerprint comparison — no per-row
+  existence probes, no semantic idempotency keys. History is DuckLake
+  snapshot time travel, not rows; "recipe v3 superseded v2" is simply the
+  table being v3's output.
+- **PostgreSQL `binding_overrides` is the only human decision table.** A human
+  accepting, correcting, or unbinding an episode advances one locator head:
+  the previous row is retired and a replacement row records locator, capture
+  (NULL to unbind), method, note, and database timestamp. Retired rows preserve
+  history; partial unique indexes enforce one active row per locator and one
+  active locator per non-NULL capture. It is a *source* in the same sense
+  bronze is — written by events outside the pipeline, never rebuilt.
+- **`current_bindings` is a composed query projection**: the active override
+  for a locator if one exists (an unbind override masks the auto row without
+  deleting anything), otherwise the auto row. A quarantined capture bound by
+  override simply shows as bound; its shadowed auto issue is suppressed in
+  status rather than "resolved" by a write — issue rows are derived and
+  disappear when a recompute no longer produces them.
 
-1. Binding A accepted → locator bound to A.
-2. A explicitly rejected (superseding row, `decision='rejected'`) → locator
-   **unbound**, because the latest decision is a rejection. Filtering to
-   accepted rows before taking the latest would incorrectly resurrect A.
-3. Binding B accepted later → locator bound to B.
+Rejection-without-replacement still returns *unbound* (the Phase B gate):
+the active override for the locator is an unbind, so the projection yields no
+row.
 
-The same construction keyed by `audio_capture_id` yields the capture-side
-view. Phase B ships tests for exactly these transitions, plus supersession
-chains and correction moves, against the 100-capture fixture.
+### Invariant posture: enforce where each write belongs, check across boundaries
 
-### Invariant posture: detect and repair
+The two uniqueness rules (one current capture per locator, one current
+locator per capture) are properties of the resolver's *whole-corpus* output.
+The batch writer sees the entire result before it commits, so it enforces
+them in ordinary Python and quarantines conflicts as issues — a writer with a
+complete view needs no row-level constraints. This is why lakehouses without
+key constraints run real workloads everywhere: their writers are idempotent
+batch jobs, not per-row compare-and-swap ledgers.
 
-The Postgres ledger enforced two uniqueness invariants at write time:
-one current binding per locator, and one current locator per capture
-(`UNIQUE(audio_capture_id)`). DuckLake cannot enforce these. The posture
-changes from **prevented** to **detected and repaired**, and this plan states
-that trade explicitly rather than minimizing it:
-
-- **Writes perform a pre-commit policy check** (query `current_bindings`,
-  verify the locator and capture heads match expectations, then append).
-  Under DuckLake this check-then-append is not atomic across machines; a
-  race between two writers is possible in principle.
-- **The realistic writer population is one human**, occasionally overlapping
-  a forgotten terminal. The damage mode of a race is two decision rows where
-  the view deterministically picks one (highest `binding_id`) and the other
-  is implicitly superseded — an untidy history, not corruption.
-- **A `consistency_findings` view runs the invariant checks on read**: any
-  capture currently bound under two locators, any locator with anomalous
-  decision chains, any binding whose `supersedes_binding_id` does not match
-  the head it replaced. Findings surface in the TUI Issues column and in
-  `ja-media status`. Repair is an ordinary superseding append.
-- **Pressure valve (documented, not built):** because the DuckLake catalog
-  is Postgres, a single plain table beside the catalog with
-  `INSERT ... ON CONFLICT` semantics can restore write-time enforcement of
-  the binding heads for ~40 lines of code, without reintroducing SQLAlchemy
-  or Alembic. If detection ever fails the operator in practice, this is the
-  first and only escalation.
+- **Overrides are transacted in PostgreSQL.** A short transaction serializes
+  head changes, retires the old locator head, inserts the replacement, and
+  lets partial unique indexes reject competing active locator/capture heads.
+  There is no application-level compare-and-swap or ordered-ID choreography.
+- **`consistency_findings` remains as a read-side check** surfaced in
+  `ja-data status` — a data-quality test in the dbt sense (override
+  referencing a vanished capture, or a later auto recompute assigning an
+  overridden capture under a different locator), not a transactional backstop.
+- **The cross-substrate check remains explicit.** PostgreSQL cannot foreign-key
+  an override to a DuckLake capture, so append-time application validation and
+  `consistency_findings` detect missing or stale capture references. That is a
+  real boundary check, not an attempt to reproduce PostgreSQL concurrency in
+  DuckLake.
 
 ### Schema management: DDL in git
 
@@ -282,20 +315,26 @@ each applied transactionally through DuckLake, plus a tiny idempotent
 table. Adding a column for LID v3 is a reviewed one-line SQL file, not a
 migration module — review is preserved, the framework is removed. Clean
 environments are reproducible by applying the directory in order.
+`packages/data/postgres_schema/` does the same for the one application-owned
+PostgreSQL relation, with separate checksum history in its control schema.
 
 ### Execution kernel
 
 The part of orchestration this pipeline genuinely needs, made explicit and
 owned as code rather than hidden inside UI actions:
 
-- **Staleness and eligibility queries** (`status_query` module). A result is
-  current only when its input fingerprint and recipe/model version match the
-  current upstream head; superseded bindings cascade staleness downstream.
-  This is the six-state vocabulary from
-  `05-invalidation-rebuilds-and-retention.md` (missing / failed / stale /
-  superseded / quarantined / deleted) compiled into SQL over the DuckLake
-  tables. **This is the hardest module and is prototyped first in Phase D**,
-  because if it is wrong the status matrix displays lies.
+- **Staleness by fingerprint** (`status_query` module). Each materialized
+  target stores the hash of its exact inputs (upstream fingerprints, recipe
+  file content hash, input ETags) in `materializations`; a target is stale
+  when the stored hash differs from the one recomputed from current
+  upstreams. Because derived tables are replaced wholesale, "current" needs
+  no derivation — the table is current by construction — and stage state
+  compiles to a fingerprint join rather than a cascade over decision logs.
+  (The original
+  plan flagged this as the hardest module; most of that predicted difficulty
+  came from deriving currency out of the ledger shape, which the write-shape
+  amendment removes. It is still prototyped first in Phase D, because if it
+  is wrong the status matrix displays lies.)
 - **`run_log`**, append-only: stage, target selector, input fingerprints,
   recipe versions, machine, started/finished timestamps, exit status, and a
   Garage path for captured logs. This answers "did that 90-minute ASR run I
@@ -322,9 +361,8 @@ state.
 The TUI and CLI never remotely execute anything. The contract:
 
 - **Heavy stages run where the hardware is**: the operator SSHes to (or sits
-  at) the CUDA box or Mac and runs `ja-media run --through <stage>` there.
-  Platform checks in the stage runners refuse work the local machine cannot
-  do.
+  at) the CUDA box or Mac and runs `ja-data run <target>` there. Platform
+  checks in the stage runners refuse work the local machine cannot do.
 - **Light stages and decisions run anywhere**: binding acceptance, issue
   resolution, and bundling are fine from the laptop TUI.
 - **The lakehouse is the rendezvous.** Because every machine reads and
@@ -337,7 +375,7 @@ The TUI and CLI never remotely execute anything. The contract:
 
 Each recipe iteration writes new rows tagged `recipe_version`; old rows
 remain for comparison and time travel. GC is explicit, separate, and
-conservative, per `05-invalidation-rebuilds-and-retention.md`:
+conservative:
 
 - Row-level GC of a losing recipe version is a DuckLake `DELETE` (a
   rewrite-based operation — rows from several recipes may share Parquet
@@ -355,13 +393,48 @@ conservative, per `05-invalidation-rebuilds-and-retention.md`:
 
 ### Operator surfaces
 
-**CLI first.** `ja-media status --series <id>` prints the matrix;
-`ja-media run --through <stage> --series <id> [--episode <ep>]` executes the
-dependency closure of missing/stale stages up to a pause point on the current
-machine. These exist before, and independently of, the TUI — they are the
-Phase D vertical-slice deliverable and the permanent scripting surface.
+*(Amended 2026-07-14: the original plan placed the pipeline CLI and TUI in
+`packages/frontend` under the consumer `ja-media` entry point. That grafts
+plant operation onto the consumer surface and drags duckdb/psycopg into the
+frontend environment. Withdrawn.)*
 
-**Textual TUI** (`ja-media lakehouse`) as the pane of glass:
+**Both surfaces live in `packages/data`; the status model comes first.** A thin
+read-only Textual view is deliberately built before stage execution so the
+operator can sanity-check real C2 state while later phases arrive. The CLI is
+`ja-data` (renamed from `ja-media-data`), and its verb set does not grow with
+the pipeline:
+
+```text
+ja-data status  [--series <id>]        episode × stage matrix + findings
+ja-data run <target> [--series <id> | --set <name>]
+                                       walk the target's dependency closure;
+                                       default scope is "everything stale"
+ja-data targets / ja-data stages       introspection, rendered from the
+                                       registry that executes (cannot drift)
+ja-data bind / ja-data issues          human decisions and the review queue
+ja-data schema apply                   checked-in DDL
+```
+
+Three rules keep the surface small as the pipeline grows to dozens of steps:
+
+- **Targets, not routes.** `run` names a product (`abs-bundle`,
+  `eval-dataset`, `webdataset`, `transcripts`); the kernel walks that sink's
+  ancestry. Forks in the DAG are different sinks reusing shared upstream
+  stages through fingerprints — adding a stage or target adds zero CLI
+  surface.
+- **Structure is code; parameters are files; membership is data.** The stage
+  DAG is an ordered registry in Python (structure has behavior — fingerprint
+  composition, platform checks, closure). Recipe parameters (ASR model,
+  VAD thresholds, stem counts) live in per-stage TOML files validated by
+  Pydantic models; the recipe file's content hash is a fingerprint input, so
+  editing a recipe automatically stales exactly its downstream. Curated
+  series membership lives in small named-set TOML files (or a pinned lake
+  table), never in shell globs. Workflow logic never goes in YAML/TOML.
+- **Default scope is the stale set.** `ja-data run abs-bundle` after a
+  50-series ingest prints the discovered worklist, confirms once, and goes.
+  Enumerating series on the command line is the exception, not the routine.
+
+**Textual TUI** as the pane of glass over the same status projection:
 
 ```text
 Episode │ Capture │ Binding │ LID    │ Align  │ Bundle   │ Issues
@@ -370,35 +443,32 @@ e002    │ v1 ✓    │ human ✓ │ v3 ✓   │ stale  │ —        │
 e003    │ v1 ✓    │ issue   │ —      │ —      │ —        │ ambiguous ep
 ```
 
-One DuckDB query fills the matrix (the kernel's staleness query, not TUI
-logic). Actions call the same kernel functions the CLI calls: `[r]un` next
-eligible stage for the selected row (subject to local platform capability),
-`[b]ind` / issue resolution in a modal, `[i]ssues` for the review queue
-including consistency findings. "Walk to a pause point" is arrowing down,
-pressing `r`, and quitting when something needs thought.
+The first slice is read-only: refresh, filtering, findings, binding provenance,
+and details. Unimplemented LID/alignment/publication stages render explicitly
+as `not implemented`, never as pending, stale, or successful. Widgets do not
+query storage directly; a UI-independent status projection fills the matrix
+and later gains real fingerprint state as each stage is implemented. Mutation
+and execution actions follow only after their underlying operations are proven.
 
-Module budget — honest, based on the existing `subsync/tui.py` (431 lines
-for a simpler surface) and respecting the 300-line soft limit per file:
+Module budget — revised after the write-shape amendment; `catalog.py` is the
+measured Phase B figure, not the original optimistic estimate:
 
 ```text
 packages/data/src/ja_media_data/lakehouse/
   schema/ (SQL files)            —    checked-in DDL
-  catalog.py          ~80 lines  —    attach, config, apply_schema
-  status_query.py     ~180 lines —    staleness/eligibility/consistency SQL
-  run_log.py          ~60 lines  —    run records, log capture to Garage
-  stages.py           ~150 lines —    stage runner protocol, idempotent commit
-
-packages/frontend/src/ja_media_frontend/lakehouse/
-  tui.py              ~200 lines —    App, matrix, bindings, refresh
-  actions.py          ~100 lines —    thin adapters onto kernel functions
-  issue_browser.py    ~80 lines  —    ModalScreen for issues + findings
-  cli.py              ~80 lines  —    status / run entrypoints
+  catalog.py          ~240 lines —    attach, config, apply_schema (measured)
+  writer.py           ~100 lines —    batch replace + override append
+  status_query.py     ~120 lines —    fingerprint staleness + findings
+  stages.py           ~150 lines —    target registry, runners, commits
+  recipes.py           ~60 lines —    TOML recipe loading + content hashing
+  cli.py additions    ~120 lines —    status / run / bind / targets
 ```
 
-Total ~930 lines against ~800 removed — roughly a wash in code volume, but
-the removed lines were framework adaptation (ORM models, repository
-plumbing, asset decorators, sensor) and the added lines are the domain
-itself (staleness semantics, run history, the operator surface).
+Total ~790 lines against ~800 removed — a wash in volume, but the removed
+lines were framework adaptation (ORM models, repository plumbing, asset
+decorators, sensor) plus ledger-shape constraint simulation, and the added
+lines are the domain itself (staleness semantics, run history, the operator
+surface).
 
 ## What survives
 
@@ -413,17 +483,18 @@ Tool-agnostic domain logic, unchanged except persistence calls:
   `diagnostics.py`, `episode_metadata.py`.
 - `packages/data/src/ja_media_data/bronze_store.py` — boto3 Garage adapter;
   the bronze read path is unaffected.
-- The 100-capture fixtures, spike report, and idempotency tests (adapted to
-  DuckLake).
-- The plan-doc contracts: vocabulary (`00`), bronze contract (`01`), bundle
-  contract (`06`), invalidation vocabulary (`05`), packed datasets (`08`).
+- The 100-capture fixtures and idempotency tests (adapted to DuckLake), with
+  the validated result recorded in the phase companion.
+- The durable storage, binding, invalidation, bundle, and operator contracts
+  consolidated in this document and its phase companion.
 
-## What is removed
+## What Phase F removed
 
 - `packages/data/src/ja_media_data/models.py`, `repository.py`,
-  `ledger_types.py` (where fully replaced), `database.py`.
-- `packages/data/migrations/` (Alembic; exactly one migration exists today,
-  which is why now is the cheap moment).
+  `database.py`, and `diagnostics.py`; `ledger_types.py` was reduced to the
+  surviving C2 domain records and renamed `resolution_types.py`.
+- `packages/data/migrations/` and `alembic.ini` (Alembic; exactly one migration
+  existed, which is why this remained a cheap deletion).
 - `packages/data/src/ja_media_data/episode_assets.py`, `bronze.py` (the
   Dagster sensor — replaced by a scan script), `definitions.py`.
 - Dependencies: `dagster`, `dagster-dg-cli`, `dagster-webserver`,
@@ -431,114 +502,39 @@ Tool-agnostic domain logic, unchanged except persistence calls:
   `boto3` remains for bronze.) Added via `uv add`: `duckdb`; the `ducklake`
   and `postgres` DuckDB extensions install at attach time.
 - `[tool.dg]` sections in `packages/data/pyproject.toml`.
-- `deploy/dagster/` (compose, dagster.yaml, workspace.yaml, Dockerfile) and
-  the Dagster Postgres database/principal.
-- Decide `deploy/metaflow/`'s fate in the same pass — this plan standardizes
-  on "no orchestrator," and a second dormant one should not linger
-  unexamined.
+- The `deploy/dagster/` Compose deployment and local image. The Dagster
+  Postgres database/principal remains a user-owned infrastructure cleanup.
+- `deploy/metaflow/` was reviewed and retained for the separate evaluation
+  workbench proposal in `eval-workbench-design.md`; it is not part of this data
+  layer and must not be used as an alternative orchestrator here.
+- The Phase C DuckLake *ledger* write path is additionally reworked by Phase
+  C2 (see the phases document): ordered/ULID ID generation, write-time head
+  checks, and race fixtures are deleted in favor of the batch writer.
 
 ## Migration phases
 
-### Phase A — DuckLake-on-Garage spike
+The implementation sequence, fixtures, development stack, and acceptance gates
+live in [lakehouse-migration-phases.md](lakehouse-migration-phases.md). Keeping
+the execution checklist separate lets this document remain focused on the
+architectural decision and ownership boundaries.
 
-Prove the substrate against this Garage before building anything on it:
-
-1. `uv add duckdb` in `packages/data`. Attach
-   `ducklake:postgres:<catalog dsn>` with `DATA_PATH` on the Garage
-   endpoint, path-style addressing, credentials via DuckDB secrets loaded
-   from the environment (never printed).
-2. Exercise: `CREATE TABLE`, appends (including small appends to observe
-   data inlining and flush), `ALTER TABLE ADD COLUMN`, time-travel reads,
-   snapshot expiry + file cleanup, concurrent appends from two machines.
-3. Verify recovery: `pg_dump` the catalog, destroy and restore it, confirm
-   tables read correctly; document the backup step in the runbook.
-
-**Gate:** all of the above work against Garage; the recovery drill succeeds;
-any Garage incompatibility is found now, at zero sunk cost.
-
-### Phase B — schema and views
-
-1. `packages/data/schema/` SQL files defining the identity tables
-   (`bronze_captures`, `episode_hints`, `episode_bindings`,
-   `episode_resolution_issues`) matching the contracts in
-   `03-partitions-identity-and-binding.md`, minus `dagster_run_id`
-   (replaced by nullable `run_source`), plus `run_log`.
-2. `current_bindings` and `consistency_findings` views per the semantics
-   above.
-3. Tests for the currency semantics: accept, reject-without-replacement,
-   supersede, correction move, race artifact detection — against fixtures.
-
-**Gate:** the rejection-without-replacement case returns *unbound*; all
-transition tests pass; `apply_schema` is idempotent from a clean catalog.
-
-### Phase C — port the resolver
-
-1. Replace `LedgerRepository` calls in `resolution_service.py` with DuckLake
-   appends plus the pre-commit policy check.
-2. Replace the Dagster bronze sensor with a scan script: list Garage
-   manifest markers, upsert `bronze_captures` (rebuildable cache).
-3. Port idempotency/conflict tests.
-
-**Gate:** `ja-media-data resolve-sample --limit 100 --apply` reproduces the
-baseline — 52 accepted, 48 quarantined, same reasons — against DuckLake.
-
-### Phase D — execution kernel + vertical slice (the real proof)
-
-Implement the kernel and prove the execution contract on one real slice,
-**portable audio + LID**, CLI only:
-
-1. `status_query.py` first: staleness/eligibility for the slice, tested
-   against fixtures with deliberately stale and superseded inputs.
-2. Stage runners with scratch-then-commit, `run_log`, idempotent re-run.
-3. `ja-media status --series <id>` and
-   `ja-media run --through lid --series <id>`.
-4. Demonstrate, in order: bounded selection; `--through` walking the
-   dependency closure; a mid-run kill leaving a visibly abandoned `run_log`
-   row and no partial commit; re-run to completion **on a different
-   machine**; a recipe bump marking downstream results stale; the status
-   matrix rendering all of it truthfully.
-
-**Gate:** every demonstration passes. This gate exists because the kernel —
-not the TUI and not the storage — is where this plan could actually fail.
-No TUI work begins until it holds.
-
-### Phase E — Textual TUI
-
-Build `ja-media lakehouse` over the proven kernel: matrix, detail panel,
-issue browser (including consistency findings), light actions.
-
-**Gate:** the operator opens the TUI on the laptop, sees a series, runs the
-next light stage for a stale episode, resolves one issue, and no hash was
-copied and no list command was run. Heavy-stage rows correctly show as
-runnable-elsewhere on a machine lacking the capability.
-
-### Phase F — remove Dagster and the old substrate
-
-Delete the files and dependencies listed under "What is removed," including
-`deploy/dagster/`; drop the Dagster database; update
-`docs/plans/bronze-media-and-publication/` docs to reference this substrate.
-
-**Gate:** no Dagster/SQLAlchemy/Alembic imports anywhere; Postgres holds
-only the DuckLake catalog; CI green.
-
-### Phase G (optional) — dbt
-
-`dbt-duckdb` over the DuckLake catalog for tests, documented lineage, and a
-transformation registry. Genuinely optional: with ~12 tables and one
-operator, checked-in SQL plus the consistency views may remain sufficient
-indefinitely. Adopt only if the SQL surface grows past what the schema
-directory keeps legible, and adopt incrementally.
+At a glance: Phase A proves the substrate; B defines schema and views; C ports
+the resolver; C2 reshapes the write path to recompute-and-replace and restores
+the PostgreSQL decision boundary (the 2026-07-14 and 2026-07-15 amendments);
+D0 adds a read-only operator view; D proves the execution kernel with portable
+audio + LID; E adds safe actions; F removed Dagster and the old substrate; G
+optionally adopts dbt.
 
 ## Alternatives considered
 
-- **Keep Postgres as the domain store, add a planner/runner on top.** Solves
+- **Keep Postgres as the entire domain store, add a planner/runner on top.** Solves
   the coordination pain and keeps enforced constraints, but retains the
   ORM/migration stack, retains *two copies* of every silver table (live rows
   plus the required Parquet exports) with a synchronization pipeline between
   them, and grows the eventual migration surface every month it persists.
-  The constraint benefit is real but narrow — two uniqueness rules on one
-  table — and is priced into this plan as detect-and-repair plus a
-  documented fallback.
+  The constraint benefit is real but narrow. This plan keeps precisely that
+  narrow decision table in PostgreSQL while moving recomputable, analytical,
+  and media-adjacent products to DuckLake.
 - **Delta Lake (alone or stacked).** Stacking under DuckLake is not a real
   architecture — they are competing formats with incompatible snapshot
   models. Delta alone would drop the Postgres dependency but makes commit
@@ -555,14 +551,16 @@ directory keeps legible, and adopt incrementally.
   still would not render the episode × stage matrix. The kernel this plan
   owns is smaller than a Prefect integration.
 
-## Open questions to validate before committing
+## Remaining validation questions
 
-1. **Phase A is the question.** DuckLake + Garage compatibility, data
-   inlining behavior, snapshot cleanup, and the recovery drill are all
-   front-loaded into a spike with zero sunk cost behind it.
-2. **Catalog backup cadence.** Confirm the existing Postgres backup regimen
+1. **Catalog backup cadence.** Confirm the existing Postgres backup regimen
    covers the catalog database, or add it; the catalog is load-bearing.
-3. **Staleness query complexity.** If the Phase D prototype shows the
-   fingerprint cascade is materially harder than budgeted, pause and
-   reassess before the TUI — that would be evidence the kernel wants more
-   structure, and it should be reviewed rather than absorbed silently.
+2. **Recipe fingerprint granularity.** Content-hashing recipe files means an
+   edit stales everything downstream of that stage, so recipes must be split
+   per-stage rather than one mega-config. If Phase D shows file-level hashes
+   are still too coarse (innocent edits triggering corpus-scale rebuild
+   scares), hash the parsed, stage-relevant subset instead of file bytes.
+3. **Staleness query complexity.** Largely defused by the write-shape
+   amendment (currency no longer needs deriving), but the rule stands: if
+   the Phase D prototype is materially harder than budgeted, pause and
+   reassess before the TUI rather than absorbing it silently.

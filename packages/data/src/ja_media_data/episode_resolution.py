@@ -10,8 +10,8 @@ from typing import Any
 from ja_media_core.bronze import BronzeCaptureManifest
 
 from ja_media_data.episode_metadata import SeriesEpisodeMetadata
-from ja_media_data.ledger_types import (
-    BindingDecision,
+from ja_media_data.resolution_types import (
+    AutomaticBinding,
     HintClaim,
     ResolutionIssueClaim,
 )
@@ -23,12 +23,12 @@ RECIPE_VERSION = "episode-filename-v1"
 
 @dataclass(frozen=True)
 class EpisodeResolutionPlan:
-    """Pure proposed ledger writes plus an explainable classification."""
+    """Pure resolution output plus an explainable classification."""
 
     classification: str
     reason: str
     hints: tuple[HintClaim, ...]
-    binding: BindingDecision | None
+    binding: AutomaticBinding | None
     issue: ResolutionIssueClaim | None
     evidence: dict[str, Any]
 
@@ -38,7 +38,7 @@ def plan_episode_resolution(
     *,
     input_data_version: str,
     metadata: SeriesEpisodeMetadata | None,
-    dagster_run_id: str | None = None,
+    run_source: str | None = None,
 ) -> EpisodeResolutionPlan:
     """Require filename-signal agreement and AniList bounds before acceptance."""
 
@@ -55,6 +55,7 @@ def plan_episode_resolution(
             evidence,
             reason="multi_episode_range",
             kind="ambiguous",
+            run_source=run_source,
         )
     candidates = tuple(
         sorted(set(explicit_episodes) | ({ptn_episode} if ptn_episode else set()))
@@ -66,7 +67,7 @@ def plan_episode_resolution(
         explicit_episodes=explicit_episodes,
         evidence=evidence,
         input_data_version=input_data_version,
-        dagster_run_id=dagster_run_id,
+        run_source=run_source,
     )
     if not candidates:
         reason = (
@@ -80,6 +81,7 @@ def plan_episode_resolution(
             evidence,
             reason=reason,
             kind="ambiguous",
+            run_source=run_source,
         )
     if len(candidates) != 1 or ptn_episode != candidates[0] or explicit_episodes != candidates:
         return _issue_plan(
@@ -89,6 +91,7 @@ def plan_episode_resolution(
             reason="parser_signals_disagree",
             kind="ambiguous",
             hints=hints,
+            run_source=run_source,
         )
 
     episode = candidates[0]
@@ -100,6 +103,7 @@ def plan_episode_resolution(
             reason="title_metadata_unavailable",
             kind="ambiguous",
             hints=hints,
+            run_source=run_source,
         )
     if matched_title is None:
         return _issue_plan(
@@ -109,6 +113,7 @@ def plan_episode_resolution(
             reason="filename_title_disagrees_with_anilist",
             kind="invalid",
             hints=hints,
+            run_source=run_source,
         )
     if metadata.episode_count is None:
         return _issue_plan(
@@ -118,6 +123,7 @@ def plan_episode_resolution(
             reason="episode_count_unavailable",
             kind="ambiguous",
             hints=hints,
+            run_source=run_source,
         )
     if metadata.media_format == "MOVIE" or episode > metadata.episode_count:
         return _issue_plan(
@@ -131,19 +137,12 @@ def plan_episode_resolution(
             ),
             kind="invalid",
             hints=hints,
+            run_source=run_source,
         )
 
     hint = hints[0]
-    binding = BindingDecision(
-        binding_id=_stable_id(
-            "binding",
-            manifest.capture_id,
-            input_data_version,
-            RECIPE_VERSION,
-            manifest.series.namespace,
-            manifest.series.identifier,
-            str(episode),
-        ),
+    binding = AutomaticBinding(
+        binding_id=_stable_id("binding", hint.hint_id),
         namespace=manifest.series.namespace,
         series_id=manifest.series.identifier,
         episode=str(episode),
@@ -152,7 +151,7 @@ def plan_episode_resolution(
         decision_evidence={"hint_id": hint.hint_id, **evidence},
         input_data_version=input_data_version,
         recipe_version=RECIPE_VERSION,
-        dagster_run_id=dagster_run_id,
+        run_source=run_source,
     )
     return EpisodeResolutionPlan(
         classification="accepted",
@@ -172,7 +171,7 @@ def _candidate_hints(
     explicit_episodes: tuple[int, ...],
     evidence: dict[str, Any],
     input_data_version: str,
-    dagster_run_id: str | None,
+    run_source: str | None,
 ) -> tuple[HintClaim, ...]:
     results = []
     for candidate in candidates:
@@ -205,7 +204,7 @@ def _candidate_hints(
                 evidence=evidence,
                 input_data_version=input_data_version,
                 recipe_version=RECIPE_VERSION,
-                dagster_run_id=dagster_run_id,
+                run_source=run_source,
             )
         )
     return tuple(results)
@@ -219,6 +218,7 @@ def _issue_plan(
     reason: str,
     kind: str,
     hints: tuple[HintClaim, ...] = (),
+    run_source: str | None = None,
 ) -> EpisodeResolutionPlan:
     issue = ResolutionIssueClaim(
         issue_id=_stable_id(
@@ -228,6 +228,7 @@ def _issue_plan(
         hint_id=hints[0].hint_id if hints else None,
         kind=kind,
         details={"reason": reason, "recipe_version": RECIPE_VERSION, **evidence},
+        run_source=run_source,
     )
     return EpisodeResolutionPlan(
         classification="quarantined",
@@ -262,11 +263,17 @@ def overlap_issue(
             "recipe_version": RECIPE_VERSION,
             **plan.evidence,
         },
+        run_source=plan.binding.run_source,
     )
 
 
 def invalid_manifest_issue(
-    *, capture_id: str, input_data_version: str, error: str, manifest_key: str
+    *,
+    capture_id: str,
+    input_data_version: str,
+    error: str,
+    manifest_key: str,
+    run_source: str | None = None,
 ) -> ResolutionIssueClaim:
     """Create a deterministic DLQ row for an unreadable committed manifest."""
 
@@ -283,10 +290,11 @@ def invalid_manifest_issue(
             "manifest_key": manifest_key,
             "recipe_version": RECIPE_VERSION,
         },
+        run_source=run_source,
     )
 
 
 def _stable_id(prefix: str, *parts: str) -> str:
+    """Derive a deterministic display/idempotency key from immutable evidence."""
     encoded = json.dumps(parts, ensure_ascii=False, separators=(",", ":"))
-    digest = hashlib.sha256(encoded.encode()).hexdigest()[:40]
-    return f"{prefix}-{digest}"
+    return f"{prefix}-{hashlib.sha256(encoded.encode()).hexdigest()[:40]}"

@@ -1,126 +1,59 @@
-# ja-media data layer
+# ja-media data compiler
 
-This package owns Dagster definitions and Garage adapters for durable data
-products. Domain contracts remain in `packages/core`; this package owns the
-orchestration-specific asset, partition, sensor, and execution vocabulary.
+This package compiles immutable Garage evidence into replaceable DuckLake data
+products and keeps human episode-binding overrides in ordinary PostgreSQL.
+The supported implementation is the lakehouse modules and the `ja-data` CLI;
+the retired Dagster, SQLAlchemy, and Alembic substrate has been removed.
 
-Bronze captures are external assets because ingest commits them before Dagster
-sees them. They use dynamic partitions keyed by `capture_id`. The scan sensor
-lists only `metadata/*.json` commit markers, registers unseen capture IDs, and
-reports an external materialization keyed by capture ID plus S3 ETag. An
-unchanged repair scan is idempotent; a changed manifest appears as a new data
-version. The same sensor upserts the small manifest header into the shared
-PostgreSQL capture index. Large media bytes never pass through Dagster or
-PostgreSQL.
+## Storage boundary
 
-## Configuration
+- Garage owns bronze media, manifests, and DuckLake Parquet files.
+- DuckLake owns rebuildable `bronze_captures`, `episode_hints_auto`,
+  `episode_bindings_auto`, `resolution_issues_auto`, and materialization state.
+- PostgreSQL owns the DuckLake catalog plus the small transactional
+  `binding_overrides` table.
+- Effective binding reads take an active PostgreSQL override first, including
+  an explicit unbind, and otherwise use the automatic DuckLake row.
 
-Keep the data code location's credentials and settings in its own `.env`:
+Automatic products are replaced as complete transactions. Their content
+fingerprints make an identical repeat a zero-write no-op; history is DuckLake
+snapshot time travel rather than supersession rows.
 
-```sh
-cd packages/data
-cp .env.example .env
-$EDITOR .env
-```
+## Commands
 
-Run Dagster commands from `packages/data`; Dagster then loads this package-local
-`.env` into the webserver, daemon, and code-location subprocesses. Shell command
-prefixes and manually exported variables are not required. Existing shell
-variables still take precedence when an intentional one-off override is useful.
-
-AWS credentials use boto3's standard variable names. Only the credentials and
-`JA_MEDIA_BRONZE_BUCKET` lack useful code defaults. The bucket is deliberately
-not discovered because a Garage principal need not enumerate unrelated
-buckets. `JA_MEDIA_DATA_DATABASE_URL` selects the separate domain ledger;
-standard `postgresql://` and explicit `postgresql+psycopg://` URLs are accepted.
-Percent-encode reserved characters in its password component. The scan event
-limit bounds bootstrap pressure; additional captures are reported on later
-sensor ticks.
-
-## Database schema
-
-Alembic owns the ledger schema. Review generated SQL before applying the
-additive migration to development:
+Load the package environment without printing it:
 
 ```sh
 cd packages/data
 set -a
 source .env
 set +a
-uv run alembic upgrade head --sql
-uv run alembic upgrade head
-uv run alembic check
 ```
 
-The initial migration creates `bronze_captures`, `episode_hints`,
-`episode_bindings`, `current_episode_bindings`, and
-`episode_resolution_issues`. Its downgrade deliberately refuses to drop the
-ledger tables. Production migration remains a separate user-owned operation.
-
-The ordinary test suite uses SQLite for fast transaction checks. The opt-in
-integration test requires a disposable local PostgreSQL database whose name
-ends in `_test`:
+Then use the compiler surface:
 
 ```sh
-JA_MEDIA_DATA_TEST_DATABASE_URL='postgresql+psycopg://user:password@127.0.0.1:5432/ja_media_data_test' \
-  uv run pytest tests/test_repository_postgres.py
+uv run ja-data apply-lakehouse-schema
+uv run ja-data scan-bronze --limit 100
+uv run ja-data resolve-sample --limit 100 --show issues
+uv run ja-data resolve-sample --limit 100 --apply --show none
+uv run ja-data resolution-report --limit 100
+uv run ja-data bind anilist 15451 3 --capture <capture-id>
+uv run ja-data bind anilist 15451 3 --unbind
 ```
 
-Apply the Alembic migration to that database first. The test refuses non-local
-hosts and non-test database names, writes uniquely named rows, and removes them
-afterward.
+`apply-lakehouse-schema` applies checksum-protected SQL from both `schema/`
+and `postgres_schema/`. Schema files describe the final C2 contracts only;
+reset disposable pre-C2 catalogs instead of attempting an in-place upgrade.
 
-## Episode-resolution probe
+## Tests
 
-The Phase 3 resolver combines the shared core PTN wrapper with an independent
-explicit episode token, exact AniList title/synonym agreement, AniList episode
-bounds, and PostgreSQL uniqueness. Dry-run and inspect before applying:
+The data-package suite uses the disposable PostgreSQL catalog configured by
+`deploy/lakehouse-dev/`:
 
 ```sh
-cd packages/data
-set -a
-source .env
-set +a
-uv run ja-media-data resolve-sample --limit 100 --show issues
-uv run ja-media-data resolve-sample --limit 100 --apply --show none
-uv run ja-media-data resolution-report --limit 100
+uv run --directory packages/data pytest tests
 ```
 
-The spike currently still defines `episode_resolution`, its
-`stable_episode_mapping` check, and optional `validated_episode_mapping` output.
-Do not extend this graph: the optional output made processed-and-quarantined
-captures appear missing, and the design is scheduled for removal in Phase 3b.
-The resolver, CLI, PostgreSQL ledger, evidence, and diagnostics remain valid.
-
-The replacement proof will expose a collection-level
-`episode_identity_ledger` asset. Its internal task graph will select a bounded
-set of unresolved or stale captures from PostgreSQL, map the resolver over
-typed work items, commit accepted bindings/issues idempotently, and report
-aggregate counts. PostgreSQL remains the item-level cache and review authority;
-Dagster is being evaluated for task retries, logs, scheduling, and durable
-collection lineage.
-
-## Local proof of value
-
-Validate and inspect the code location:
-
-```sh
-cd packages/data
-uv run dg check defs
-uv run dagster asset list -m ja_media_data.definitions
-uv run dagster sensor preview bronze_scan_sensor -m ja_media_data.definitions
-```
-
-Run the local UI and daemon with persistent state:
-
-```sh
-mkdir -p .dagster-home
-export DAGSTER_HOME="$PWD/.dagster-home"
-uv run dg dev -m ja_media_data.definitions
-```
-
-Enable `bronze_scan_sensor` in the UI. The first tick registers capture
-partitions and records external materializations; it does not launch a bronze
-job because Dagster did not create the source data. Later ticks skip manifest
-ETags already reported. The sensor is stopped by default so importing the
-package never scans Garage.
+Set `JA_MEDIA_PHASE_B_MINIO_SMOKE=1` to additionally exercise Parquet round
+trips through the disposable MinIO bucket.

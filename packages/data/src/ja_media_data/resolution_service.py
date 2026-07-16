@@ -1,43 +1,61 @@
-"""Application service shared by Dagster assets and the resolver CLI."""
+"""Batch orchestration for the automatic episode-resolution product."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
-from pathlib import PurePosixPath
-from typing import Any
+from typing import Protocol, Sequence
 
-from ja_media_core.bronze import (
-    BronzeCaptureManifest,
-    BronzeManifestError,
-    parse_bronze_manifest,
-)
-
-from ja_media_data.bronze_store import BronzeDocument, BronzeMarker, BronzeStore
+from ja_media_data.bronze_store import BronzeDocument, BronzeStore
 from ja_media_data.episode_metadata import EpisodeMetadataProvider
-from ja_media_data.episode_resolution import (
-    EpisodeResolutionPlan,
-    invalid_manifest_issue,
-    overlap_issue,
-    plan_episode_resolution,
+from ja_media_data.episode_resolution import overlap_issue
+from ja_media_data.resolution_types import (
+    BatchWriteResult,
+    CaptureObservation,
+    ReplaceResult,
+    ResolutionBatch,
 )
-from ja_media_data.ledger_types import CaptureObservation
-from ja_media_data.models import BronzeCapture
-from ja_media_data.repository import BindingConflictError, LedgerRepository
+from ja_media_data.resolution_fingerprints import (
+    fingerprint_observations,
+    fingerprint_resolution,
+)
+from ja_media_data.resolution_planning import (
+    PlannedDocument,
+    ResolutionResult,
+    plan_document,
+    result_from_plan,
+)
+
+
+class BatchRepository(Protocol):
+    """The two atomic replacement operations required by the resolver."""
+
+    def replace_bronze_captures(
+        self,
+        observations: Sequence[CaptureObservation],
+        fingerprint: str,
+        *,
+        scope: str,
+        run_id: str | None,
+    ) -> ReplaceResult: ...
+
+    def replace_resolution_tables(
+        self,
+        batch: ResolutionBatch,
+        fingerprint: str,
+        *,
+        scope: str,
+        run_id: str | None,
+    ) -> BatchWriteResult: ...
 
 
 @dataclass(frozen=True)
-class ResolutionResult:
-    """One explainable batch/asset outcome suitable for logs and JSONL."""
+class ResolutionBatchResult:
+    """Compiled outcomes plus optional persistence results for both products."""
 
-    capture_id: str
-    series_id: str
-    stem: str
-    classification: str
-    reason: str
-    locator: str | None
-    issue_kind: str | None
-    evidence: dict[str, Any]
+    results: tuple[ResolutionResult, ...]
+    bronze_write: ReplaceResult | None
+    resolution_write: BatchWriteResult | None
 
 
 def resolve_document(
@@ -45,214 +63,102 @@ def resolve_document(
     *,
     store: BronzeStore,
     metadata_provider: EpisodeMetadataProvider,
-    repository: LedgerRepository | None = None,
-    dagster_run_id: str | None = None,
+    run_source: str | None = None,
 ) -> ResolutionResult:
-    """Plan one capture and optionally commit its ledger effects."""
+    """Plan one document without performing persistence side effects."""
 
-    try:
-        manifest = parse_bronze_manifest(
-            document.manifest,
-            capture_id=document.marker.capture_id,
-            manifest_key=document.marker.key,
-        )
-    except BronzeManifestError as error:
-        return _handle_invalid_manifest(
-            document,
-            store=store,
-            repository=repository,
-            error=error,
-        )
-    metadata = metadata_provider.get(
-        manifest.series.namespace, manifest.series.identifier
-    )
-    plan = plan_episode_resolution(
-        manifest,
-        input_data_version=document.marker.etag,
-        metadata=metadata,
-        dagster_run_id=dagster_run_id,
-    )
-    if repository is not None:
-        _index_capture(repository, store, document, manifest)
-        plan = _prepare_safe_supersession(repository, plan)
-        plan = _apply_plan(repository, plan, document.marker.etag)
-    return _result(manifest, plan)
-
-
-def resolve_indexed_capture(
-    capture_id: str,
-    *,
-    store: BronzeStore,
-    metadata_provider: EpisodeMetadataProvider,
-    repository: LedgerRepository,
-    dagster_run_id: str | None,
-) -> ResolutionResult:
-    """Resolve one sensor-indexed capture from its Dagster partition key."""
-
-    capture = repository.get_capture(capture_id)
-    if capture is None:
-        raise LookupError(f"capture {capture_id!r} is not indexed")
-    manifest = store.read_manifest(
-        capture.manifest_key, expected_etag=capture.manifest_etag
-    )
-    document = BronzeDocument(
-        marker=_marker_from_capture(capture),
-        manifest=manifest,
-    )
-    return resolve_document(
+    return plan_document(
         document,
         store=store,
         metadata_provider=metadata_provider,
-        repository=repository,
-        dagster_run_id=dagster_run_id,
-    )
+        observed_at=datetime.now(UTC),
+        run_source=run_source,
+    ).result
 
 
-def _index_capture(
-    repository: LedgerRepository,
+def resolve_batch(
+    documents: Sequence[BronzeDocument],
+    *,
     store: BronzeStore,
-    document: BronzeDocument,
-    manifest: BronzeCaptureManifest,
-) -> None:
-    repository.observe_capture(
-        CaptureObservation(
-            capture_id=manifest.capture_id,
-            series_namespace=manifest.series.namespace,
-            series_id=manifest.series.identifier,
-            manifest_bucket=store.bucket,
-            manifest_key=document.marker.key,
-            manifest_etag=document.marker.etag,
-            manifest_schema_version=manifest.schema_version,
-            observed_at=datetime.now(UTC),
+    metadata_provider: EpisodeMetadataProvider,
+    repository: BatchRepository | None = None,
+    scope: str = "corpus",
+    run_source: str | None = None,
+) -> ResolutionBatchResult:
+    """Compile a deterministic corpus and write each changed product once."""
+
+    timestamp = datetime.now(UTC)
+    ordered = sorted(documents, key=lambda item: (item.marker.key, item.marker.capture_id))
+    planned = [
+        plan_document(
+            document,
+            store=store,
+            metadata_provider=metadata_provider,
+            observed_at=timestamp,
+            run_source=run_source,
         )
+        for document in ordered
+    ]
+    planned = _quarantine_overlaps(planned)
+    batch = ResolutionBatch(
+        hints=tuple(hint for item in planned for hint in item.plan.hints),
+        bindings=tuple(
+            item.plan.binding for item in planned if item.plan.binding is not None
+        ),
+        issues=tuple(item.plan.issue for item in planned if item.plan.issue is not None),
+    )
+    observations = tuple(item.observation for item in planned)
+    bronze_write = None
+    resolution_write = None
+    if repository is not None:
+        bronze_write = repository.replace_bronze_captures(
+            observations,
+            fingerprint_observations(observations),
+            scope=scope,
+            run_id=run_source,
+        )
+        resolution_write = repository.replace_resolution_tables(
+            batch,
+            fingerprint_resolution(batch),
+            scope=scope,
+            run_id=run_source,
+        )
+    return ResolutionBatchResult(
+        results=tuple(item.result for item in planned),
+        bronze_write=bronze_write,
+        resolution_write=resolution_write,
     )
 
 
-def _apply_plan(
-    repository: LedgerRepository,
-    plan: EpisodeResolutionPlan,
-    input_data_version: str,
-) -> EpisodeResolutionPlan:
-    for hint in plan.hints:
-        repository.add_hint(hint)
-    if plan.issue is not None:
-        repository.record_issue(plan.issue)
-        return plan
-    assert plan.binding is not None
-    try:
-        repository.accept_binding(plan.binding)
-        repository.resolve_open_issues(
-            plan.binding.audio_capture_id,
-            note=f"accepted by {plan.binding.recipe_version}",
-        )
-        return plan
-    except BindingConflictError:
+def _quarantine_overlaps(items: list[PlannedDocument]) -> list[PlannedDocument]:
+    locators: set[tuple[str, str, str]] = set()
+    captures: set[str] = set()
+    results: list[PlannedDocument] = []
+    for item in items:
+        binding = item.plan.binding
+        if binding is None:
+            results.append(item)
+            continue
+        locator = (binding.namespace, binding.series_id, binding.episode)
+        if locator not in locators and binding.audio_capture_id not in captures:
+            locators.add(locator)
+            captures.add(binding.audio_capture_id)
+            results.append(item)
+            continue
         issue = overlap_issue(
-            plan,
-            capture_id=plan.binding.audio_capture_id,
-            input_data_version=input_data_version,
+            item.plan,
+            capture_id=binding.audio_capture_id,
+            input_data_version=binding.input_data_version,
         )
-        repository.record_issue(issue)
-        return replace(
-            plan,
+        plan = replace(
+            item.plan,
             classification="quarantined",
             reason="locator_or_capture_already_bound",
             binding=None,
             issue=issue,
         )
-
-
-def _prepare_safe_supersession(
-    repository: LedgerRepository, plan: EpisodeResolutionPlan
-) -> EpisodeResolutionPlan:
-    binding = plan.binding
-    if binding is None:
-        return plan
-    current = repository.get_current_binding_for_capture(binding.audio_capture_id)
-    if current is None or current.binding_id == binding.binding_id:
-        return plan
-    same_locator = (
-        current.namespace,
-        current.series_id,
-        current.episode,
-    ) == (binding.namespace, binding.series_id, binding.episode)
-    if not same_locator:
-        return plan
-    return replace(
-        plan,
-        binding=replace(binding, supersedes_binding_id=current.binding_id),
-    )
-
-
-def _result(
-    manifest: BronzeCaptureManifest, plan: EpisodeResolutionPlan
-) -> ResolutionResult:
-    binding = plan.binding
-    locator = (
-        f"{binding.namespace}:{binding.series_id}:{binding.episode}"
-        if binding is not None
-        else None
-    )
-    return ResolutionResult(
-        capture_id=manifest.capture_id,
-        series_id=manifest.series.identifier,
-        stem=manifest.stem,
-        classification=plan.classification,
-        reason=plan.reason,
-        locator=locator,
-        issue_kind=plan.issue.kind if plan.issue else None,
-        evidence=plan.evidence,
-    )
-
-
-def _handle_invalid_manifest(
-    document: BronzeDocument,
-    *,
-    store: BronzeStore,
-    repository: LedgerRepository | None,
-    error: BronzeManifestError,
-) -> ResolutionResult:
-    parts = PurePosixPath(document.marker.key).parts
-    series_id = (
-        parts[parts.index("metadata") - 1] if "metadata" in parts else "unknown"
-    )
-    evidence = {"error": str(error), "manifest_key": document.marker.key}
-    if repository is not None:
-        repository.observe_capture(
-            CaptureObservation(
-                capture_id=document.marker.capture_id,
-                series_namespace="anilist" if series_id != "unknown" else "unknown",
-                series_id=series_id,
-                manifest_bucket=store.bucket,
-                manifest_key=document.marker.key,
-                manifest_etag=document.marker.etag,
-                manifest_schema_version=1,
-                observed_at=datetime.now(UTC),
-            )
+        assert item.manifest is not None
+        results.append(
+            replace(item, plan=plan, result=result_from_plan(item.manifest, plan))
         )
-        repository.record_issue(
-            invalid_manifest_issue(
-                capture_id=document.marker.capture_id,
-                input_data_version=document.marker.etag,
-                error=str(error),
-                manifest_key=document.marker.key,
-            )
-        )
-    return ResolutionResult(
-        capture_id=document.marker.capture_id,
-        series_id=series_id,
-        stem=PurePosixPath(document.marker.key).stem,
-        classification="quarantined",
-        reason="invalid_manifest",
-        locator=None,
-        issue_kind="invalid",
-        evidence=evidence,
-    )
-def _marker_from_capture(capture: BronzeCapture) -> BronzeMarker:
-    return BronzeMarker(
-        capture_id=capture.capture_id,
-        key=capture.manifest_key,
-        etag=capture.manifest_etag,
-        size=0,
-        last_modified="indexed",
-    )
+    return results

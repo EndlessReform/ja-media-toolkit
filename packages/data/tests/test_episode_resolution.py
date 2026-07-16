@@ -45,7 +45,7 @@ def test_agreeing_parsers_and_metadata_bounds_accept() -> None:
     assert plan.hints[0].method == "ptn+explicit-episode-token"
 
 
-def test_same_evidence_produces_stable_domain_ids() -> None:
+def test_same_evidence_keeps_stable_claim_and_automatic_binding_ids() -> None:
     first = plan_episode_resolution(
         manifest("Example_Ep03"),
         input_data_version="etag-v1",
