@@ -18,6 +18,10 @@ from ja_media_data.resolution_service import ResolutionResult, resolve_batch
 def main() -> None:
     """Run the small, deliberately developer-facing resolver CLI."""
 
+    from ja_media_data.environment import load_cli_environment
+    from ja_media_data.operator.phase_d_registry import build_phase_d_registry
+
+    load_cli_environment()
     parser = argparse.ArgumentParser(prog="ja-data")
     commands = parser.add_subparsers(dest="command", required=True)
     sample = commands.add_parser(
@@ -27,7 +31,7 @@ def main() -> None:
     sample.add_argument(
         "--apply",
         action="store_true",
-        help="commit capture headers, hints, bindings, and issues to the configured DB",
+        help="commit capture headers, hints, proposals, and issues to the configured DB",
     )
     sample.add_argument(
         "--show", choices=("issues", "all", "none"), default="issues"
@@ -48,6 +52,27 @@ def main() -> None:
     commands.add_parser(
         "apply-lakehouse-schema",
         help="apply checked-in DuckLake and PostgreSQL control-plane SQL",
+    )
+
+    commands.add_parser("targets", help="list executable data products")
+    commands.add_parser("campaigns", help="list operator campaigns")
+    recipes = commands.add_parser("recipes", help="list operator recipes as JSON")
+    recipes.add_argument("--query")
+    plan = commands.add_parser("plan", help="preview a campaign plan as JSON")
+    plan.add_argument("campaign_id")
+    campaign = commands.add_parser(
+        "campaign", help="inspect one operator campaign as JSON"
+    )
+    campaign.add_argument("campaign_id")
+    campaign.add_argument("--series", dest="series_id")
+    web = commands.add_parser("web", help="serve the local operator workbench")
+    web.add_argument("--port", type=int, default=8765)
+    run = commands.add_parser("run", help="compile one target and its dependencies")
+    run.add_argument("target", choices=tuple(build_phase_d_registry().targets))
+    run.add_argument(
+        "--force-from",
+        choices=tuple(build_phase_d_registry().stages),
+        help="recompute this stage and every downstream checkpoint in the run",
     )
 
     bind = commands.add_parser(
@@ -71,6 +96,34 @@ def main() -> None:
         _scan_bronze(args)
     elif args.command == "bind":
         _bind(args)
+    elif args.command == "targets":
+        from ja_media_data.pipeline_cli import print_targets
+
+        print_targets()
+    elif args.command == "campaigns":
+        from ja_media_data.operator.cli import print_campaigns
+
+        print_campaigns()
+    elif args.command == "campaign":
+        from ja_media_data.operator.cli import print_campaign
+
+        print_campaign(args.campaign_id, series_id=args.series_id)
+    elif args.command == "recipes":
+        from ja_media_data.operator.cli import print_recipes
+
+        print_recipes(query=args.query)
+    elif args.command == "plan":
+        from ja_media_data.operator.cli import print_plan
+
+        print_plan(args.campaign_id)
+    elif args.command == "web":
+        from ja_media_data.operator.cli import run_web
+
+        run_web(port=args.port)
+    elif args.command == "run":
+        from ja_media_data.pipeline_cli import run_target
+
+        run_target(args.target, force_from=args.force_from)
     else:
         _apply_lakehouse_schema()
 
@@ -83,17 +136,13 @@ def _resolve_sample(args: argparse.Namespace) -> None:
     documents = tuple(store.scan_documents(limit=args.limit))
     if args.apply:
         with repository_from_env() as repository:
-            batch = resolve_batch(
+            from ja_media_data.resolution_execution import apply_resolution_batch
+
+            batch, flushed_tables = apply_resolution_batch(
                 documents,
                 store=store,
                 metadata_provider=provider,
                 repository=repository,
-                run_source="cli:resolve-sample",
-            )
-            flushed_tables = (
-                repository.flush_inlined_data()
-                if batch.resolution_write and batch.resolution_write.written
-                else 0
             )
     else:
         batch = resolve_batch(
@@ -117,7 +166,7 @@ def _resolve_sample(args: argparse.Namespace) -> None:
             Counter(
                 f"{item.series_id}:{item.reason}"
                 for item in results
-                if item.classification != "accepted"
+                if item.classification != "proposed"
             )
         ),
     }
@@ -125,7 +174,7 @@ def _resolve_sample(args: argparse.Namespace) -> None:
     if args.show == "none":
         return
     for result in results:
-        if args.show == "issues" and result.classification == "accepted":
+        if args.show == "issues" and result.classification == "proposed":
             continue
         _print_record(_result_record(result), jsonl=args.jsonl)
 
@@ -214,7 +263,7 @@ def _bind(args: argparse.Namespace) -> None:
 
 def _result_record(result: ResolutionResult) -> dict[str, Any]:
     record = asdict(result)
-    if result.classification == "accepted":
+    if result.classification == "proposed":
         record.pop("evidence")
     return record
 

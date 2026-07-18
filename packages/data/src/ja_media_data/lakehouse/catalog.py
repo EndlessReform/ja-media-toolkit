@@ -27,6 +27,7 @@ SCHEMA_DIR = (
     else Path(__file__).parents[3] / "schema"
 )
 _IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+DEFAULT_DATA_PREFIX = "audio/anime/lakehouse"
 
 
 @dataclass(frozen=True)
@@ -62,7 +63,9 @@ class CatalogConfig:
         data_path = os.environ.get("JA_MEDIA_DUCKLAKE_DATA_PATH")
         if not data_path:
             bucket = _required_env("JA_MEDIA_BRONZE_BUCKET")
-            prefix = _required_env("JA_MEDIA_DUCKLAKE_DATA_PREFIX").strip("/")
+            prefix = os.environ.get(
+                "JA_MEDIA_DUCKLAKE_DATA_PREFIX", DEFAULT_DATA_PREFIX
+            ).strip("/")
             data_path = f"s3://{bucket}/{prefix}/"
         return cls(
             postgres_url=postgres_url,
@@ -73,7 +76,7 @@ class CatalogConfig:
             s3_endpoint_url=os.environ.get("JA_MEDIA_DUCKLAKE_S3_ENDPOINT_URL")
             or os.environ.get("JA_MEDIA_S3_ENDPOINT_URL"),
             s3_region=os.environ.get("JA_MEDIA_DUCKLAKE_S3_REGION")
-            or os.environ.get("AWS_DEFAULT_REGION", "us-east-1"),
+            or os.environ.get("AWS_DEFAULT_REGION", "garage"),
             s3_key_id=os.environ.get("JA_MEDIA_DUCKLAKE_S3_ACCESS_KEY_ID")
             or os.environ.get("AWS_ACCESS_KEY_ID"),
             s3_secret=os.environ.get("JA_MEDIA_DUCKLAKE_S3_SECRET_ACCESS_KEY")
@@ -144,10 +147,16 @@ def _prepare_metadata_schema(config: CatalogConfig) -> bool:
         ).fetchone()[0]
 
 
-def connect_catalog(config: CatalogConfig) -> duckdb.DuckDBPyConnection:
-    """Return an in-memory DuckDB client attached to the shared DuckLake."""
+def connect_catalog(
+    config: CatalogConfig, *, initialize_catalog: bool = True
+) -> duckdb.DuckDBPyConnection:
+    """Return a DuckDB client attached to an existing or initialized DuckLake.
 
-    initialize = _prepare_metadata_schema(config)
+    Read-only applications pass ``initialize_catalog=False`` so opening a
+    screen cannot create PostgreSQL schemas or initialize a new catalog.
+    """
+
+    initialize = _prepare_metadata_schema(config) if initialize_catalog else False
     target = _parse_postgres_url(config.postgres_url)
     connection = duckdb.connect()
     try:

@@ -9,27 +9,21 @@ does not justify retaining an ORM or a migration framework.
 
 from __future__ import annotations
 
-import hashlib
 import os
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
 from typing import Iterator
 
 import psycopg
 from psycopg import sql
 
 from ja_media_data.resolution_types import BindingConflictError
-
-
-_PACKAGED_SCHEMA_DIR = Path(__file__).parent / "postgres_schema"
-POSTGRES_SCHEMA_DIR = (
-    _PACKAGED_SCHEMA_DIR
-    if _PACKAGED_SCHEMA_DIR.is_dir()
-    else Path(__file__).parents[2] / "postgres_schema"
+from ja_media_data.binding_schema import (
+    DEFAULT_CONTROL_SCHEMA,
+    apply_postgres_schema,
+    postgres_url_for_psycopg,
 )
-DEFAULT_CONTROL_SCHEMA = "ja_media_control"
 
 
 @dataclass(frozen=True)
@@ -47,62 +41,6 @@ class BindingOverrideRecord:
     retired_at: datetime | None
 
 
-def postgres_url_for_psycopg(value: str) -> str:
-    """Normalize the configured PostgreSQL URL for psycopg."""
-
-    return value.replace("postgresql+psycopg://", "postgresql://", 1)
-
-
-def apply_postgres_schema(
-    connection: psycopg.Connection[tuple],
-    *,
-    control_schema: str = DEFAULT_CONTROL_SCHEMA,
-    schema_dir: Path = POSTGRES_SCHEMA_DIR,
-) -> list[str]:
-    """Apply checksum-protected control-plane SQL in its own PostgreSQL schema."""
-
-    identifier = sql.Identifier(control_schema)
-    with connection.transaction():
-        connection.execute(sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(identifier))
-        connection.execute(
-            sql.SQL(
-                """CREATE TABLE IF NOT EXISTS {}.schema_history (
-                       filename TEXT PRIMARY KEY,
-                       checksum TEXT NOT NULL,
-                       applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
-                   )"""
-            ).format(identifier)
-        )
-    applied = dict(
-        connection.execute(
-            sql.SQL("SELECT filename, checksum FROM {}.schema_history").format(
-                identifier
-            )
-        ).fetchall()
-    )
-    newly_applied: list[str] = []
-    for path in sorted(schema_dir.glob("[0-9][0-9][0-9]_*.sql")):
-        contents = path.read_text()
-        checksum = hashlib.sha256(contents.encode()).hexdigest()
-        if existing := applied.get(path.name):
-            if existing != checksum:
-                raise RuntimeError(f"applied PostgreSQL schema file changed: {path.name}")
-            continue
-        with connection.transaction():
-            connection.execute(
-                sql.SQL("SET LOCAL search_path TO {}, pg_catalog").format(identifier)
-            )
-            connection.execute(contents)
-            connection.execute(
-                sql.SQL(
-                    "INSERT INTO {}.schema_history (filename, checksum) VALUES (%s, %s)"
-                ).format(identifier),
-                (path.name, checksum),
-            )
-        newly_applied.append(path.name)
-    return newly_applied
-
-
 class BindingOverrideRepository:
     """Reads and atomically advances PostgreSQL binding-override heads."""
 
@@ -118,6 +56,7 @@ class BindingOverrideRepository:
                 "their own explicit transactions"
             )
         self.connection = connection
+        self.schema = sql.Identifier(control_schema)
         self.table = sql.Identifier(control_schema, "binding_overrides")
 
     def append_override(
@@ -153,20 +92,29 @@ class BindingOverrideRepository:
                     current.decision_note,
                 ) == (audio_capture_id, decision_method, decision_note):
                     return current.override_id
+                revision = self.connection.execute(
+                    sql.SQL(
+                        """UPDATE {}.control_revisions
+                           SET revision = revision + 1
+                           WHERE name = 'binding_overrides'
+                           RETURNING revision"""
+                    ).format(self.schema),
+                ).fetchone()[0]
                 self.connection.execute(
                     sql.SQL(
-                        """UPDATE {} SET retired_at = now()
+                        """UPDATE {} SET retired_at = now(), retired_revision = %s
                            WHERE namespace = %s AND series_id = %s AND episode = %s
                              AND retired_at IS NULL"""
                     ).format(self.table),
-                    (namespace, series_id, episode),
+                    (revision, namespace, series_id, episode),
                 )
                 self.connection.execute(
                     sql.SQL(
                         """INSERT INTO {} (
                                override_id, namespace, series_id, episode,
-                               audio_capture_id, decision_method, decision_note
-                           ) VALUES (%s, %s, %s, %s, %s, %s, %s)"""
+                               audio_capture_id, decision_method, decision_note,
+                               created_revision
+                           ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)"""
                     ).format(self.table),
                     (
                         identifier,
@@ -176,6 +124,7 @@ class BindingOverrideRepository:
                         audio_capture_id,
                         decision_method,
                         decision_note,
+                        revision,
                     ),
                 )
         except psycopg.errors.UniqueViolation as error:
@@ -218,6 +167,35 @@ class BindingOverrideRepository:
                    FROM {} WHERE retired_at IS NULL
                    ORDER BY namespace, series_id, episode"""
             ).format(self.table)
+        ).fetchall()
+        yield from (BindingOverrideRecord(*row) for row in rows)
+
+    def current_revision(self) -> int:
+        """Return the exact global head used by canonicalization build keys."""
+
+        row = self.connection.execute(
+            sql.SQL(
+                """SELECT revision FROM {}.control_revisions
+                   WHERE name = 'binding_overrides'"""
+            ).format(self.schema)
+        ).fetchone()
+        return int(row[0]) if row else 0
+
+    def iter_overrides_at_revision(
+        self, revision: int
+    ) -> Iterator[BindingOverrideRecord]:
+        """Yield decisions active at one historical control-plane revision."""
+
+        rows = self.connection.execute(
+            sql.SQL(
+                """SELECT override_id, namespace, series_id, episode,
+                          audio_capture_id, decision_method, decision_note,
+                          created_at, retired_at
+                   FROM {} WHERE created_revision <= %s
+                     AND (retired_revision IS NULL OR retired_revision > %s)
+                   ORDER BY namespace, series_id, episode"""
+            ).format(self.table),
+            (revision, revision),
         ).fetchall()
         yield from (BindingOverrideRecord(*row) for row in rows)
 

@@ -22,6 +22,7 @@ class CaptureObservation:
     manifest_key: str
     manifest_etag: str
     manifest_schema_version: int
+    manifest_modified_at: datetime
     observed_at: datetime
 
 
@@ -43,16 +44,16 @@ class HintClaim:
 
 
 @dataclass(frozen=True)
-class AutomaticBinding:
-    """One deterministic row in the replaceable automatic binding product."""
+class BindingProposal:
+    """One resolver proposal eligible for a separate acceptance policy."""
 
-    binding_id: str
+    proposal_id: str
     namespace: str
     series_id: str
     episode: str
     audio_capture_id: str
-    decision_method: str
-    decision_evidence: dict[str, Any]
+    proposal_method: str
+    proposal_evidence: dict[str, Any]
     input_data_version: str
     recipe_version: str
     run_source: str | None = None
@@ -75,7 +76,7 @@ class ResolutionBatch:
     """Complete automatic resolver product prepared before a DuckLake commit."""
 
     hints: tuple[HintClaim, ...]
-    bindings: tuple[AutomaticBinding, ...]
+    proposals: tuple[BindingProposal, ...]
     issues: tuple[ResolutionIssueClaim, ...]
 
 
@@ -86,7 +87,7 @@ class BatchWriteResult:
     written: bool
     fingerprint: str
     hints: int
-    bindings: int
+    proposals: int
     issues: int
 
 

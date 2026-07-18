@@ -11,7 +11,7 @@ import pytest
 from ja_media_data.lakehouse import CatalogConfig, apply_schema, connect_catalog
 from ja_media_data.lakehouse.repository import DuckLakeRepository
 from ja_media_data.resolution_types import (
-    AutomaticBinding,
+    BindingProposal,
     CaptureObservation,
     HintClaim,
     ResolutionBatch,
@@ -49,6 +49,7 @@ def observation(
         manifest_key=key or f"metadata/{capture_id}.json",
         manifest_etag=f"etag-{minute}",
         manifest_schema_version=1,
+        manifest_modified_at=datetime(2026, 7, 15, 11, minute, tzinfo=UTC),
         observed_at=datetime(2026, 7, 15, 12, minute, tzinfo=UTC),
     )
 
@@ -66,18 +67,18 @@ def batch(capture_id: str, episode: str) -> ResolutionBatch:
         input_data_version="etag-0",
         recipe_version="resolver-v1",
     )
-    binding = AutomaticBinding(
-        binding_id=f"binding-{capture_id}-{episode}",
+    binding = BindingProposal(
+        proposal_id=f"proposal-{capture_id}-{episode}",
         namespace="anilist",
         series_id="15451",
         episode=episode,
         audio_capture_id=capture_id,
-        decision_method="test",
-        decision_evidence={"hint_id": hint.hint_id},
+        proposal_method="test",
+        proposal_evidence={"hint_id": hint.hint_id},
         input_data_version="etag-0",
         recipe_version="resolver-v1",
     )
-    return ResolutionBatch(hints=(hint,), bindings=(binding,), issues=())
+    return ResolutionBatch(hints=(hint,), proposals=(binding,), issues=())
 
 
 def test_bronze_rescan_replaces_and_identical_fingerprint_is_noop(catalog) -> None:
@@ -128,22 +129,25 @@ def test_resolution_replacement_noop_and_time_travel(catalog) -> None:
     assert first.written is True
     assert repeated.written is False
     assert changed.written is True
-    assert catalog.execute("SELECT episode FROM current_bindings").fetchone()[0] == "4"
     assert catalog.execute(
-        f"SELECT episode FROM lakehouse.episode_bindings_auto "
+        "SELECT episode FROM episode_binding_proposals"
+    ).fetchone()[0] == "4"
+    assert catalog.execute(
+        f"SELECT episode FROM lakehouse.episode_binding_proposals "
         f"AT (VERSION => {snapshot})"
     ).fetchone()[0] == "3"
 
 
-def test_batch_writer_rejects_duplicate_automatic_locators(catalog) -> None:
+def test_batch_writer_allows_duplicate_proposed_locators(catalog) -> None:
     repository = DuckLakeRepository(catalog)
-    first = batch("capture-1", "3").bindings[0]
-    second = batch("capture-2", "3").bindings[0]
-    invalid = ResolutionBatch(hints=(), bindings=(first, second), issues=())
+    first = batch("capture-1", "3").proposals[0]
+    second = batch("capture-2", "3").proposals[0]
+    invalid = ResolutionBatch(hints=(), proposals=(first, second), issues=())
 
-    with pytest.raises(ValueError, match="duplicate automatic locators"):
-        repository.replace_resolution_tables(invalid, "invalid")
-    assert catalog.execute("SELECT count(*) FROM episode_bindings_auto").fetchone()[0] == 0
+    repository.replace_resolution_tables(invalid, "valid-proposals")
+    assert catalog.execute(
+        "SELECT count(*) FROM episode_binding_proposals"
+    ).fetchone()[0] == 2
 
 
 def test_derived_issue_rows_are_replaced_not_resolved(catalog) -> None:
@@ -156,7 +160,7 @@ def test_derived_issue_rows_are_replaced_not_resolved(catalog) -> None:
         details={"reason": "test"},
     )
     repository.replace_resolution_tables(
-        ResolutionBatch(hints=(), bindings=(), issues=(issue,)), "issue-v1"
+        ResolutionBatch(hints=(), proposals=(), issues=(issue,)), "issue-v1"
     )
     repository.replace_resolution_tables(batch("capture-1", "3"), "issue-v2")
 

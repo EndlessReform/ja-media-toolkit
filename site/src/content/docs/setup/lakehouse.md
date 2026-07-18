@@ -20,11 +20,13 @@ re-running is a no-op, and editing an applied file is rejected.
 
 ```sh
 cd packages/data
-set -a
-source .env
-set +a
 uv run ja-data apply-lakehouse-schema
 ```
+
+`ja-data` merges `.env` files from the Git repository root through its
+invocation directory, with more specific files winning. Already-exported
+process variables remain authoritative, and discovery never crosses the
+repository boundary.
 
 Configure `JA_MEDIA_DUCKLAKE_CATALOG_SCHEMA` and either a direct
 `JA_MEDIA_DUCKLAKE_DATA_PATH` or both `JA_MEDIA_BRONZE_BUCKET` and
@@ -103,12 +105,13 @@ uv run --directory packages/data \
 the normalized cache as one compiled product. The resolver reads the same
 bounded ordering, queries exact AniList metadata through the core SDK, validates
 the complete result, and replaces `episode_hints_auto`,
-`episode_bindings_auto`, and `resolution_issues_auto` in one transaction.
+`episode_binding_proposals`, and `resolution_issues_auto` in one transaction.
 
-Each product records a content fingerprint in `materializations`. Repeating an
-identical command performs zero table writes. A changed input replaces the
-product atomically; the previous version remains available through DuckLake
-snapshot time travel.
+Each product records a content fingerprint and lineage metadata in
+`materializations`. Repeating an identical compilation avoids rewriting product
+rows while still recording the global run and local stage checkpoint. A changed
+input replaces the product atomically; the previous version remains available
+through DuckLake snapshot time travel.
 
 ## Back up the catalog
 

@@ -87,7 +87,7 @@ class IdentityQueries:
                 return _binding_from_override(override)
         row = self.connection.execute(
             """SELECT binding_id, namespace, series_id, episode, audio_capture_id
-               FROM current_bindings WHERE audio_capture_id = ?
+               FROM canonical_episode_inputs WHERE audio_capture_id = ?
                LIMIT 1""",
             [capture_id],
         ).fetchone()
@@ -117,7 +117,7 @@ class IdentityQueries:
                 )
         row = self.connection.execute(
             """SELECT binding_id, namespace, series_id, episode, audio_capture_id
-               FROM current_bindings
+               FROM canonical_episode_inputs
                WHERE namespace = ? AND series_id = ? AND episode = ?""",
             [namespace, series_id, episode],
         ).fetchone()
@@ -189,8 +189,9 @@ class IdentityQueries:
                 )
                 continue
             automatic = self.connection.execute(
-                """SELECT namespace, series_id, episode, binding_id
-                   FROM current_bindings WHERE audio_capture_id = ? LIMIT 1""",
+                """SELECT namespace, series_id, episode, acceptance_id
+                   FROM accepted_bindings_auto
+                   WHERE audio_capture_id = ? LIMIT 1""",
                 [capture_id],
             ).fetchone()
             if automatic is None or automatic[:3] == (
@@ -217,7 +218,11 @@ class IdentityQueries:
         names = (
             "bronze_captures",
             "episode_hints_auto",
-            "episode_bindings_auto",
+            "episode_binding_proposals",
+            "accepted_bindings_auto",
+            "canonical_episode_inputs",
+            "canonical_subtitle_inputs",
+            "subtitle_language_results",
             "resolution_issues_auto",
             "consistency_findings",
         )
@@ -226,8 +231,8 @@ class IdentityQueries:
             for name in names
         }
         if self.override_repository is None:
-            result["current_bindings"] = self.connection.execute(
-                "SELECT count(*) FROM current_bindings"
+            result["effective_bindings"] = self.connection.execute(
+                "SELECT count(*) FROM canonical_episode_inputs"
             ).fetchone()[0]
             return result
         overrides = tuple(self.override_repository.iter_current_overrides())
@@ -235,11 +240,11 @@ class IdentityQueries:
             (item.namespace, item.series_id, item.episode) for item in overrides
         }
         automatic = self.connection.execute(
-            "SELECT namespace, series_id, episode FROM current_bindings"
+            "SELECT namespace, series_id, episode FROM canonical_episode_inputs"
         ).fetchall()
         result["binding_overrides"] = len(overrides)
         result["consistency_findings"] = len(self.list_consistency_findings())
-        result["current_bindings"] = sum(
+        result["effective_bindings"] = sum(
             tuple(row) not in overridden_locators for row in automatic
         ) + sum(item.audio_capture_id is not None for item in overrides)
         return result

@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Protocol, Sequence
 
 from ja_media_data.bronze_store import BronzeDocument, BronzeStore
 from ja_media_data.episode_metadata import EpisodeMetadataProvider
-from ja_media_data.episode_resolution import overlap_issue
 from ja_media_data.resolution_types import (
     BatchWriteResult,
     CaptureObservation,
@@ -20,10 +19,8 @@ from ja_media_data.resolution_fingerprints import (
     fingerprint_resolution,
 )
 from ja_media_data.resolution_planning import (
-    PlannedDocument,
     ResolutionResult,
     plan_document,
-    result_from_plan,
 )
 
 
@@ -99,11 +96,10 @@ def resolve_batch(
         )
         for document in ordered
     ]
-    planned = _quarantine_overlaps(planned)
     batch = ResolutionBatch(
         hints=tuple(hint for item in planned for hint in item.plan.hints),
-        bindings=tuple(
-            item.plan.binding for item in planned if item.plan.binding is not None
+        proposals=tuple(
+            item.plan.proposal for item in planned if item.plan.proposal is not None
         ),
         issues=tuple(item.plan.issue for item in planned if item.plan.issue is not None),
     )
@@ -128,37 +124,3 @@ def resolve_batch(
         bronze_write=bronze_write,
         resolution_write=resolution_write,
     )
-
-
-def _quarantine_overlaps(items: list[PlannedDocument]) -> list[PlannedDocument]:
-    locators: set[tuple[str, str, str]] = set()
-    captures: set[str] = set()
-    results: list[PlannedDocument] = []
-    for item in items:
-        binding = item.plan.binding
-        if binding is None:
-            results.append(item)
-            continue
-        locator = (binding.namespace, binding.series_id, binding.episode)
-        if locator not in locators and binding.audio_capture_id not in captures:
-            locators.add(locator)
-            captures.add(binding.audio_capture_id)
-            results.append(item)
-            continue
-        issue = overlap_issue(
-            item.plan,
-            capture_id=binding.audio_capture_id,
-            input_data_version=binding.input_data_version,
-        )
-        plan = replace(
-            item.plan,
-            classification="quarantined",
-            reason="locator_or_capture_already_bound",
-            binding=None,
-            issue=issue,
-        )
-        assert item.manifest is not None
-        results.append(
-            replace(item, plan=plan, result=result_from_plan(item.manifest, plan))
-        )
-    return results

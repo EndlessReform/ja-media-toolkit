@@ -11,7 +11,7 @@ from ja_media_core.bronze import BronzeCaptureManifest
 
 from ja_media_data.episode_metadata import SeriesEpisodeMetadata
 from ja_media_data.resolution_types import (
-    AutomaticBinding,
+    BindingProposal,
     HintClaim,
     ResolutionIssueClaim,
 )
@@ -28,7 +28,7 @@ class EpisodeResolutionPlan:
     classification: str
     reason: str
     hints: tuple[HintClaim, ...]
-    binding: AutomaticBinding | None
+    proposal: BindingProposal | None
     issue: ResolutionIssueClaim | None
     evidence: dict[str, Any]
 
@@ -141,23 +141,23 @@ def plan_episode_resolution(
         )
 
     hint = hints[0]
-    binding = AutomaticBinding(
-        binding_id=_stable_id("binding", hint.hint_id),
+    proposal = BindingProposal(
+        proposal_id=_stable_id("proposal", hint.hint_id),
         namespace=manifest.series.namespace,
         series_id=manifest.series.identifier,
         episode=str(episode),
         audio_capture_id=manifest.capture_id,
-        decision_method="automatic-filename-and-anilist-bounds",
-        decision_evidence={"hint_id": hint.hint_id, **evidence},
+        proposal_method="automatic-filename-and-anilist-bounds",
+        proposal_evidence={"hint_id": hint.hint_id, **evidence},
         input_data_version=input_data_version,
         recipe_version=RECIPE_VERSION,
         run_source=run_source,
     )
     return EpisodeResolutionPlan(
-        classification="accepted",
+        classification="proposed",
         reason="signals_agree_and_episode_is_in_bounds",
         hints=hints,
-        binding=binding,
+        proposal=proposal,
         issue=None,
         evidence=evidence,
     )
@@ -234,7 +234,7 @@ def _issue_plan(
         classification="quarantined",
         reason=reason,
         hints=hints,
-        binding=None,
+        proposal=None,
         issue=issue,
         evidence=evidence,
     )
@@ -245,7 +245,7 @@ def overlap_issue(
 ) -> ResolutionIssueClaim:
     """Convert a transactional uniqueness conflict into a durable review item."""
 
-    assert plan.binding is not None
+    assert plan.proposal is not None
     return ResolutionIssueClaim(
         issue_id=_stable_id(
             "issue", capture_id, input_data_version, RECIPE_VERSION, "overlap"
@@ -256,14 +256,14 @@ def overlap_issue(
         details={
             "reason": "locator_or_capture_already_bound",
             "candidate_locator": {
-                "namespace": plan.binding.namespace,
-                "series_id": plan.binding.series_id,
-                "episode": plan.binding.episode,
+                "namespace": plan.proposal.namespace,
+                "series_id": plan.proposal.series_id,
+                "episode": plan.proposal.episode,
             },
             "recipe_version": RECIPE_VERSION,
             **plan.evidence,
         },
-        run_source=plan.binding.run_source,
+        run_source=plan.proposal.run_source,
     )
 
 

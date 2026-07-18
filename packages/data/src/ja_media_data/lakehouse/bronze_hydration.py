@@ -63,6 +63,9 @@ def hydrate_bronze_captures(
                 manifest_key=document.marker.key,
                 manifest_etag=document.marker.etag,
                 manifest_schema_version=schema_version,
+                manifest_modified_at=datetime.fromisoformat(
+                    document.marker.last_modified.replace("Z", "+00:00")
+                ),
                 observed_at=timestamp,
             )
         )

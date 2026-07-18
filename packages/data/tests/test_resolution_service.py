@@ -72,7 +72,7 @@ def document(
     )
 
 
-def test_batch_quarantines_overlap_and_identical_replay_is_zero_write(
+def test_batch_keeps_competing_proposals_and_identical_replay_is_zero_write(
     repository: DuckLakeRepository,
 ) -> None:
     documents = (document("capture-1"), document("capture-2"))
@@ -90,10 +90,9 @@ def test_batch_quarantines_overlap_and_identical_replay_is_zero_write(
     )
 
     assert [item.classification for item in first.results] == [
-        "accepted",
-        "quarantined",
+        "proposed",
+        "proposed",
     ]
-    assert first.results[1].issue_kind == "overlap"
     assert first.bronze_write is not None and first.bronze_write.written is True
     assert first.resolution_write is not None
     assert first.resolution_write.written is True
@@ -101,8 +100,8 @@ def test_batch_quarantines_overlap_and_identical_replay_is_zero_write(
     assert repeated.bronze_write.written is False
     assert repeated.resolution_write is not None
     assert repeated.resolution_write.written is False
-    assert repository.summary()["episode_bindings_auto"] == 1
-    assert repository.summary()["resolution_issues_auto"] == 1
+    assert repository.summary()["episode_binding_proposals"] == 2
+    assert repository.summary()["resolution_issues_auto"] == 0
 
 
 def test_invalid_manifest_is_in_rebuilt_review_product(
@@ -124,7 +123,7 @@ def test_invalid_manifest_is_in_rebuilt_review_product(
     assert issue.kind == "invalid"
 
 
-def test_changed_input_replaces_automatic_binding_without_supersession(
+def test_changed_input_replaces_proposal_without_supersession(
     repository: DuckLakeRepository,
 ) -> None:
     first = resolve_batch(
@@ -133,7 +132,9 @@ def test_changed_input_replaces_automatic_binding_without_supersession(
         metadata_provider=FakeMetadata(),
         repository=repository,
     )
-    first_binding = repository.get_current_binding_for_capture("capture-1")
+    first_binding_id = repository.connection.execute(
+        "SELECT proposal_id FROM episode_binding_proposals"
+    ).fetchone()[0]
     changed = resolve_batch(
         (document("capture-1", etag="etag-v2"),),
         store=FakeStore(),
@@ -141,9 +142,10 @@ def test_changed_input_replaces_automatic_binding_without_supersession(
         repository=repository,
     )
 
-    current = repository.get_current_binding_for_capture("capture-1")
+    current_binding_id = repository.connection.execute(
+        "SELECT proposal_id FROM episode_binding_proposals"
+    ).fetchone()[0]
     assert first.resolution_write is not None
     assert changed.resolution_write is not None and changed.resolution_write.written
-    assert first_binding is not None and current is not None
-    assert current.binding_id != first_binding.binding_id
-    assert repository.summary()["episode_bindings_auto"] == 1
+    assert current_binding_id != first_binding_id
+    assert repository.summary()["episode_binding_proposals"] == 1

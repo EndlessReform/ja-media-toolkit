@@ -1,0 +1,33 @@
+{% extends 'base.html' %}
+{% from '_identity.html' import internal_ids %}
+{% block title %}Run #{{ run.run_number }}{% endblock %}
+{% block header %}
+<div class="breadcrumb"><a href="/operator">Operator Home</a> » <a href="/operator/runs">Run Log</a> » Run #{{ run.run_number }}</div>
+<header class="page-header campaign-header">
+  <div><h1>Run #{{ run.run_number }}</h1><p>One global compiler dispatch across the listed stage executions. {{ internal_ids(run.run_id) }}</p></div>
+  <table class="context-table">
+    <tr><th>target</th><td>{{ run.target }}</td></tr>
+    <tr><th>status</th><td><span class="status {{ run.status }}">{{ run.status }}</span></td></tr>
+    <tr><th>snapshot</th><td>{{ run.terminal_snapshot_id or '—' }}</td></tr>
+    <tr><th>override rev</th><td>{{ run.override_revision }}</td></tr>
+  </table>
+</header>
+{% endblock %}
+{% block content %}
+{% if run.terminal_snapshot_id %}<div class="notice"><a href="/operator/campaigns/canonicalization-gate?run_id={{ run.run_id }}">[ VIEW WORKSPACE LEFT BY THIS RUN ]</a></div>{% endif %}
+<div class="terminology-note"><strong>Reading this page:</strong> Run #{{ run.run_number }} is the global dispatch. Each row is one stage execution within it. A product version is the durable, atomically committed output created or reused by that stage—not a path to the media assets.</div>
+<section class="forum-panel">
+  <h2>Stage Executions</h2>
+  <table class="data-table run-table">
+    <thead><tr><th>#</th><th>Stage</th><th>Result</th><th>Internal IDs</th><th>Recipe</th><th>Elapsed</th><th>Failure</th></tr></thead>
+    <tbody>{% for checkpoint in run.checkpoints %}<tr>
+      <td>{{ checkpoint.ordinal }}</td><td><strong>{{ checkpoint.stage }}</strong></td>
+      <td><span class="status {{ checkpoint.disposition }}">{{ checkpoint.disposition }}</span></td>
+      <td>{{ internal_ids(None, checkpoint.attempt_id, checkpoint.materialization_id) }}</td>
+      <td><code>{{ checkpoint.recipe_revision }}</code></td>
+      <td>{% if checkpoint.started_at and checkpoint.finished_at %}{{ ((checkpoint.finished_at - checkpoint.started_at).total_seconds() * 1000) | round | int }} ms{% else %}—{% endif %}</td>
+      <td class="error">{{ checkpoint.error or '—' }}</td>
+    </tr>{% endfor %}</tbody>
+  </table>
+</section>
+{% endblock %}

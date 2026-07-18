@@ -24,9 +24,11 @@ any Garage incompatibility is found now, at zero sunk cost.
 
 ## Phase B — schema and views (done; write shape superseded by Phase C2)
 
-1. Add `packages/data/schema/` SQL defining `bronze_captures`, `episode_hints`,
-   `episode_bindings`, and `episode_resolution_issues`, plus a nullable
-   `run_source`; also define `run_log`.
+1. Add `packages/data/schema/` SQL defining the original
+   `bronze_captures`, `episode_hints`, `episode_bindings`, and
+   `episode_resolution_issues` spike, plus `run_source` and `run_log`. These
+   historical names and the ledger-shaped write model were removed by C2/D2;
+   they are recorded here only to explain the migration sequence.
 2. Add `current_bindings` and `consistency_findings` views with the currency
    semantics in the architecture plan.
 3. Test accept, reject-without-replacement, supersession, correction moves,
@@ -44,7 +46,8 @@ resolver corpus (that corpus enters in Phase C). Checked-in rows cover:
 - deliberate locator-side and capture-side collisions representing possible
   check-then-append races;
 - the corresponding `consistency_findings`; and
-- minimal issue and `run_log` rows proving those schemas are usable.
+- minimal issue and historical `run_log` rows proving those spike schemas were
+  usable.
 
 Use stable IDs and explicit ordering values so view tests do not depend on wall
 clock timing or generated UUID order. Keep fixtures declarative and small enough
@@ -81,7 +84,7 @@ changing the local-filesystem results.
 3. Port idempotency and conflict tests.
 
 **Gate:** `ja-data resolve-sample --limit 100 --apply` reproduces the
-baseline: 52 accepted, 48 quarantined, with the same reasons.
+baseline: 52 auto-acceptable proposals, 48 quarantined, with the same reasons.
 
 ## Phase C2 — reshape writes and restore the PostgreSQL decision boundary (done)
 
@@ -93,11 +96,12 @@ self-inflicted by the ported shape, not demanded by the problem. The amended
 architecture (plan: "Binding product") splits machine derivations from human
 decisions. A subsequent review on 2026-07-15 restored ordinary PostgreSQL as
 the owner of the small, invariant-bearing human decision set. This phase pays
-both corrections before any kernel or TUI code builds on the ledger shape.
+both corrections before any kernel or operator-surface code builds on the
+ledger shape.
 
 1. **Done (2026-07-15):** replace `episode_hints` / `episode_bindings` /
    `episode_resolution_issues` with `episode_hints_auto`,
-   `episode_bindings_auto`, `resolution_issues_auto` (derived, replaced per
+   `episode_binding_proposals`, `resolution_issues_auto` (derived, replaced per
    recompute) plus `materializations` (target, scope, fingerprint,
    computed_at, run_id). Shrink `consistency_findings` to cross-substrate
    data-quality checks.
@@ -134,7 +138,7 @@ both corrections before any kernel or TUI code builds on the ledger shape.
 9. **Done (2026-07-15):** fix `catalog.py`'s packaged-schema path and verify
    both DuckLake and PostgreSQL SQL directories are present in the built wheel.
 
-**Gate:** the 100-capture corpus reproduces 52 accepted / 48 quarantined with
+**Gate:** the 100-capture corpus reproduces 52 proposals / 48 quarantined with
 the same reasons through the batch writer; an identical second run is a
 fingerprint no-op with **zero** table writes (not "expected cache churn"); an
 appended override is immediately visible in the effective-binding query with
@@ -142,64 +146,104 @@ no rebuild step; a competing capture override fails atomically in PostgreSQL;
 the prior automatic product remains readable via snapshot time travel.
 
 **Validated 2026-07-15:** the isolated local PostgreSQL/MinIO run produced 96
-hints, 52 automatic bindings, 48 issues, and zero consistency findings. An
+hints, 52 automatic proposals, 48 issues, and zero consistency findings. An
 identical second run reported `bronze_written=false`,
 `resolution_written=false`, and `flushed_tables=0`; the first product remained
 queryable by snapshot version in the repository test.
 
-## Phase D0 — operator visibility slice
+## Phase D — binding-to-subtitle-LID vertical slice (implemented)
 
-Build a thin read-only Textual surface over real C2 state before adding more
-pipeline machinery:
+The 2026-07-15 implementation deliberately moved the first interactive surface
+until after one real downstream path existed. The slice is:
 
-1. Define a UI-independent status projection for captures, automatic and
-   effective bindings, override provenance, resolution issues, consistency
-   findings, fingerprints, and materialization timestamps.
-2. Render an episode × stage matrix with refresh, filtering, and a detail pane.
-3. Register LID, alignment, and publication as explicit `not_implemented`
-   stages. A stub never emits domain output or masquerades as pending, stale,
-   successful, or failed work.
-4. Keep the first slice read-only. Widgets call the status projection rather
-   than querying DuckLake or PostgreSQL directly.
+```text
+bronze capture
+  -> episode binding proposal
+  -> automatic acceptance gate
+  -> canonical episode input
+  -> subtitle LID result
+```
 
-**Gate:** the operator can inspect the 100-capture C2 result, distinguish
-automatic bindings, overrides, explicit unbinds, and quarantines, and see that
-future stages are intentionally unavailable. The same projection is testable
-without Textual.
+1. Rename resolver output to `episode_binding_proposals`. Proposals are not a
+   downstream contract.
+2. Materialize `accepted_bindings_auto` through a separately versioned policy.
+   Phase D policy `accept-resolver-proposals-v1` accepts every proposal the
+   conservative resolver emits. This is intentionally permissive so
+   canonicalization and LID see representative data; changing the policy does
+   not change either downstream stage. Active PostgreSQL overrides still mask,
+   correct, or unbind a locator before canonicalization.
+3. Materialize `canonical_episode_inputs` and `canonical_subtitle_inputs`.
+   When several accepted captures claim one locator, choose the greatest
+   bronze commit marker's `manifest_modified_at`; break exact timestamp ties by
+   manifest key and capture ID. This is the complete versioned Phase D policy,
+   `latest-manifest-modified-v1`: “latest file wins at compile time.”
+4. Run existing script-first/FastText-fallback subtitle language analysis over
+   canonical subtitle objects only. Audio LID is deliberately absent.
+5. Store exact input fingerprints, recipe/policy versions, materialization
+   timestamps, and run rows. Identical target fingerprints do not rewrite
+   product tables (the dispatch is still recorded as a global run and local
+   stage checkpoint). A read,
+   parse, or LID failure records a failed run and leaves the previous complete
+   result table intact.
+6. Expose the closure as `ja-data run subtitle-lid`; also expose the two
+   intermediate targets and `ja-data targets` so individual boundaries can be
+   exercised while debugging.
 
-## Phase D — execution kernel and vertical slice
+**Repository gate:** tests prove two competing acceptable proposals survive
+the resolver, the newer capture wins canonicalization, only its subtitle is
+classified, identical reruns do not rewrite products, and a failed rerun
+preserves the prior result. Applying this schema and compiling the configured
+shared corpus remain explicit operator actions; repository tests do not write
+shared data services.
 
-Prove the execution contract on portable audio + LID behind the established
-status projection:
+## Phase D1/D2 — read-only operator workbench and truthful runs (implemented)
 
-1. Implement the target registry and fingerprint staleness query first
-   (stale = stored fingerprint ≠ fingerprint recomputed from current
-   upstreams), tested with missing, stale, and override-shadowed inputs.
-2. Per-stage TOML recipe files loaded through Pydantic; the recipe content
-   hash feeds the fingerprint.
-3. Scratch-then-replace stage runners, `run_log`, and re-run semantics.
-4. Add `ja-data status [--series <id>]` and
-   `ja-data run <target> [--series <id> | --set <name>]` with "everything
-   stale" as the default scope, plus `ja-data targets` introspection.
-5. Replace the LID `not_implemented` state with real missing/current/stale/
-   failed status; do not change widget-side storage logic.
-6. Demonstrate: default stale-set selection across many series; walking the
-   closure to a fork (two targets sharing ancestry, computed once); mid-run
-   kill leaving the previous table version intact; completion on another
-   machine; a recipe edit staling exactly its downstream; truthful status
-   rendering.
+The implemented slice is a surface-neutral operator application with typed JSON
+and loopback FastAPI/Jinja/HTMX adapters. It deliberately registers only real
+Phase D stages instead of manufacturing future mock targets. The campaign view:
 
-**Gate:** every demonstration passes and the TUI reports the same state as the
-CLI status command.
+1. leads with the paged canonical product and lazily loads candidate evidence;
+2. exposes a selectable, horizontally scrollable pipeline spine with paged
+   stage-owned exception/result views;
+3. distinguishes the currently committed product, the global run that built
+   it, the most recent stage execution, and dependency-derived currency;
+4. records monotonically numbered global runs made of independently atomic
+   local stage checkpoints;
+5. supports exact historical workspace views through DuckLake snapshots; and
+6. owns attached DuckLake/PostgreSQL clients and bounded projection caches in
+   the FastAPI lifespan.
 
-## Phase E — safe operator actions
+The UI remains read-only. Routes and templates consume application DTOs and do
+not own storage queries, planning, staleness, or mutation rules. See
+[`packages/data/ARCHITECTURE.md`](../packages/data/ARCHITECTURE.md) for the
+implemented contracts; the broader workbench design remains directional rather
+than a claim that every proposed future target exists.
 
-Add light mutation and execution actions to the proven read-only TUI: binding
-override/unbind, issue navigation, and local-capability-aware stage dispatch.
+**Gate status:** complete. The configured bronze corpus drives the campaign;
+operators can explain canonical selection, inspect failure evidence, distinguish
+mixed-generation stage state, expand bounded products, and inspect global/local
+run lineage without copying opaque IDs.
 
-**Gate:** on the laptop, the operator sees a series, runs the next light stage
-for a stale episode, resolves an issue, and copies no hash or runs list commands.
-Heavy stages show as runnable elsewhere when local capability is absent.
+## Phase E — operator resolution decisions (next)
+
+Add reusable, evidence-bound decision primitives and apply them first to the
+canonicalization boundary:
+
+1. present competing canonical candidates and binding alternatives in the
+   stage-owned inspection surface;
+2. preview the exact decision and downstream invalidation before mutation;
+3. append a PostgreSQL binding override or explicit unbind through the existing
+   transactional control-plane contract;
+4. bind every decision to the evidence/product version it reviewed so changed
+   upstream evidence visibly invalidates or supersedes it; and
+5. expose the resulting stale canonical product and explicit recomputation path
+   without silently launching work.
+
+**Gate:** the operator can resolve a competing candidate or binding from the
+workbench, see durable provenance for that human decision, and see precisely
+which canonical/downstream products now require recomputation. No generic
+approval framework, remote executor, autonomous queue, or destructive action is
+introduced for this gate.
 
 ## Phase F — remove Dagster and the old substrate (repository done)
 

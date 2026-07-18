@@ -39,13 +39,13 @@ def test_agreeing_parsers_and_metadata_bounds_accept() -> None:
         metadata=metadata(),
     )
 
-    assert plan.classification == "accepted"
-    assert plan.binding is not None
-    assert plan.binding.episode == "3"
+    assert plan.classification == "proposed"
+    assert plan.proposal is not None
+    assert plan.proposal.episode == "3"
     assert plan.hints[0].method == "ptn+explicit-episode-token"
 
 
-def test_same_evidence_keeps_stable_claim_and_automatic_binding_ids() -> None:
+def test_same_evidence_keeps_stable_claim_and_proposal_ids() -> None:
     first = plan_episode_resolution(
         manifest("Example_Ep03"),
         input_data_version="etag-v1",
@@ -58,8 +58,8 @@ def test_same_evidence_keeps_stable_claim_and_automatic_binding_ids() -> None:
     )
 
     assert first.hints[0].hint_id == second.hints[0].hint_id
-    assert first.binding is not None and second.binding is not None
-    assert first.binding.binding_id == second.binding.binding_id
+    assert first.proposal is not None and second.proposal is not None
+    assert first.proposal.proposal_id == second.proposal.proposal_id
 
 
 def test_episode_above_anilist_count_is_invalid() -> None:
@@ -69,7 +69,7 @@ def test_episode_above_anilist_count_is_invalid() -> None:
         metadata=metadata(episodes=12),
     )
 
-    assert plan.binding is None
+    assert plan.proposal is None
     assert plan.issue is not None
     assert plan.issue.kind == "invalid"
     assert plan.reason == "episode_exceeds_anilist_count"
@@ -82,7 +82,7 @@ def test_range_is_quarantined_instead_of_collapsed() -> None:
         metadata=metadata(),
     )
 
-    assert plan.binding is None
+    assert plan.proposal is None
     assert plan.reason == "multi_episode_range"
 
 
@@ -109,5 +109,5 @@ def test_filename_title_must_match_anilist_identity() -> None:
         ),
     )
 
-    assert plan.binding is None
+    assert plan.proposal is None
     assert plan.reason == "filename_title_disagrees_with_anilist"

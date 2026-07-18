@@ -1,0 +1,39 @@
+{% extends 'base.html' %}
+{% block title %}{{ snapshot.campaign.name }}{% endblock %}
+{% block header %}
+<div class="breadcrumb"><a href="/operator">Campaign Index</a> » {{ snapshot.campaign.name }}</div>
+<header class="page-header campaign-header">
+  <div>
+    <h1>{{ snapshot.campaign.name }}</h1>
+    <p>{{ snapshot.campaign.description }}</p>
+  </div>
+  <table class="context-table">
+    <tr><th>target</th><td><code>{{ snapshot.campaign.target }}</code></td></tr>
+    <tr><th>scope</th><td>{{ snapshot.campaign.scope }}</td></tr>
+    <tr><th>lens</th><td>{{ snapshot.lens.kind }}</td></tr>
+    <tr><th>refreshed</th><td>{{ snapshot.generated_at.strftime('%Y-%m-%d %H:%M:%S UTC') }}</td></tr>
+    <tr><th>view</th><td>{% if run_id %}run <code>{{ run_id }}</code> / snapshot {{ snapshot.lens.view_snapshot_id }} · <a href="/operator/campaigns/{{ snapshot.campaign.campaign_id }}">CURRENT</a>{% else %}current workspace{% endif %}</td></tr>
+  </table>
+</header>
+{% endblock %}
+{% block content %}
+<section class="forum-panel" aria-labelledby="lens-heading">
+  <div class="panel-title-row">
+    <h2 id="lens-heading">Binding → Admission → Canonicalization</h2>
+    <form
+      action="/operator/campaigns/{{ snapshot.campaign.campaign_id }}"
+      method="get"
+      hx-get="/operator/campaigns/{{ snapshot.campaign.campaign_id }}/lens"
+      hx-target="#target-lens"
+      hx-swap="outerHTML"
+      hx-trigger="submit, change delay:250ms"
+    >
+      <label for="series-id">Series ID:</label>
+      <input id="series-id" name="series_id" value="{{ series_id }}" placeholder="ALL">
+      <input id="view-run-id" type="hidden" name="run_id" value="{{ run_id }}">
+      <button type="submit">FILTER</button>
+    </form>
+  </div>
+  {% include '_canonicalization_lens.html' %}
+</section>
+{% endblock %}

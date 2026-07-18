@@ -32,6 +32,7 @@ Background services that provide data or compute resources, often deployed in co
 ├── site/               # User-facing documentation site (The "How")
 ├── packages/           # Shared logic and shared libraries
 │   ├── core/           # Shared contracts, transcript formats, and config
+│   ├── data/           # DuckLake compiler and local operator workbench
 │   └── frontend/       # CLI entrypoints and TUI surfaces
 ├── envs/               # Platform-specific runtimes & dependencies
 │   ├── apple/          # MacBook workflows (MLX, Metal, local ASR/VAD)
@@ -79,3 +80,22 @@ For developers, the following files are essential for understanding the system b
 - `docs/ARCHITECTURE.md`: The durable boundaries between ASR, config, and backends.
 - `docs/audio-library/README.md`: Derived anime audio filesystem, metadata, and conversion contracts.
 - `AGENTS.md`: Guidelines for LLMs and agents operating within this codebase.
+
+### Lakehouse Operator Web UI
+
+The data package includes a loopback-only operator workbench for inspecting
+compiled products, stage currency, run lineage, canonical binding evidence, and
+failure queues. Repository and package `.env` files are merged automatically;
+more specific values win.
+
+```sh
+cd packages/data
+uv sync
+uv run ja-data apply-lakehouse-schema
+uv run ja-data web
+```
+
+Open [http://127.0.0.1:8765/operator](http://127.0.0.1:8765/operator). The
+current gate is intentionally read-only. Contributor concepts and storage,
+execution, caching, and UI boundaries are documented in
+[`packages/data/ARCHITECTURE.md`](packages/data/ARCHITECTURE.md).

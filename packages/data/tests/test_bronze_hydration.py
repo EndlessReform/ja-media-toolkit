@@ -43,6 +43,9 @@ def test_hydration_indexes_valid_and_invalid_commit_markers() -> None:
         True,
     )
     assert repository.observations[0].series_id == "15451"
+    assert repository.observations[0].manifest_modified_at == datetime(
+        2026, 7, 13, tzinfo=UTC
+    )
     assert repository.observations[1].series_id == "15451"
 
 
@@ -53,7 +56,7 @@ def _document(capture_id: str, manifest: dict) -> BronzeDocument:
             key=f"audio/anime/bronze/15451/metadata/{capture_id}.json",
             etag="etag",
             size=1,
-            last_modified="2026-07-14T00:00:00Z",
+            last_modified="2026-07-13T00:00:00Z",
         ),
         manifest=manifest,
     )

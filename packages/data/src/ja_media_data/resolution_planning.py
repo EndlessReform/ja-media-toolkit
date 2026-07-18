@@ -92,7 +92,7 @@ def result_from_plan(
 ) -> ResolutionResult:
     """Project a domain plan into the stable CLI/report result contract."""
 
-    binding = plan.binding
+    proposal = plan.proposal
     return ResolutionResult(
         capture_id=manifest.capture_id,
         series_id=manifest.series.identifier,
@@ -100,8 +100,8 @@ def result_from_plan(
         classification=plan.classification,
         reason=plan.reason,
         locator=(
-            f"{binding.namespace}:{binding.series_id}:{binding.episode}"
-            if binding is not None
+            f"{proposal.namespace}:{proposal.series_id}:{proposal.episode}"
+            if proposal is not None
             else None
         ),
         issue_kind=plan.issue.kind if plan.issue else None,
@@ -130,7 +130,7 @@ def _invalid_plan(
         classification="quarantined",
         reason="invalid_manifest",
         hints=(),
-        binding=None,
+        proposal=None,
         issue=issue,
         evidence=evidence,
     )
@@ -154,6 +154,7 @@ def _invalid_plan(
             manifest_key=document.marker.key,
             manifest_etag=document.marker.etag,
             manifest_schema_version=1,
+            manifest_modified_at=_manifest_modified_at(document),
             observed_at=observed_at,
         ),
         manifest=None,
@@ -174,8 +175,15 @@ def _observation(
         manifest_key=document.marker.key,
         manifest_etag=document.marker.etag,
         manifest_schema_version=manifest.schema_version,
+        manifest_modified_at=_manifest_modified_at(document),
         observed_at=observed_at,
     )
+
+
+def _manifest_modified_at(document: BronzeDocument) -> datetime:
+    """Parse the commit marker timestamp used by canonical latest-wins policy."""
+
+    return datetime.fromisoformat(document.marker.last_modified.replace("Z", "+00:00"))
 
 
 def _series_hint(key: str) -> tuple[str, str]:

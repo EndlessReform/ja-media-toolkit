@@ -13,7 +13,8 @@ This plan replaces the retired Dagster + Alembic + PostgreSQL-domain-tables
 spike with DuckLake tables on Garage, the
 existing PostgreSQL instance as both DuckLake catalog and a deliberately tiny
 binding-decision control plane, a small explicit execution kernel, and CLI +
-Textual surfaces for the operator. dbt is an optional later phase, not a
+surface-neutral operator core plus CLI/HTTP/interactive adapters. dbt is an
+optional later phase, not a
 prerequisite.
 
 ## Decision summary
@@ -74,14 +75,14 @@ Honest labeling, per the architectural decision protocol:
 
 **Measured:**
 
-- The resolver works: 100 captures → 96 hints, 52 accepted bindings, 48
-  quarantined with informative reasons. This is the behavioral baseline.
+- The resolver works: 100 captures → 96 hints, 52 auto-acceptable proposals,
+  48 quarantined with informative reasons. This is the behavioral baseline.
 - Per-record Dagster assets failed concretely: conditional outputs made
   quarantine look like missing data; blocking checks turned legitimate
   quarantines into failed runs; partition mappings could not express the
   data-dependent capture→locator fan-in without duplicating Postgres
   eligibility state into a second registry. Both repairs were rejected.
-- The C2 compiler reproduced 100 captures → 96 hints, 52 automatic bindings,
+- The C2 compiler reproduced 100 captures → 96 hints, 52 automatic proposals,
   and 48 quarantines; an identical second run performed zero table writes.
 - PostgreSQL partial unique indexes atomically enforced competing active human
   binding decisions, while an override became visible without a DuckLake
@@ -90,10 +91,17 @@ Honest labeling, per the architectural decision protocol:
   worked against Garage. See `lakehouse-phase-a-spike-report.md` for the
   substrate evidence.
 
+**Measured in the Phase D repository slice:**
+
+- The explicit acceptance → canonicalization → subtitle-LID closure preserves
+  competing proposals, deterministically chooses the newer source capture,
+  performs fingerprint no-ops, and preserves the last good LID product after a
+  failed object read.
+
 **Assumed (not yet measured):**
 
-- The real size of the execution kernel and TUI (budgeted conservatively
-  below, with an operator-visibility slice before stage execution is built).
+- The real size and usability of the interactive operator surface. Its first
+  slice now follows the Phase D execution slice rather than preceding it.
 - Corpus-scale query performance in either substrate. Note that performance
   is *not* the argument for this migration; at this corpus size Postgres
   would also be fast. The argument is single-copy storage and the removal of
@@ -129,11 +137,11 @@ vertical-slice gate (Phase D).
 
 | Lost | Replacement |
 | --- | --- |
-| Run history and logs for long jobs | `run_log` table + log files in Garage scratch (Phase D) |
+| Run history and logs for long jobs | numbered `pipeline_runs` + local `run_stage_checkpoints`; large logs may use Garage scratch |
 | Stale detection via code versions | Explicit fingerprint/recipe staleness query (Phase D, prototyped first) |
 | Retries | Idempotent stage commits + the operator pressing `r` again |
 | Asset lineage graph | ~12 tables whose lineage fits in one diagram in this document; optional dbt docs later |
-| Web UI | Read-only Textual status surface (Phase D0) + `ja-data status` (Phase D) |
+| Web UI | Headless operator API + local FastAPI/HTMX workbench (Phase D1) |
 
 ## Why the substrate changes: one copy of the data
 
@@ -206,25 +214,30 @@ DuckLake tables (Parquet on Garage, catalog in Postgres)
 ────────────────────────────────────────────────────────
 bronze_captures            rebuildable index, rescanned and replaced
 episode_hints_auto         derived resolver claims, replaced per recompute
-episode_bindings_auto      derived resolver decisions, replaced per recompute
+episode_binding_proposals  derived resolver proposals, replaced per recompute
+accepted_bindings_auto     versioned automatic acceptance-policy output
+canonical_episode_inputs   latest accepted capture selected per locator
+canonical_subtitle_inputs  exact subtitle objects from canonical captures
 resolution_issues_auto     derived quarantine reasons, replaced per recompute
-audio_language_results     derived, recipe-versioned
+subtitle_language_results  derived, recipe-versioned (audio LID deferred)
 subtitle_alignments        derived, recipe-versioned
 episode_bundles            derived, policy-versioned
-materializations           fingerprint per (target, scope) = what is current
-run_log                    append-only execution history
+materializations           fingerprint, build key, inputs, producing checkpoint
+pipeline_runs              numbered global operator dispatches
+run_stage_checkpoints      independently atomic local stage executions
 consistency_findings       VIEW (read-side data-quality checks, in status)
 
-Composed query projections (packages/data)
-──────────────────────────────────────────
-current_bindings           active PG override, else DuckLake auto row
+Binding composition (packages/data)
+─────────────────────────────────
+canonical compiler         active PG override, else accepted proposals;
+                           latest source-modified capture wins
 
 Execution kernel (packages/data)          Operator surface (packages/data)
 ────────────────────────────────          ────────────────────────────────
-target DAG + fingerprint staleness        ja-data status [--series <id>]
-stage runners (resolve, LID, align,       ja-data run <target> [--series|--set]
-  transcode, bundle) with replace-        ja-data bind / issues / targets
-  or-append commits and run_log           (Textual TUI optional, after Phase D)
+target DAG + fingerprint staleness        ja-data campaigns / campaign
+stage runners (resolve, LID, align,       ja-data run <target> [--force-from]
+  transcode, bundle) with replace-        ja-data bind / targets / recipes
+  or-append commits and checkpoints       (local web UI; Textual optional)
 ```
 
 ### Ownership boundaries
@@ -239,10 +252,12 @@ stage runners (resolve, LID, align,       ja-data run <target> [--series|--set]
   claimed, what automatic result was computed, and what ran.
 - **The execution kernel owns semantics**: what is stale, what is eligible,
   what running a stage means, how results commit.
-- **CLI and TUI own presentation and dispatch only.** They are two views
-  over the same kernel functions and contain no pipeline logic.
+- **The operator application owns use cases; adapters own transport and
+  presentation only.** CLI, FastAPI JSON, HTML/HTMX, and any later
+  Textual/React client share the same application DTOs and contain no pipeline
+  logic.
 
-### Binding product: derived table plus human overrides
+### Binding product: proposals, an acceptance gate, and human overrides
 
 *(Amended 2026-07-14. The original design ported the Postgres ledger's
 event-sourced shape — monotonic binding IDs, supersession pointers, a
@@ -252,18 +267,25 @@ Phases B–C implemented it faithfully and the reports repeatedly observed it
 guarantees the old substrate gave for free. The amendment replaces the shape
 with one that matches what the data actually is.)*
 
-All 52 accepted bindings in the 100-capture baseline are machine outputs, not
-human decisions: they are the output of a **pure function** of (bronze
-manifests, AniList metadata, recipe version) — Phase C proved determinism by
-exact replay. Pure functions are recomputed, not event-sourced:
+All 52 auto-acceptable bindings in the 100-capture baseline are machine
+outputs, not human decisions: they are the output of a **pure function** of
+(bronze manifests, AniList metadata, recipe version) — Phase C proved
+determinism by exact replay. Phase D makes the boundary explicit: resolver
+output is a proposal, a versioned policy admits proposals, and downstream
+stages consume only admitted bindings. Pure functions are recomputed, not
+event-sourced:
 
-- **`episode_bindings_auto` is a derivation.** Each resolver run recomputes
-  the full result and replaces the table in one DuckLake transaction,
+- **`episode_binding_proposals` is a derivation.** Each resolver run recomputes
+  the full proposal set and replaces the table in one DuckLake transaction,
   recording the input fingerprint in `materializations`. Re-running with
   unchanged inputs is a no-op by fingerprint comparison — no per-row
   existence probes, no semantic idempotency keys. History is DuckLake
   snapshot time travel, not rows; "recipe v3 superseded v2" is simply the
   table being v3's output.
+- **`accepted_bindings_auto` is the upstream policy gate.** Its first policy,
+  `accept-resolver-proposals-v1`, admits every proposal so downstream testing
+  is not starved of representative data. A later stricter or learned policy
+  replaces this stage without changing canonicalization or LID.
 - **PostgreSQL `binding_overrides` is the only human decision table.** A human
   accepting, correcting, or unbinding an episode advances one locator head:
   the previous row is retired and a replacement row records locator, capture
@@ -271,12 +293,13 @@ exact replay. Pure functions are recomputed, not event-sourced:
   history; partial unique indexes enforce one active row per locator and one
   active locator per non-NULL capture. It is a *source* in the same sense
   bronze is — written by events outside the pipeline, never rebuilt.
-- **`current_bindings` is a composed query projection**: the active override
-  for a locator if one exists (an unbind override masks the auto row without
-  deleting anything), otherwise the auto row. A quarantined capture bound by
-  override simply shows as bound; its shadowed auto issue is suppressed in
-  status rather than "resolved" by a write — issue rows are derived and
-  disappear when a recompute no longer produces them.
+- **Canonicalization composes the gate and overrides.** An active override for
+  a locator replaces its automatic candidates (a NULL capture removes the
+  locator); otherwise every automatically accepted proposal is eligible. If
+  several candidates remain, the capture with the latest bronze commit-marker
+  modification time wins, with deterministic key/ID tie-breakers. A
+  quarantined capture bound by override simply becomes eligible; its shadowed
+  auto issue is suppressed in status rather than mutated.
 
 Rejection-without-replacement still returns *unbound* (the Phase B gate):
 the active override for the locator is an unbind, so the projection yields no
@@ -296,8 +319,8 @@ batch jobs, not per-row compare-and-swap ledgers.
   head changes, retires the old locator head, inserts the replacement, and
   lets partial unique indexes reject competing active locator/capture heads.
   There is no application-level compare-and-swap or ordered-ID choreography.
-- **`consistency_findings` remains as a read-side check** surfaced in
-  `ja-data status` — a data-quality test in the dbt sense (override
+- **`consistency_findings` remains as a read-side check** surfaced in the
+  resolution report and operator workbench — a data-quality test in the dbt sense (override
   referencing a vanished capture, or a later auto recompute assigning an
   overridden capture under a different locator), not a transactional backstop.
 - **The cross-substrate check remains explicit.** PostgreSQL cannot foreign-key
@@ -335,18 +358,17 @@ owned as code rather than hidden inside UI actions:
   came from deriving currency out of the ledger shape, which the write-shape
   amendment removes. It is still prototyped first in Phase D, because if it
   is wrong the status matrix displays lies.)
-- **`run_log`**, append-only: stage, target selector, input fingerprints,
-  recipe versions, machine, started/finished timestamps, exit status, and a
-  Garage path for captured logs. This answers "did that 90-minute ASR run I
-  started before dinner finish?" without an orchestrator database, and gives
-  the TUI a last-failure column. A run that never wrote a terminal row is
-  visibly abandoned; because commits are idempotent, the recovery procedure
-  is simply to run the stage again.
+- **Numbered global runs plus local checkpoints**, append-only execution
+  metadata. `pipeline_runs` identifies one operator dispatch with a human
+  `Run #N`; `run_stage_checkpoints` records each stage's exact inputs, recipe,
+  timing, disposition, failure, and resulting product version. This answers
+  both “where did the dispatch stop?” and “which run built the output currently
+  on screen?” without pretending the whole multi-stage run is atomic.
 - **Idempotent stage commits.** Every stage computes to scratch, then
-  commits results and `run_log` terminal row in one DuckLake transaction
-  keyed by (target, input fingerprint, recipe version). Re-running a
-  committed stage is a no-op; re-running an interrupted one adopts nothing
-  and redoes the work.
+  commits results and materialization metadata in one DuckLake transaction
+  keyed by declared input heads and recipe revision. The surrounding stage
+  checkpoint records success, reuse, or failure; re-running an interrupted
+  stage preserves the prior committed output and recomputes safely.
 
 Deliberately absent, because manual single-operator dispatch is the design:
 schedulers, sensors, work queues, leases, heartbeats, ownership records, and
@@ -358,15 +380,15 @@ state.
 
 ### Dispatch model: status is global, execution is local
 
-The TUI and CLI never remotely execute anything. The contract:
+Operator clients never remotely execute anything. The contract:
 
 - **Heavy stages run where the hardware is**: the operator SSHes to (or sits
   at) the CUDA box or Mac and runs `ja-data run <target>` there. Platform
   checks in the stage runners refuse work the local machine cannot do.
 - **Light stages and decisions run anywhere**: binding acceptance, issue
-  resolution, and bundling are fine from the laptop TUI.
+  resolution, and bundling are fine from a local laptop client.
 - **The lakehouse is the rendezvous.** Because every machine reads and
-  writes the same catalog and Parquet over tailnet, a laptop TUI left open
+  writes the same catalog and Parquet over tailnet, a laptop workbench left open
   shows results appearing as the workstation commits them (on refresh).
   "Resume on another machine" requires no session state — the durable
   tables *are* the session.
@@ -393,26 +415,33 @@ conservative:
 
 ### Operator surfaces
 
-*(Amended 2026-07-14: the original plan placed the pipeline CLI and TUI in
+*(Amended 2026-07-14: the original plan placed the pipeline CLI and interactive
+operator client in
 `packages/frontend` under the consumer `ja-media` entry point. That grafts
 plant operation onto the consumer surface and drags duckdb/psycopg into the
 frontend environment. Withdrawn.)*
 
-**Both surfaces live in `packages/data`; the status model comes first.** A thin
-read-only Textual view is deliberately built before stage execution so the
-operator can sanity-check real C2 state while later phases arrive. The CLI is
-`ja-data` (renamed from `ja-media-data`), and its verb set does not grow with
-the pipeline:
+**The headless operator application lives in `packages/data`; every surface is
+an adapter over it.** Its campaign, recipe, planning, run-item, approval, API,
+and frontend design lives in
+[lakehouse-operator-workbench-design.md](lakehouse-operator-workbench-design.md).
+The CLI is `ja-data` (renamed from `ja-media-data`). Its implemented operator
+commands are intentionally small:
 
 ```text
-ja-data status  [--series <id>]        episode × stage matrix + findings
-ja-data run <target> [--series <id> | --set <name>]
-                                       walk the target's dependency closure;
-                                       default scope is "everything stale"
-ja-data targets / ja-data stages       introspection, rendered from the
-                                       registry that executes (cannot drift)
-ja-data bind / ja-data issues          human decisions and the review queue
-ja-data schema apply                   checked-in DDL
+ja-data campaigns                       list the operator campaign registry
+ja-data campaign <id> [--series <id>]  inspect one campaign snapshot
+ja-data plan <id>                       preview its execution plan
+ja-data targets                         list executable data products
+ja-data run <target> [--force-from <stage>]
+                                        walk the target's dependency closure;
+                                        optionally invalidate a local checkpoint
+                                        and every downstream stage in this run
+ja-data recipes [--query <text>]        inspect the recipe registry
+ja-data bind ...                        append a binding override or unbind
+ja-data resolution-report               inspect resolver issues and findings
+ja-data apply-lakehouse-schema          apply checked-in control and lake DDL
+ja-data web [--port 8765]               serve the read-only operator workbench
 ```
 
 Three rules keep the surface small as the pipeline grows to dozens of steps:
@@ -434,7 +463,11 @@ Three rules keep the surface small as the pipeline grows to dozens of steps:
   50-series ingest prints the discovered worklist, confirms once, and goes.
   Enumerating series on the command line is the exception, not the routine.
 
-**Textual TUI** as the pane of glass over the same status projection:
+**Local web workbench.** The first interactive adapter is a loopback-only
+FastAPI application with typed JSON routes and server-rendered Jinja2/HTMX
+pages. It reads the same application DTOs as the CLI; route handlers and
+templates do not own planning, status, or mutation rules. The episode matrix
+remains one target-specific lens:
 
 ```text
 Episode │ Capture │ Binding │ LID    │ Align  │ Bundle   │ Issues
@@ -443,32 +476,32 @@ e002    │ v1 ✓    │ human ✓ │ v3 ✓   │ stale  │ —        │
 e003    │ v1 ✓    │ issue   │ —      │ —      │ —        │ ambiguous ep
 ```
 
-The first slice is read-only: refresh, filtering, findings, binding provenance,
-and details. Unimplemented LID/alignment/publication stages render explicitly
-as `not implemented`, never as pending, stale, or successful. Widgets do not
-query storage directly; a UI-independent status projection fills the matrix
-and later gains real fingerprint state as each stage is implemented. Mutation
-and execution actions follow only after their underlying operations are proven.
+The first slice is read-only: campaign/target navigation, recipe paging, plan
+preview, refresh, filtering, findings, binding provenance, run/failure timing,
+and details. Unimplemented stages and targets render explicitly as
+`not_implemented`, never as pending, stale, or successful. Adapters do not
+query storage directly; UI-independent application services supply every
+response. Mutation and execution actions follow only after their underlying
+operations are proven.
 
-Module budget — revised after the write-shape amendment; `catalog.py` is the
-measured Phase B figure, not the original optimistic estimate:
+This is deliberately not a permanent bet against a SPA. FastAPI exposes a
+versioned `/api/operator/v1` contract from the beginning, so a Vite/React
+client can replace or complement the HTML routes without moving domain logic.
+Make that investment only after the first workbench demonstrates a concrete
+need for client-side virtualization, tightly synchronized multi-pane state,
+interactive dependency-graph editing, waveform/timeline interaction, or
+high-frequency optimistic updates. Textual remains an optional thin client for
+terminal-only compute hosts, not the application architecture.
 
-```text
-packages/data/src/ja_media_data/lakehouse/
-  schema/ (SQL files)            —    checked-in DDL
-  catalog.py          ~240 lines —    attach, config, apply_schema (measured)
-  writer.py           ~100 lines —    batch replace + override append
-  status_query.py     ~120 lines —    fingerprint staleness + findings
-  stages.py           ~150 lines —    target registry, runners, commits
-  recipes.py           ~60 lines —    TOML recipe loading + content hashing
-  cli.py additions    ~120 lines —    status / run / bind / targets
-```
+The operator layer is implemented in responsibility-sized modules rather than
+being folded into `cli.py` or route handlers. The detailed module boundary and
+incremental gates live in the workbench design. At minimum, keep product and
+registry contracts, planning, campaigns, snapshot composition, approvals,
+runs, the application facade, JSON DTOs, and HTTP presentation separate.
 
-Total ~790 lines against ~800 removed — a wash in volume, but the removed
-lines were framework adaptation (ORM models, repository plumbing, asset
-decorators, sensor) plus ledger-shape constraint simulation, and the added
-lines are the domain itself (staleness semantics, run history, the operator
-surface).
+No new hand-written module may cross the repository's 500-line hard limit.
+Estimate and review the operator application after O0 rather than carrying
+forward the obsolete estimate for a much smaller Textual-only surface.
 
 ## What survives
 
@@ -521,8 +554,10 @@ architectural decision and ownership boundaries.
 At a glance: Phase A proves the substrate; B defines schema and views; C ports
 the resolver; C2 reshapes the write path to recompute-and-replace and restores
 the PostgreSQL decision boundary (the 2026-07-14 and 2026-07-15 amendments);
-D0 adds a read-only operator view; D proves the execution kernel with portable
-audio + LID; E adds safe actions; F removed Dagster and the old substrate; G
+D proves the execution kernel from permissively accepted proposals through
+latest-wins canonicalization and subtitle-only LID; D1/D2 add the read-only
+operator view and truthful global/local run lineage; E adds evidence-bound
+canonical and binding decisions; F removed Dagster and the old substrate; G
 optionally adopts dbt.
 
 ## Alternatives considered
@@ -563,4 +598,5 @@ optionally adopts dbt.
 3. **Staleness query complexity.** Largely defused by the write-shape
    amendment (currency no longer needs deriving), but the rule stands: if
    the Phase D prototype is materially harder than budgeted, pause and
-   reassess before the TUI rather than absorbing it silently.
+   reassess before building the interactive workbench rather than absorbing it
+   silently.

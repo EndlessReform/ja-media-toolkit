@@ -75,12 +75,14 @@ read stable gold contracts.
   open, inspectable forms. DuckLake tables are Parquet on Garage with their
   transactional catalog in PostgreSQL; DuckDB is the query/compiler process,
   not a durable database file or separate copy of the data.
-- Automatic episode identity is a replaceable DuckLake product. Human binding
+- Resolver episode identity is a replaceable proposal product. A separately
+  versioned automatic policy admits proposals before canonicalization; the
+  Phase D policy intentionally admits every resolver proposal. Human binding
   decisions are the approved transactional exception: the small
   `binding_overrides` relation lives directly in PostgreSQL so partial unique
-  indexes can enforce active locator and capture heads. Effective reads prefer
-  an active override (including an explicit unbind), then fall back to the
-  automatic DuckLake binding.
+  indexes can enforce active locator and capture heads. Canonicalization applies
+  an active override (including an explicit unbind) before choosing the latest
+  automatically accepted source capture for each locator.
 - Partitioning should reflect a semantically useful recomputation and backfill
   boundary. Keep lower-granularity IDs as row-level provenance when making them
   partitions would harm navigation or create needless orchestration overhead.

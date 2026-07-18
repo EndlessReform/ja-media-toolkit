@@ -1,0 +1,11 @@
+<tbody id="candidate-{{ locator_dom_id }}" class="candidate-rows-loaded">
+  <tr class="candidate-header"><th colspan="8"><div class="candidate-line candidate-labels"><span>Decision</span><span>Capture</span><span>Proposal</span><span>Acceptance</span><span>Source</span><span>Modified</span><span>Manifest</span></div></th></tr>
+  {% for candidate in candidates %}
+  <tr class="candidate-row{% if candidate.selected %} selected{% endif %}"><td colspan="8"><div class="candidate-line">
+    <span class="candidate-pick">{% if candidate.selected %}● SELECTED{% else %}○ CANDIDATE{% endif %}</span>
+    <span><code>{{ candidate.capture_id }}</code></span><span><code>{{ candidate.proposal_id or '—' }}</code></span>
+    <span><code>{{ candidate.acceptance_id or '—' }}</code></span><span>{{ candidate.source }} / {{ 'admitted' if candidate.admitted else 'rejected' }}</span>
+    <span>{{ candidate.manifest_modified_at.strftime('%Y-%m-%d %H:%M') }}</span><span class="candidate-manifest"><code>{{ candidate.manifest_url }}</code></span>
+  </div></td></tr>
+  {% endfor %}
+</tbody>

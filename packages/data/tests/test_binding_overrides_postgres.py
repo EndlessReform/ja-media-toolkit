@@ -17,8 +17,9 @@ from ja_media_data.binding_overrides import (
 )
 from ja_media_data.lakehouse import CatalogConfig, apply_schema, connect_catalog
 from ja_media_data.lakehouse.repository import DuckLakeRepository
+from ja_media_data.phase_d import compile_acceptances
 from ja_media_data.resolution_types import (
-    AutomaticBinding,
+    BindingProposal,
     BindingConflictError,
     CaptureObservation,
     ResolutionBatch,
@@ -46,7 +47,8 @@ def repository(tmp_path):
     )
     apply_schema(catalog)
     assert apply_postgres_schema(control, control_schema=control_schema) == [
-        "001_binding_overrides.sql"
+        "001_binding_overrides.sql",
+        "002_override_revisions.sql",
     ]
     assert apply_postgres_schema(control, control_schema=control_schema) == []
     yield DuckLakeRepository(
@@ -71,6 +73,7 @@ def index(repository: DuckLakeRepository, *capture_ids: str) -> None:
             manifest_key=f"metadata/{capture_id}.json",
             manifest_etag="etag-1",
             manifest_schema_version=1,
+            manifest_modified_at=datetime(2026, 7, 14, tzinfo=UTC),
             observed_at=datetime(2026, 7, 15, tzinfo=UTC),
         )
         for capture_id in capture_ids
@@ -81,19 +84,20 @@ def index(repository: DuckLakeRepository, *capture_ids: str) -> None:
 
 
 def test_override_and_unbind_are_immediately_effective(repository) -> None:
+    assert repository.override_repository.current_revision() == 0
     index(repository, "capture-1", "capture-2")
     repository.replace_resolution_tables(
         ResolutionBatch(
             hints=(),
             issues=(),
-            bindings=(AutomaticBinding(
-            binding_id="automatic-binding",
+            proposals=(BindingProposal(
+            proposal_id="automatic-proposal",
             namespace="anilist",
             series_id="15451",
             episode="3",
             audio_capture_id="capture-1",
-            decision_method="resolver",
-            decision_evidence={"source": "test"},
+            proposal_method="resolver",
+            proposal_evidence={"source": "test"},
             input_data_version="etag-1",
             recipe_version="resolver-v1",
             ),),
@@ -122,6 +126,7 @@ def test_override_and_unbind_are_immediately_effective(repository) -> None:
         decision_note="not episode 3",
     )
     assert repository.get_current_binding("anilist", "15451", "3") is None
+    assert repository.override_repository.current_revision() == 2
     assert repository.get_current_binding_for_capture("capture-2") is None
 
 
@@ -166,21 +171,22 @@ def test_findings_report_later_auto_collision_with_override(repository) -> None:
         episode="3",
         audio_capture_id="capture-4",
     )
-    automatic = AutomaticBinding(
-        binding_id="automatic-collision",
+    automatic = BindingProposal(
+        proposal_id="automatic-collision",
         namespace="anilist",
         series_id="15451",
         episode="4",
         audio_capture_id="capture-4",
-        decision_method="resolver",
-        decision_evidence={"source": "test"},
+        proposal_method="resolver",
+        proposal_evidence={"source": "test"},
         input_data_version="etag-2",
         recipe_version="resolver-v1",
     )
     repository.replace_resolution_tables(
-        ResolutionBatch(hints=(), bindings=(automatic,), issues=()),
+        ResolutionBatch(hints=(), proposals=(automatic,), issues=()),
         "automatic-collision-v1",
     )
+    compile_acceptances(repository)
 
     assert [item.finding_type for item in repository.list_consistency_findings()] == [
         "override_automatic_capture_collision"

@@ -107,6 +107,14 @@ class BronzeStore:
             )
         return json.loads(response["Body"].read())
 
+    def read_text(self, key: str) -> str:
+        """Read one committed bronze text object without exposing boto3 callers."""
+
+        if not key.startswith(self.prefix):
+            raise ValueError(f"object is outside the bronze prefix: {key}")
+        response = self._client.get_object(Bucket=self.bucket, Key=key)
+        return response["Body"].read().decode("utf-8-sig")
+
     def scan_documents(self, *, limit: int) -> Iterator[BronzeDocument]:
         """Read at most ``limit`` markers once each, including legacy IDs.
 

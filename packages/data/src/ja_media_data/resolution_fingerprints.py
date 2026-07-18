@@ -25,7 +25,7 @@ def fingerprint_resolution(batch: ResolutionBatch) -> str:
 
     rows = {
         "hints": [_without_run_source(item) for item in batch.hints],
-        "bindings": [_without_run_source(item) for item in batch.bindings],
+        "proposals": [_without_run_source(item) for item in batch.proposals],
         "issues": [_without_run_source(item) for item in batch.issues],
     }
     return _fingerprint(rows)
@@ -38,5 +38,11 @@ def _without_run_source(value: object) -> dict[str, object]:
 
 
 def _fingerprint(value: object) -> str:
-    encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    encoded = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
     return hashlib.sha256(encoded.encode()).hexdigest()

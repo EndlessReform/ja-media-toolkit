@@ -1,0 +1,53 @@
+{% from '_identity.html' import internal_ids %}
+<div id="target-lens" aria-live="polite">
+  <table class="stats-table"><tr>
+    <th>CAPTURES</th><td>{{ snapshot.lens.progress.captures }}</td><th>PROPOSED</th><td>{{ snapshot.lens.progress.proposals }}</td>
+    <th>QUARANTINE</th><td class="warn">{{ snapshot.lens.progress.quarantined }}</td><th>LOCATORS</th><td>{{ snapshot.lens.progress.locators }}</td>
+    <th>CANONICAL</th><td class="good">{{ snapshot.lens.progress.canonicalized }}</td><th>STALE</th><td class="warn">{{ snapshot.lens.progress.stale }}</td><th>UNBOUND</th><td>{{ snapshot.lens.progress.unbound }}</td>
+    <th>WAIT ACCEPT</th><td class="warn">{{ snapshot.lens.progress.awaiting_acceptance }}</td><th>WAIT COMPILE</th><td class="warn">{{ snapshot.lens.progress.awaiting_canonicalization }}</td>
+    <th>POLICY</th><td><code>{{ snapshot.lens.policy_version }}</code></td>
+  </tr></table>
+
+  <div class="product-origin {{ snapshot.lens.product_currency }}">
+    <strong>CURRENT PRODUCT</strong>
+    <span>{{ snapshot.lens.product_currency | replace('_', ' ') }}</span>
+    <span>built by {% if snapshot.lens.product_run_id %}<a href="/operator/runs/{{ snapshot.lens.product_run_id }}"><strong>Run #{{ snapshot.lens.product_run_number }}</strong></a>{% else %}legacy data{% endif %}</span>
+    {{ internal_ids(snapshot.lens.product_run_id, snapshot.lens.product_attempt_id, snapshot.lens.product_materialization_id) }}
+    {% if snapshot.lens.product_stale_reason %}<span class="error">{{ snapshot.lens.product_stale_reason }}</span>{% endif %}
+  </div>
+
+  {% include '_canonical_product.html' %}
+
+  <div class="subhead pipeline-title-row">
+    <h3>Pipeline Spine</h3>
+    <div class="track-controls"><button type="button" data-scroll-track="pipeline-track" data-scroll-direction="-1" title="Previous stages">◀</button><button type="button" data-scroll-track="pipeline-track" data-scroll-direction="1" title="Next stages">▶</button></div>
+  </div>
+  <ol id="pipeline-track" class="pipeline-track" aria-label="Upstream to downstream product stages">
+    {% for stage in snapshot.lens.stages %}
+    <li class="pipeline-node">
+      <input class="visually-hidden stage-selector" type="radio" name="stage-selector" value="{{ stage.stage }}" id="stage-{{ stage.stage }}" {% if loop.first %}checked{% endif %}
+        hx-get="/operator/campaigns/{{ snapshot.campaign.campaign_id }}/stages/{{ stage.stage }}" hx-trigger="click" hx-target="#stage-inspector" hx-swap="innerHTML" hx-include="#series-id, #view-run-id">
+      <label for="stage-{{ stage.stage }}">
+        <div class="pipeline-node-head"><span class="pipeline-index">{{ loop.index }}</span><strong>{{ stage.label }}</strong><span class="status {{ stage.currency }}">{{ stage.currency | replace('_', ' ') }}</span></div>
+        <code>{{ stage.stage }}</code><span class="selected-flag">SELECTED</span>
+        <dl>
+          <dt>flow</dt><dd>{{ stage.input_rows }} in / {{ stage.output_rows }} out</dd>
+          <dt>built by</dt><dd>{% if stage.output_run_id %}<a href="/operator/runs/{{ stage.output_run_id }}">Run #{{ stage.output_run_number }}</a>{% else %}legacy data{% endif %}</dd>
+          <dt>last execution</dt><dd>{% if stage.latest_run_id %}<a href="/operator/runs/{{ stage.latest_run_id }}">Run #{{ stage.latest_run_number }}</a> · {{ stage.latest_run_status }}{% else %}—{% endif %}</dd>
+          <dt>last elapsed</dt><dd>{% if stage.latest_run_duration_ms is not none %}{{ stage.latest_run_duration_ms }} ms{% else %}—{% endif %}</dd>
+        </dl>
+        <div class="pipeline-run">{{ internal_ids(stage.output_run_id, stage.latest_attempt_id, stage.materialization_id) }}</div>
+        {% if stage.stale_reason %}<div class="pipeline-error">{{ stage.stale_reason }}</div>{% endif %}
+        {% if stage.latest_run_error %}<div class="pipeline-error">{{ stage.latest_run_error }}</div>{% endif %}
+      </label>
+    </li>
+    {% endfor %}
+  </ol>
+  <section id="stage-inspector" class="stage-detail" data-facet-scope="stage">
+    {% if initial_stage_page is defined %}
+      {% set page = initial_stage_page %}{% set campaign_id = snapshot.campaign.campaign_id %}{% include '_stage_results.html' %}
+    {% else %}
+      <div class="stage-placeholder" hx-get="/operator/campaigns/{{ snapshot.campaign.campaign_id }}/stages/episode_resolution" hx-trigger="load" hx-target="#stage-inspector" hx-swap="innerHTML" hx-include="#series-id, #view-run-id"><strong>LOADING STAGE 1…</strong></div>
+    {% endif %}
+  </section>
+</div>
