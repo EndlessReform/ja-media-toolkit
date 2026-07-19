@@ -5,6 +5,10 @@ description = "DuckLake data compiler and operator surface for ja-media"
 requires-python = ">=3.13"
 dependencies = [
     "boto3>=1.43.46",
+    "dagster>=1.13.14",
+    "dagster-celery>=0.29.14,<0.30",
+    "dagster-postgres>=0.29.14,<0.30",
+    "dagster-webserver>=1.13.14",
     "duckdb>=1.5.4",
     "fastapi>=0.136,<1",
     "ja-media-core",
@@ -27,6 +31,7 @@ packages = ["src/ja_media_data"]
 [tool.hatch.build.targets.wheel.force-include]
 schema = "ja_media_data/lakehouse/schema"
 postgres_schema = "ja_media_data/postgres_schema"
+campaigns = "ja_media_data/campaigns"
 
 [tool.uv.sources]
 ja-media-core = { workspace = true }

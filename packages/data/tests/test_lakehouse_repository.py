@@ -10,7 +10,7 @@ import pytest
 
 from ja_media_data.lakehouse import CatalogConfig, apply_schema, connect_catalog
 from ja_media_data.lakehouse.repository import DuckLakeRepository
-from ja_media_data.resolution_types import (
+from ja_media_data.products.episode_resolution.models import (
     BindingProposal,
     CaptureObservation,
     HintClaim,

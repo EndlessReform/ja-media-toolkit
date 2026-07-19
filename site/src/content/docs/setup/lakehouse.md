@@ -30,8 +30,10 @@ repository boundary.
 
 Configure `JA_MEDIA_DUCKLAKE_CATALOG_SCHEMA` and either a direct
 `JA_MEDIA_DUCKLAKE_DATA_PATH` or both `JA_MEDIA_BRONZE_BUCKET` and
-`JA_MEDIA_DUCKLAKE_DATA_PREFIX`. An S3 path also uses the configured endpoint,
-region, and AWS credentials. The adapter creates the PostgreSQL metadata schema
+`JA_MEDIA_DUCKLAKE_DATA_PREFIX`. An S3 path also requires the purpose-specific
+`JA_MEDIA_DUCKLAKE_S3_ENDPOINT_URL`, access-key, secret-key, and optional
+region variables. There is deliberately no shared S3 endpoint variable:
+bronze and DuckLake may use different authorities. The adapter creates the PostgreSQL metadata schema
 when absent; `JA_MEDIA_CONTROL_SCHEMA` selects the separate application-owned
 schema for binding decisions. Neither path drops or resets existing state.
 
@@ -75,16 +77,16 @@ JA_MEDIA_PHASE_B_MINIO_SMOKE=1 \
   uv run pytest packages/data/tests/test_lakehouse_minio.py
 ```
 
-MinIO proves local S3-compatible wiring; the Phase A Garage result remains the
-evidence for the real object store.
+MinIO proves local S3-compatible wiring. The retained Phase A report records
+the already-completed Garage compatibility result.
 
 ## Compile real bronze into a local lakehouse
 
 The local development pipeline intentionally uses two S3 configurations in one
 process:
 
-- standard `AWS_*` and `JA_MEDIA_S3_*` settings read immutable bronze from
-  Garage; and
+- the AWS credential chain plus `JA_MEDIA_BRONZE_S3_*` settings read immutable
+  bronze from Garage; and
 - `JA_MEDIA_DUCKLAKE_S3_*` overrides write DuckLake table data to local MinIO.
 
 Start the disposable stack, then source the existing Garage environment before
@@ -93,31 +95,32 @@ the local destination overlay:
 ```sh
 set -a
 source packages/data/.env
-source deploy/lakehouse-dev/phase-c.env.example
+source deploy/lakehouse-dev/local-ducklake.env.example
 set +a
 
 uv run --directory packages/data ja-data scan-bronze --limit 100
 uv run --directory packages/data \
-  ja-data resolve-sample --limit 100 --apply --show none
+  ja-data resolve-sample --limit 100 --show issues
 ```
 
 `scan-bronze` reads each committed manifest with ETag verification and replaces
-the normalized cache as one compiled product. The resolver reads the same
-bounded ordering, queries exact AniList metadata through the core SDK, validates
-the complete result, and replaces `episode_hints_auto`,
-`episode_binding_proposals`, and `resolution_issues_auto` in one transaction.
+the normalized cache as one compiled product. `resolve-sample` is a
+non-publishing canary. Durable resolution, acceptance, and canonicalization run
+through the Dagster campaign documented in
+[Lakehouse operator workbench](/setup/operator-workbench/); bounded sample
+application was removed with the custom executor.
 
 Each product records a content fingerprint and lineage metadata in
 `materializations`. Repeating an identical compilation avoids rewriting product
-rows while still recording the global run and local stage checkpoint. A changed
-input replaces the product atomically; the previous version remains available
-through DuckLake snapshot time travel.
+rows while Dagster records the execution. A changed input replaces the product
+atomically; the previous version remains available through DuckLake snapshot
+time travel.
 
 ## Back up the catalog
 
 Load the package environment without printing it, then make a custom-format
-dump. Phase A uses a disposable schema inside the development database; replace
-the schema name with the production catalog schema when that is introduced.
+dump. Replace the example schema names with the configured environment's
+catalog and decision schemas.
 
 ```sh
 cd packages/data
@@ -145,8 +148,8 @@ The catalog backup cadence defines the recovery-point objective: a dump taken
 before a write cannot recover the membership of Parquet files created by that
 write. Run a regular catalog backup and always take one before snapshot expiry,
 compaction, or file cleanup. Confirm that the infrastructure backup regimen
-actually includes this database/schema before treating Phase A as operationally
-complete.
+actually includes both databases/schemas before treating the catalog as
+operationally recoverable.
 
 ## Restore and verify
 
@@ -166,36 +169,8 @@ cd packages/data
 set -a
 source .env
 set +a
-uv run scripts/phase_a_ducklake_spike.py verify
+uv run ja-data resolution-report --limit 1
 ```
 
 Do not restore over a populated catalog. Restore into an empty target, verify
 it, and only then change clients to use it.
-
-## Run the Phase A compatibility spike
-
-The spike writes only beneath
-`s3://$JA_MEDIA_BRONZE_BUCKET/audio/anime/lakehouse/phase-a/` and destroys only
-the PostgreSQL schema `ja_media_ducklake_phase_a`. Both guardrails are enforced
-by the script.
-
-```sh
-cd packages/data
-set -a
-source .env
-set +a
-uv run scripts/phase_a_ducklake_spike.py run --reset
-```
-
-Run the `verify` command from a second configured machine to prove its read
-path. To complete the concurrent cross-machine check, start the following on two
-machines at the same time, using a distinct source label on each:
-
-```sh
-uv run scripts/phase_a_ducklake_spike.py append --source "$(hostname)-phase-a"
-```
-
-Each command must report 20 rows for its source, and a subsequent `verify` must
-include both batches in the total. The automatic `run` command uses two local
-worker processes; that proves catalog conflict handling but not the full network
-path from a second host.

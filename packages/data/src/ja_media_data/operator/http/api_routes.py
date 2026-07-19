@@ -7,11 +7,9 @@ from ja_media_data.operator.http.dependencies import get_application
 from ja_media_data.operator.models import (
     CampaignCard,
     CampaignSnapshot,
-    RecipePage,
     RunPage,
     RunSummary,
 )
-from ja_media_data.operator.planning import ExecutionPlan
 
 
 router = APIRouter(prefix="/api/operator/v1")
@@ -34,27 +32,6 @@ def get_campaign(
     return _campaign_snapshot(
         application, campaign_id, series_id=series_id, run_id=run_id
     )
-
-
-@router.get("/campaigns/{campaign_id}/plan", response_model=ExecutionPlan)
-def get_plan(
-    campaign_id: str,
-    application: OperatorApplication = Depends(get_application),
-) -> ExecutionPlan:
-    try:
-        return application.plan_campaign(campaign_id)
-    except KeyError as error:
-        raise HTTPException(status_code=404, detail="campaign not found") from error
-
-
-@router.get("/recipes", response_model=RecipePage)
-def list_recipes(
-    query: str | None = Query(default=None),
-    offset: int = Query(default=0, ge=0),
-    limit: int = Query(default=50, ge=1, le=500),
-    application: OperatorApplication = Depends(get_application),
-) -> RecipePage:
-    return application.list_recipes(query=query, offset=offset, limit=limit)
 
 
 @router.get("/runs", response_model=RunPage)

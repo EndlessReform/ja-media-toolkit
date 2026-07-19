@@ -2,8 +2,8 @@
 
 import pytest
 
-from ja_media_data.bronze_store import BronzeStore
-from ja_media_data.bronze_store import _capture_id, _is_manifest_key
+from ja_media_data.storage.bronze import BronzeStore, bronze_store_from_env
+from ja_media_data.storage.bronze import _capture_id, _is_manifest_key
 
 
 def test_only_metadata_json_is_a_commit_marker() -> None:
@@ -42,3 +42,11 @@ def test_manifest_read_rejects_changed_etag() -> None:
             "audio/anime/bronze/1/metadata/show.json",
             expected_etag="listed-etag",
         )
+
+
+def test_bronze_endpoint_has_no_machine_specific_fallback(monkeypatch) -> None:
+    monkeypatch.setenv("JA_MEDIA_BRONZE_BUCKET", "media")
+    monkeypatch.delenv("JA_MEDIA_BRONZE_S3_ENDPOINT_URL", raising=False)
+
+    with pytest.raises(RuntimeError, match="must name the bronze S3 endpoint"):
+        bronze_store_from_env()

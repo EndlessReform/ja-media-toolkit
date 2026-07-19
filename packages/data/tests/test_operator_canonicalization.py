@@ -17,14 +17,12 @@ from ja_media_data.operator.cache import ProjectionCache
 from ja_media_data.operator.http.app import create_operator_app
 from ja_media_data.operator.http.dependencies import get_application
 from ja_media_data.operator.http.html_routes import templates
-from ja_media_data.phase_d import compile_canonical_inputs
-from ja_media_data.pipeline_repository import PipelineRepository
-from ja_media_data.resolution_types import (
+from ja_media_data.products.episode_resolution.models import (
     CaptureObservation,
     ResolutionBatch,
     ResolutionIssueClaim,
 )
-from operator_test_support import ManifestStore, Overrides, compile_campaign
+from operator_test_support import NoopOperatorRuntime, compile_campaign, empty_gateway
 
 
 @pytest.fixture
@@ -47,9 +45,9 @@ def repository(tmp_path):
 
 
 def test_campaign_explains_latest_capture_and_stage_runs(repository) -> None:
-    compile_campaign(repository)
+    campaign = compile_campaign(repository)
 
-    snapshot = OperatorApplication(repository).get_campaign_snapshot(
+    snapshot = OperatorApplication(repository, campaign.gateway).get_campaign_snapshot(
         "canonicalization-gate"
     )
 
@@ -61,7 +59,7 @@ def test_campaign_explains_latest_capture_and_stage_runs(repository) -> None:
     assert gate.binding_source == "automatic"
     assert "Latest admitted" in gate.selection_reason
     assert gate.candidates == ()
-    candidates = OperatorApplication(repository).get_candidates(
+    candidates = OperatorApplication(repository, campaign.gateway).get_candidates(
         "canonicalization-gate", ("anilist", "15451", "3")
     )
     assert [item.capture_id for item in candidates] == [
@@ -82,7 +80,7 @@ def test_application_keeps_an_empty_shared_projection_cache(repository) -> None:
     """An empty lifespan cache must not be replaced merely because it is falsey."""
 
     cache = ProjectionCache()
-    application = OperatorApplication(repository, cache=cache)
+    application = OperatorApplication(repository, empty_gateway(), cache=cache)
 
     assert application.cache is cache
 
@@ -90,27 +88,23 @@ def test_application_keeps_an_empty_shared_projection_cache(repository) -> None:
 def test_shared_cache_invalidates_when_ducklake_snapshot_advances(repository) -> None:
     """Fresh request applications must not reuse a prior workspace projection."""
 
-    compile_campaign(repository)
+    campaign = compile_campaign(repository)
     cache = ProjectionCache()
-    before = OperatorApplication(repository, cache=cache).get_campaign_snapshot(
+    before = OperatorApplication(
+        repository, campaign.gateway, cache=cache
+    ).get_campaign_snapshot(
         "canonicalization-gate"
     )
     accepted_before = next(
         item for item in before.lens.stages if item.stage == "accepted_bindings"
     )
 
-    pipeline = PipelineRepository(repository.connection)
-    run_id = pipeline.start_pipeline_run(
-        "accepted-bindings", forced_from_stage=None, override_revision=0
-    )
-    execution = pipeline.begin_stage(
-        run_id, "accepted_bindings", 1, "accept-resolver-proposals-v1", {}
-    )
-    failure = RuntimeError("fixture failure")
-    pipeline.finish_stage(execution, disposition="failed", error=failure)
-    pipeline.finish_pipeline_run(run_id, error=failure)
+    second = campaign.run()
+    assert second.success
 
-    after = OperatorApplication(repository, cache=cache).get_campaign_snapshot(
+    after = OperatorApplication(
+        repository, campaign.gateway, cache=cache
+    ).get_campaign_snapshot(
         "canonicalization-gate"
     )
     accepted_after = next(
@@ -118,15 +112,17 @@ def test_shared_cache_invalidates_when_ducklake_snapshot_advances(repository) ->
     )
 
     assert accepted_before.latest_run_status == "succeeded"
-    assert accepted_after.latest_run_status == "failed"
-    assert accepted_after.latest_run_id == run_id
+    assert accepted_after.latest_run_status == "succeeded"
+    assert accepted_after.latest_run_id == second.run_id
+    assert accepted_after.latest_run_number > accepted_before.latest_run_number
 
 
 def test_new_override_is_visible_as_uncompiled_decision(repository) -> None:
-    compile_campaign(repository)
-    repository.override_repository = Overrides("capture-old")
+    campaign = compile_campaign(repository)
+    campaign.overrides.revision = 1
+    campaign.overrides.capture_id = "capture-old"
 
-    before = OperatorApplication(repository).get_campaign_snapshot(
+    before = OperatorApplication(repository, campaign.gateway).get_campaign_snapshot(
         "canonicalization-gate"
     ).lens.gates[0]
     assert before.status == "stale"
@@ -134,8 +130,8 @@ def test_new_override_is_visible_as_uncompiled_decision(repository) -> None:
     assert before.active_override == "capture-old"
     assert "override revision advanced" in before.selection_reason
 
-    compile_canonical_inputs(repository, ManifestStore())
-    after = OperatorApplication(repository).get_campaign_snapshot(
+    campaign.run()
+    after = OperatorApplication(repository, campaign.gateway).get_campaign_snapshot(
         "canonicalization-gate"
     ).lens.gates[0]
     assert after.status == "canonicalized"
@@ -177,7 +173,7 @@ def test_combined_lens_accounts_for_quarantined_bronze_input(repository) -> None
         "resolution-quarantine",
     )
 
-    application = OperatorApplication(repository)
+    application = OperatorApplication(repository, empty_gateway())
     lens = application.get_campaign_snapshot(
         "canonicalization-gate"
     ).lens
@@ -191,9 +187,11 @@ def test_combined_lens_accounts_for_quarantined_bronze_input(repository) -> None
 
 
 def test_json_html_htmx_and_static_asset_share_one_snapshot(repository) -> None:
-    compile_campaign(repository)
-    application = OperatorApplication(repository)
-    app = create_operator_app(initialize_schema=False)
+    campaign = compile_campaign(repository)
+    application = OperatorApplication(repository, campaign.gateway)
+    app = create_operator_app(
+        initialize_schema=False, runtime_factory=NoopOperatorRuntime
+    )
     app.dependency_overrides[get_application] = lambda: application
 
     with TestClient(app) as client:
@@ -245,7 +243,7 @@ def test_json_html_htmx_and_static_asset_share_one_snapshot(repository) -> None:
     assert 'title="s3://bronze/audio/anime/bronze/15451/metadata/new.json"' in fragment.text
     assert "↗" not in fragment.text
     assert "proposal-capture-new" not in fragment.text
-    assert "proposal-capture-new" in candidates.text
+    assert "proposal-" in candidates.text
     assert fragment.text.index("Episode Binding Desk") < fragment.text.index("Pipeline Spine")
     assert "Resolver Proposals · Exceptions" in fragment.text and "SELECTED" in fragment.text
     assert "Automatic Acceptance · Accepted" in accepted.text and "NEXT" in accepted.text
@@ -256,31 +254,26 @@ def test_json_html_htmx_and_static_asset_share_one_snapshot(repository) -> None:
 
 
 def test_unknown_campaign_is_404(repository) -> None:
-    app = create_operator_app(initialize_schema=False)
-    app.dependency_overrides[get_application] = lambda: OperatorApplication(repository)
+    app = create_operator_app(
+        initialize_schema=False, runtime_factory=NoopOperatorRuntime
+    )
+    app.dependency_overrides[get_application] = lambda: OperatorApplication(
+        repository, empty_gateway()
+    )
     with TestClient(app) as client:
         response = client.get("/api/operator/v1/campaigns/nope")
     assert response.status_code == 404
 
 
-def test_headless_application_queries_real_recipes_plan_and_runs(repository) -> None:
-    compile_campaign(repository)
-    application = OperatorApplication(repository)
+def test_headless_application_uses_graph_campaign_and_dagster_runs(repository) -> None:
+    campaign = compile_campaign(repository)
+    application = OperatorApplication(repository, campaign.gateway)
 
-    assert application.registry.target_dependencies("subtitle-lid") == (
-        "accepted-bindings",
-        "canonical-inputs",
-    )
     snapshot = application.get_campaign_snapshot("canonicalization-gate")
     assert snapshot.lens.progress.canonicalized == 1
-    recipes = application.list_recipes()
-    assert recipes.total == 3
-    assert sum(item.current_products for item in recipes.items) == 2
-    plan = application.plan_campaign("canonicalization-gate")
-    assert [item.product_type for item in plan.reused] == ["canonical_inputs"]
-    assert not plan.work_items
     runs = application.list_runs(limit=10)
-    assert runs.total == 2
+    assert runs.total == 1
     detail = application.get_run(runs.items[0].run_id)
     assert detail.status == "succeeded"
     assert detail.duration_ms is not None
+    assert detail.dagster_url.endswith(detail.run_id)

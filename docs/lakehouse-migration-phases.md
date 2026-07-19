@@ -83,8 +83,10 @@ changing the local-filesystem results.
    markers and upsert the rebuildable `bronze_captures` cache.
 3. Port idempotency and conflict tests.
 
-**Gate:** `ja-data resolve-sample --limit 100 --apply` reproduces the
-baseline: 52 auto-acceptable proposals, 48 quarantined, with the same reasons.
+**Historical gate:** the then-supported applied 100-row command reproduced 52
+auto-acceptable proposals and 48 quarantined rows. E2.1 later removed bounded
+application; `resolve-sample` is now non-publishing and durable compilation is
+Dagster-owned.
 
 ## Phase C2 — reshape writes and restore the PostgreSQL decision boundary (done)
 
@@ -187,7 +189,8 @@ bronze capture
    result table intact.
 6. Expose the closure as `ja-data run subtitle-lid`; also expose the two
    intermediate targets and `ja-data targets` so individual boundaries can be
-   exercised while debugging.
+   exercised while debugging. These temporary custom-executor commands were
+   removed in E2.1 after Dagster became the execution owner.
 
 **Repository gate:** tests prove two competing acceptable proposals survive
 the resolver, the newer capture wins canonicalization, only its subtitle is
@@ -224,33 +227,47 @@ operators can explain canonical selection, inspect failure evidence, distinguish
 mixed-generation stage state, expand bounded products, and inspect global/local
 run lineage without copying opaque IDs.
 
-## Phase E — operator resolution decisions (next)
+## Phase E — product boundaries and orchestration decision (E2.1 complete)
 
-Add reusable, evidence-bound decision primitives and apply them first to the
-canonicalization boundary:
+Phase E selected Dagster as the execution authority after separating product
+logic from orchestration. Durable decisions now live in
+[`packages/data/ARCHITECTURE.md`](../packages/data/ARCHITECTURE.md); only
+unfinished gates remain in
+[`plans/lakehouse-phase-e2-control-plane-and-workers.md`](plans/lakehouse-phase-e2-control-plane-and-workers.md).
 
-1. present competing canonical candidates and binding alternatives in the
-   stage-owned inspection surface;
-2. preview the exact decision and downstream invalidation before mutation;
-3. append a PostgreSQL binding override or explicit unbind through the existing
-   transactional control-plane contract;
-4. bind every decision to the evidence/product version it reviewed so changed
-   upstream evidence visibly invalidates or supersedes it; and
-5. expose the resulting stale canonical product and explicit recomputation path
-   without silently launching work.
+1. **Done (2026-07-18):** extract coherent product packages and
+   orchestration-free compiler/commit boundaries without redesigning the
+   current executor; validate the complete chain on 100 real bronze captures.
+2. **Done (2026-07-18):** run a corrected unpartitioned Dagster collection proof
+   over the real 100-capture canonicalization closure, including mixed-generation
+   failure, override invalidation, quarantine, downstream rerun, and a
+   non-publishing bounded canary. Accepted measurements were promoted to the
+   package architecture and the disposable spike report was removed.
+3. **Done (2026-07-19):** prove delayed native-worker claiming across a
+   webserver restart on three full canonical episodes and receive explicit
+   user acceptance of Dagster.
+4. **Done (2026-07-19):** freeze campaign/worker/gateway/storage contracts,
+   move the workbench spine and run views to public Dagster APIs, and delete the
+   custom planner, registry, executor, and execution CLI.
+5. **Next:** promote the VAD proof into the supported native-worker product
+   boundary, then add input-head-bound canonicalization decisions.
 
-**Gate:** the operator can resolve a competing candidate or binding from the
-workbench, see durable provenance for that human decision, and see precisely
-which canonical/downstream products now require recomputation. No generic
-approval framework, remote executor, autonomous queue, or destructive action is
-introduced for this gate.
+**Gate:** no speculative replacement executor is built. Product extraction is
+behavior-preserving; the Dagster proof either demonstrates collection lineage
+without duplicated eligibility/materialization truth or is removed; the chosen
+execution owner is explicit before the workbench gains mutations.
 
-## Phase F — remove Dagster and the old substrate (repository done)
+## Historical Phase F — remove the original Dagster spike (repository done)
 
 The legacy modules, tests, Alembic migration, dependencies, `tool.dg`
 configuration, deployment, image, and superseded design documents are removed.
 `ledger_types.py` became `resolution_types.py` with only the records used by the
 C2 compiler and PostgreSQL override boundary.
+
+This records the removal of the rejected capture-partitioned implementation. It
+does not prejudge Phase E's separate collection-asset proof. If that proof is
+accepted, its Dagster integration starts cleanly and does not restore the old
+dynamic partition registry, sensor, SQLAlchemy ledger, or Alembic substrate.
 
 `deploy/metaflow/` is retained because it belongs to the separate evaluation
 workbench proposal in `eval-workbench-design.md`; it is not an execution option
@@ -258,10 +275,11 @@ for this data layer. The remaining Dagster database/principal cleanup is an
 explicit user-owned infrastructure operation, not a repository compatibility
 requirement.
 
-**Gate:** no Dagster, SQLAlchemy, or Alembic imports remain; Postgres holds the
-DuckLake catalog plus the deliberately small `binding_overrides` control-plane
-table; the data-package suite and local object-storage smoke are green.
-Repository portion validated 2026-07-15; external database cleanup remains
+**Gate at completion (2026-07-15):** no imports from the original Dagster,
+SQLAlchemy, or Alembic spike remained; PostgreSQL held the DuckLake catalog plus
+the deliberately small `binding_overrides` control-plane table. Phase E1's new
+collection-only Dagster adapter is a separate 2026-07-18 proof and does not
+restore that capture-partitioned substrate. External database cleanup remains
 user-owned.
 
 ## Phase G (optional) — dbt

@@ -1,65 +1,50 @@
-"""Surface-neutral use cases for the first real operator campaign."""
+"""Surface-neutral operator use cases over Dagster and durable products."""
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
 
 from ja_media_data.lakehouse.repository import DuckLakeRepository
+from ja_media_data.operator.cache import ProjectionCache
+from ja_media_data.operator.cache_keys import CampaignKeys
 from ja_media_data.operator.campaigns import (
-    CAMPAIGNS,
+    CampaignCatalog,
     CampaignDefinition,
     campaign_card,
 )
 from ja_media_data.operator.canonicalization import CanonicalizationLensProjector
-from ja_media_data.operator.cache import ProjectionCache
 from ja_media_data.operator.models import (
     CampaignCard,
     CampaignSnapshot,
-    RecipeObservation,
-    RecipePage,
     RunPage,
     RunSummary,
     StageResultPage,
 )
-from ja_media_data.operator.phase_d_registry import build_phase_d_registry
-from ja_media_data.operator.planning import (
-    CapabilityProfile,
-    ExecutionIntent,
-    ExecutionPlan,
-    Planner,
-)
-from ja_media_data.operator.status import PhaseDStatusAdapter
-from ja_media_data.operator.stage_results import StageResultProjector
 from ja_media_data.operator.run_history import RunHistoryReader
-from ja_media_data.operator.cache_keys import CampaignKeys
+from ja_media_data.operator.stage_results import StageResultProjector
+from ja_media_data.orchestration.dagster.definitions import build_definitions
+from ja_media_data.orchestration.dagster.gateway import DagsterGateway
 
 
 class OperatorApplication:
-    """Own validation and snapshot composition independently of any UI framework."""
+    """Join orchestration facts to bounded domain views without owning execution."""
 
     def __init__(
-        self, repository: DuckLakeRepository, *, cache: ProjectionCache | None = None
+        self,
+        repository: DuckLakeRepository,
+        gateway: DagsterGateway,
+        *,
+        campaigns: CampaignCatalog | None = None,
+        cache: ProjectionCache | None = None,
     ) -> None:
         self.repository = repository
-        # ProjectionCache exposes __len__, so an empty shared cache is falsey.
-        # Identity, not truthiness, decides whether the FastAPI-lifetime cache
-        # was supplied.
+        self.gateway = gateway
+        self.campaigns = campaigns or CampaignCatalog(build_definitions())
         self.cache = cache if cache is not None else ProjectionCache()
-        self.registry = build_phase_d_registry()
-        self._canonicalization = CanonicalizationLensProjector(repository)
         self._stage_results = StageResultProjector(repository)
-        self._history = RunHistoryReader(repository)
-        self._keys = CampaignKeys(repository)
-        self._lens_projectors = {
-            "canonicalization": self._canonicalization.project,
-        }
 
     def list_campaigns(self) -> tuple[CampaignCard, ...]:
-        """Return checked-in campaigns without opening UI-specific state."""
-
-        return tuple(
-            campaign_card(definition.spec) for definition in CAMPAIGNS.values()
-        )
+        return tuple(campaign_card(item) for item in self.campaigns.all())
 
     def get_campaign_snapshot(
         self,
@@ -70,26 +55,23 @@ class OperatorApplication:
         gate_limit: int = 50,
         run_id: str | None = None,
     ) -> CampaignSnapshot:
-        """Return the real Phase D target lens for one campaign."""
+        """Return current domain facts plus a graph-derived Dagster spine."""
 
         run_id = _optional(run_id)
         definition = self._campaign(campaign_id)
-        projector = self._lens_projectors[definition.lens_kind]
-        view = self._keys.run_view(run_id)
-        state_token = (
-            ("historical", *view) if view else self._keys.campaign_state()
-        )
-        key = (
-            "campaign", campaign_id, state_token, series_id,
-            gate_offset, gate_limit,
-        )
+        projector, keys = self._services(definition)
+        view = keys.run_view(run_id)
+        state = ("historical", *view) if view else keys.campaign_state()
+        key = ("campaign", campaign_id, definition.spec.revision, state,
+               series_id, gate_offset, gate_limit)
         return self.cache.get_or_create(key, lambda: CampaignSnapshot(
-            campaign=campaign_card(definition.spec), generated_at=datetime.now(UTC),
-            lens=projector(series_id=series_id, gate_offset=gate_offset,
-                           gate_limit=gate_limit,
-                           snapshot_id=view[0] if view else None,
-                           override_revision=view[1] if view else None,
-                           view_run_id=run_id),
+            campaign=campaign_card(definition), generated_at=datetime.now(UTC),
+            lens=projector.project(
+                series_id=series_id, gate_offset=gate_offset, gate_limit=gate_limit,
+                snapshot_id=view[0] if view else None,
+                override_revision=view[1] if view else None,
+                view_run_id=run_id,
+            ),
         ))
 
     def get_stage_results(
@@ -102,18 +84,16 @@ class OperatorApplication:
         limit: int = 50,
         run_id: str | None = None,
     ) -> StageResultPage:
-        """Return a bounded stage-owned view only after an explicit inspection."""
+        """Return one bounded stage-owned table only after explicit inspection."""
 
         run_id = _optional(run_id)
-        self._campaign(campaign_id)
-        view = self._keys.run_view(run_id)
-        head_token = (
-            ("historical", *view) if view else self._keys.product_head(stage)
-        )
-        key = (
-            "stage-page", stage, head_token, series_id,
-            offset, limit,
-        )
+        definition = self._campaign(campaign_id)
+        if stage not in {item.stage for item in definition.spine}:
+            raise KeyError(stage)
+        _, keys = self._services(definition)
+        view = keys.run_view(run_id)
+        head = ("historical", *view) if view else keys.product_head(stage)
+        key = ("stage-page", stage, head, series_id, offset, limit)
         return self.cache.get_or_create(key, lambda: self._stage_results.page(
             stage, series_id=series_id, offset=offset, limit=limit,
             snapshot_id=view[0] if view else None,
@@ -123,14 +103,13 @@ class OperatorApplication:
         self, campaign_id: str, locator: tuple[str, str, str], *,
         run_id: str | None = None,
     ):
-        """Return one lazily loaded candidate set from current or historical state."""
-
         run_id = _optional(run_id)
-        self._campaign(campaign_id)
-        view = self._keys.run_view(run_id)
-        token = (("historical", *view) if view else self._keys.campaign_state())
+        definition = self._campaign(campaign_id)
+        projector, keys = self._services(definition)
+        view = keys.run_view(run_id)
+        token = ("historical", *view) if view else keys.domain_state()
         key = ("candidates", locator, token)
-        return self.cache.get_or_create(key, lambda: self._canonicalization.candidates(
+        return self.cache.get_or_create(key, lambda: projector.candidates(
             locator, snapshot_id=view[0] if view else None,
             override_revision=view[1] if view else None,
         ))
@@ -139,83 +118,49 @@ class OperatorApplication:
         self, campaign_id: str, *, series_id: str | None, offset: int,
         limit: int, run_id: str | None = None,
     ) -> CampaignSnapshot:
-        """Return one product page without rebuilding stage cards or counters."""
+        """Page the product with no Dagster history query or spine reconstruction."""
 
         run_id = _optional(run_id)
         definition = self._campaign(campaign_id)
-        view = self._keys.run_view(run_id)
-        token = (
-            ("historical", *view) if view
-            else self._keys.campaign_state()
-        )
+        projector, keys = self._services(definition)
+        view = keys.run_view(run_id)
+        token = ("historical", *view) if view else keys.domain_state()
         key = ("product-page", campaign_id, token, series_id, offset, limit)
         return self.cache.get_or_create(key, lambda: CampaignSnapshot(
-            campaign=campaign_card(definition.spec), generated_at=datetime.now(UTC),
-            lens=self._canonicalization.project_product(
+            campaign=campaign_card(definition), generated_at=datetime.now(UTC),
+            lens=projector.project_product(
                 series_id=series_id, gate_offset=offset, gate_limit=limit,
                 snapshot_id=view[0] if view else None,
-                override_revision=view[1] if view else None,
-                view_run_id=run_id,
+                override_revision=view[1] if view else None, view_run_id=run_id,
             ),
         ))
 
-    def plan_campaign(
-        self,
-        campaign_id: str,
-        *,
-        capabilities: CapabilityProfile | None = None,
-    ) -> ExecutionPlan:
-        """Recompute a campaign plan from current durable products."""
-
-        campaign = self._campaign(campaign_id).spec
-        intent = ExecutionIntent(
-            target=campaign.target,
-            scope=campaign.scope,
-            recipe_bindings=campaign.recipe_bindings,
-            stop_target=campaign.stop_target,
-        )
-        status = PhaseDStatusAdapter(self.repository)
-        return Planner(self.registry).plan(
-            intent, status.observe, capabilities=capabilities
-        )
-
-    def list_recipes(
-        self, *, query: str | None = None, offset: int = 0, limit: int = 50
-    ) -> RecipePage:
-        """Search registered recipes and attach run/product observations in bulk."""
-
-        _validate_page(offset, limit)
-        recipes = sorted(self.registry.recipes.values(), key=lambda item: item.recipe_id)
-        if query:
-            needle = query.casefold()
-            recipes = [
-                item for item in recipes
-                if needle in " ".join((item.recipe_id, item.name, item.stage)).casefold()
-            ]
-        observations = self._history.recipe_observations()
-        items = tuple(
-            RecipeObservation(recipe=item, **observations.get(item.revision, {}))
-            for item in recipes[offset : offset + limit]
-        )
-        return RecipePage(items=items, total=len(recipes), offset=offset, limit=limit)
-
     def list_runs(self, *, offset: int = 0, limit: int = 50) -> RunPage:
-        """Return bounded global runs with their local stage checkpoints."""
-
         _validate_page(offset, limit)
-        return self._history.list(offset=offset, limit=limit)
+        definition = self.campaigns.all()[0]
+        return RunHistoryReader(
+            self.repository, self.gateway, job_name=definition.spec.job_name
+        ).list(offset=offset, limit=limit)
 
     def get_run(self, run_id: str) -> RunSummary:
-        """Return one run detail or fail without leaking a storage row."""
+        definition = self.campaigns.all()[0]
+        return RunHistoryReader(
+            self.repository, self.gateway, job_name=definition.spec.job_name
+        ).get(run_id)
 
-        return self._history.get(run_id)
+    def _services(self, definition: CampaignDefinition):
+        keys = CampaignKeys(
+            self.repository, self.gateway, job_name=definition.spec.job_name
+        )
+        projector = CanonicalizationLensProjector(
+            self.repository, self.gateway, spine=definition.spine,
+            job_name=definition.spec.job_name,
+        )
+        return projector, keys
 
-    @staticmethod
-    def _campaign(campaign_id: str) -> CampaignDefinition:
-        try:
-            return CAMPAIGNS[campaign_id]
-        except KeyError as error:
-            raise KeyError(campaign_id) from error
+    def _campaign(self, campaign_id: str) -> CampaignDefinition:
+        return self.campaigns.get(campaign_id)
+
 
 def _validate_page(offset: int, limit: int) -> None:
     if offset < 0 or limit < 1 or limit > 500:
@@ -223,6 +168,4 @@ def _validate_page(offset: int, limit: int) -> None:
 
 
 def _optional(value: str | None) -> str | None:
-    """Normalize blank query fields emitted by HTMX form inclusion."""
-
     return value.strip() or None if value is not None else None

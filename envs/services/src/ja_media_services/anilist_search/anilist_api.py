@@ -191,10 +191,18 @@ class AniListGraphQLClient:
     async def fetch_media_by_id(self, anilist_id: int) -> dict[str, Any] | None:
         """Fetch one anime by exact AniList ID, returning None for no Media."""
 
-        data = await self.execute(
-            ANILIST_MEDIA_BY_ID_QUERY,
-            {"id": int(anilist_id)},
-        )
+        try:
+            data = await self.execute(
+                ANILIST_MEDIA_BY_ID_QUERY,
+                {"id": int(anilist_id)},
+            )
+        except AniListApiError as error:
+            # AniList returns HTTP 404, rather than HTTP 200 with Media=null,
+            # for some absent exact IDs. At this exact-ID boundary both forms
+            # mean the same thing and feed the negative fallback cache.
+            if error.status_code == 404:
+                return None
+            raise
         payload = data.get("data")
         if not isinstance(payload, dict):
             raise AniListApiError("AniList response missing data object")

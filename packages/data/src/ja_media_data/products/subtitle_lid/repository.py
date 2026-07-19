@@ -1,0 +1,38 @@
+"""Atomic persistence for subtitle language evidence."""
+
+from dataclasses import asdict
+import json
+
+import duckdb
+
+from ja_media_data.products.atomic import AtomicProductStore
+from ja_media_data.products.materialization import MaterializationContext, ProductCommitResult
+from ja_media_data.products.subtitle_lid.compiler import CompiledSubtitleLid
+
+
+def replace_product(
+    connection: duckdb.DuckDBPyConnection,
+    product: CompiledSubtitleLid,
+    context: MaterializationContext,
+) -> ProductCommitResult:
+    """Atomically replace all subtitle language results."""
+
+    values = []
+    for item in product.rows:
+        raw = asdict(item)
+        raw["script_metrics"] = json.dumps(
+            raw["script_metrics"], ensure_ascii=False, sort_keys=True
+        )
+        raw["sampled_metrics"] = (
+            json.dumps(raw["sampled_metrics"], ensure_ascii=False, sort_keys=True)
+            if raw["sampled_metrics"] is not None
+            else None
+        )
+        values.append(tuple(raw.values()))
+    return AtomicProductStore(connection).replace(
+        target="subtitle_lid",
+        tables=(("subtitle_language_results", 11, values),),
+        fingerprint=product.fingerprint,
+        rows=len(product.rows),
+        context=context,
+    )

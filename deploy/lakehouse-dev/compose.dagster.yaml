@@ -1,0 +1,131 @@
+# Optional Phase E overlay. Dagster processes share the development host network
+# so they inherit its tailnet routing and DNS. Durable dependencies retain their
+# loopback-published ports in compose.yaml.
+x-dagster-environment: &dagster-environment
+  DAGSTER_HOME: /var/lib/dagster/home
+  DAGSTER_POSTGRES_URL: postgresql://${POSTGRES_USER:-ja_media_lakehouse_test}:${POSTGRES_PASSWORD:-ja_media_lakehouse_test}@127.0.0.1:${POSTGRES_PORT:-55432}/${POSTGRES_DB:-ja_media_lakehouse_test}?options=-csearch_path%3Dja_media_dagster_local
+  JA_MEDIA_CELERY_BROKER_URL: pyamqp://guest@127.0.0.1:${RABBITMQ_AMQP_PORT:-5672}//
+  JA_MEDIA_DATA_DATABASE_URL: postgresql://${POSTGRES_USER:-ja_media_lakehouse_test}:${POSTGRES_PASSWORD:-ja_media_lakehouse_test}@127.0.0.1:${POSTGRES_PORT:-55432}/${POSTGRES_DB:-ja_media_lakehouse_test}
+  JA_MEDIA_DUCKLAKE_CATALOG_SCHEMA: ja_media_ducklake_local
+  JA_MEDIA_DUCKLAKE_DATA_PATH: s3://${MINIO_BUCKET:-ja-media-lakehouse-test}/ducklake/local/
+  JA_MEDIA_DUCKLAKE_S3_ENDPOINT_URL: http://127.0.0.1:${MINIO_API_PORT:-59000}
+  JA_MEDIA_DUCKLAKE_S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-ja_media_lakehouse_test}
+  JA_MEDIA_DUCKLAKE_S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-ja-media-lakehouse-test-only}
+  JA_MEDIA_DUCKLAKE_S3_REGION: us-east-1
+  JA_MEDIA_E1B_S3_ENDPOINT_URL: http://127.0.0.1:${MINIO_API_PORT:-59000}
+  JA_MEDIA_E1B_S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-ja_media_lakehouse_test}
+  JA_MEDIA_E1B_S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-ja-media-lakehouse-test-only}
+  JA_MEDIA_E1B_BUCKET: ${MINIO_BUCKET:-ja-media-lakehouse-test}
+
+x-dagster-volumes: &dagster-volumes
+  - ../../packages/data/dagster/dagster.yaml:/var/lib/dagster/home/dagster.yaml:ro
+
+x-dagster-depends: &dagster-depends
+  postgres:
+    condition: service_healthy
+  dagster-schema-init:
+    condition: service_completed_successfully
+  minio:
+    condition: service_started
+  minio-init:
+    condition: service_completed_successfully
+  rabbitmq:
+    condition: service_healthy
+
+services:
+  rabbitmq:
+    image: ${RABBITMQ_IMAGE:-rabbitmq:4.1-management-alpine}
+    ports:
+      - "127.0.0.1:${RABBITMQ_AMQP_PORT:-5672}:5672"
+      - "127.0.0.1:${RABBITMQ_UI_PORT:-55672}:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  dagster-schema-init:
+    image: ${POSTGRES_IMAGE:-postgres:17-alpine}
+    environment:
+      PGHOST: postgres
+      PGDATABASE: ${POSTGRES_DB:-ja_media_lakehouse_test}
+      PGUSER: ${POSTGRES_USER:-ja_media_lakehouse_test}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-ja_media_lakehouse_test}
+    command:
+      - /bin/sh
+      - -ec
+      - psql -v ON_ERROR_STOP=1 -c 'CREATE SCHEMA IF NOT EXISTS ja_media_dagster_local'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  dagster:
+    build:
+      context: ../..
+      dockerfile: packages/data/Dockerfile.dagster
+    image: ja-media/data-dagster-local:local
+    network_mode: host
+    init: true
+    restart: unless-stopped
+    env_file:
+      - ../../packages/data/.env
+    environment: *dagster-environment
+    command:
+      - dagster-webserver
+      - --host
+      - 127.0.0.1
+      - --port
+      - "${DAGSTER_DEV_PORT:-53000}"
+      - --module-name
+      - ja_media_data.orchestration.dagster.definitions
+    volumes: *dagster-volumes
+    depends_on: *dagster-depends
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:${DAGSTER_DEV_PORT:-53000}/server_info"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  dagster-daemon:
+    image: ja-media/data-dagster-local:local
+    network_mode: host
+    init: true
+    restart: unless-stopped
+    env_file:
+      - ../../packages/data/.env
+    environment: *dagster-environment
+    command:
+      - dagster-daemon
+      - run
+      - --module-name
+      - ja_media_data.orchestration.dagster.definitions
+    volumes: *dagster-volumes
+    depends_on: *dagster-depends
+
+  dagster-server-worker:
+    image: ja-media/data-dagster-local:local
+    network_mode: host
+    init: true
+    restart: unless-stopped
+    env_file:
+      - ../../packages/data/.env
+    environment: *dagster-environment
+    command:
+      - dagster-celery
+      - worker
+      - start
+      - --config-yaml
+      - /opt/ja-media/packages/data/dagster/celery-container.yaml
+      - --queue
+      - server
+      - --app
+      - dagster_celery.app
+      - --loglevel
+      - INFO
+      - --
+      - --concurrency=1
+    volumes: *dagster-volumes
+    depends_on: *dagster-depends

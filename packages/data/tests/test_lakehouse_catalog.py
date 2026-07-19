@@ -21,7 +21,6 @@ def _postgres_url() -> str:
 def test_ducklake_s3_settings_can_differ_from_bronze(monkeypatch) -> None:
     monkeypatch.setenv("JA_MEDIA_DATA_DATABASE_URL", _postgres_url())
     monkeypatch.setenv("JA_MEDIA_DUCKLAKE_DATA_PATH", "s3://silver/local/")
-    monkeypatch.setenv("JA_MEDIA_S3_ENDPOINT_URL", "https://garage.example")
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "garage-key")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "garage-secret")
     monkeypatch.setenv("JA_MEDIA_DUCKLAKE_S3_ENDPOINT_URL", "http://minio:9000")
@@ -38,7 +37,9 @@ def test_ducklake_s3_settings_can_differ_from_bronze(monkeypatch) -> None:
 def test_catalog_uses_stable_lakehouse_prefix_by_default(monkeypatch) -> None:
     monkeypatch.setenv("JA_MEDIA_DATA_DATABASE_URL", _postgres_url())
     monkeypatch.setenv("JA_MEDIA_BRONZE_BUCKET", "media")
-    monkeypatch.setenv("JA_MEDIA_S3_ENDPOINT_URL", "https://garage.example")
+    monkeypatch.setenv(
+        "JA_MEDIA_DUCKLAKE_S3_ENDPOINT_URL", "https://garage.example"
+    )
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "garage-key")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "garage-secret")
     monkeypatch.delenv("JA_MEDIA_DUCKLAKE_DATA_PATH", raising=False)
@@ -72,6 +73,7 @@ def catalog(tmp_path_factory):
             "003_phase_d_subtitle_lid.sql",
             "004_operator_runs.sql",
             "005_human_run_numbers.sql",
+            "006_worker_handoffs.sql",
         ]
     yield connection
     connection.close()
@@ -79,7 +81,7 @@ def catalog(tmp_path_factory):
 
 def test_apply_schema_is_idempotent(catalog) -> None:
     assert apply_schema(catalog) == []
-    assert catalog.execute("SELECT count(*) FROM schema_history").fetchone()[0] == 5
+    assert catalog.execute("SELECT count(*) FROM schema_history").fetchone()[0] == 6
 
 
 def test_apply_schema_rejects_an_edited_applied_file(catalog, tmp_path) -> None:

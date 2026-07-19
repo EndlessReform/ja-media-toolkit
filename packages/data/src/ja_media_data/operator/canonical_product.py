@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
-
 from ja_media_data.lakehouse.repository import DuckLakeRepository
 from ja_media_data.lakehouse.time_travel import table_ref
 from ja_media_data.operator.models import (

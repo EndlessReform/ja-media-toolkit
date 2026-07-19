@@ -73,8 +73,7 @@ class CatalogConfig:
                 "JA_MEDIA_DUCKLAKE_CATALOG_SCHEMA", "ja_media_ducklake"
             ),
             data_path=data_path,
-            s3_endpoint_url=os.environ.get("JA_MEDIA_DUCKLAKE_S3_ENDPOINT_URL")
-            or os.environ.get("JA_MEDIA_S3_ENDPOINT_URL"),
+            s3_endpoint_url=os.environ.get("JA_MEDIA_DUCKLAKE_S3_ENDPOINT_URL"),
             s3_region=os.environ.get("JA_MEDIA_DUCKLAKE_S3_REGION")
             or os.environ.get("AWS_DEFAULT_REGION", "garage"),
             s3_key_id=os.environ.get("JA_MEDIA_DUCKLAKE_S3_ACCESS_KEY_ID")

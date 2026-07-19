@@ -9,6 +9,9 @@ from typing import Iterator
 from ja_media_data.lakehouse.repository import DuckLakeRepository, repository_from_env
 from ja_media_data.operator.application import OperatorApplication
 from ja_media_data.operator.cache import ProjectionCache
+from ja_media_data.operator.campaigns import CampaignCatalog
+from ja_media_data.orchestration.dagster.definitions import build_definitions
+from ja_media_data.orchestration.dagster.gateway import DagsterGateway
 
 
 class RepositoryPool:
@@ -49,14 +52,19 @@ class OperatorRuntime:
     def __init__(self, *, pool_size: int = 2, cache_entries: int = 512) -> None:
         self.pool = RepositoryPool(pool_size)
         self.cache = ProjectionCache(cache_entries)
+        self.gateway = DagsterGateway.from_env()
+        self.campaigns = CampaignCatalog(build_definitions())
 
     @contextmanager
     def application(self) -> Iterator[OperatorApplication]:
         """Create a cheap request application over one borrowed repository."""
 
         with self.pool.borrow() as repository:
-            yield OperatorApplication(repository, cache=self.cache)
+            yield OperatorApplication(
+                repository, self.gateway, campaigns=self.campaigns, cache=self.cache
+            )
 
     def close(self) -> None:
         self.cache.clear()
+        self.gateway.close()
         self.pool.close()

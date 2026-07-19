@@ -1,0 +1,24 @@
+FROM python:3.13-slim
+
+COPY --from=ghcr.io/astral-sh/uv:0.8.22 /uv /uvx /bin/
+
+RUN apt-get update \
+    && apt-get install --no-install-recommends --yes curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt/ja-media
+
+COPY pyproject.toml uv.lock README.md ./
+COPY packages/core packages/core
+COPY packages/data packages/data
+COPY packages/media packages/media
+
+RUN uv sync --frozen --package ja-media-data --no-dev
+
+ENV DAGSTER_HOME=/var/lib/dagster/home
+ENV PATH=/opt/ja-media/.venv/bin:$PATH
+ENV PYTHONUNBUFFERED=1
+
+RUN mkdir -p /var/lib/dagster/home
+
+CMD ["dagster", "dev", "--host", "0.0.0.0", "--port", "3000", "--module-name", "ja_media_data.orchestration.dagster.definitions"]

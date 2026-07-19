@@ -8,31 +8,24 @@ from dataclasses import asdict
 import json
 from typing import Any
 
-from ja_media_data.bronze_store import bronze_store_from_env
-from ja_media_data.episode_metadata import AniListEpisodeMetadataProvider
+from ja_media_data.storage.bronze import bronze_store_from_env
+from ja_media_data.products.episode_resolution.metadata import AniListEpisodeMetadataProvider
 from ja_media_data.lakehouse.bronze_hydration import hydrate_bronze_captures
 from ja_media_data.lakehouse.repository import repository_from_env
-from ja_media_data.resolution_service import ResolutionResult, resolve_batch
+from ja_media_data.products.episode_resolution import ResolutionResult, resolve_batch
 
 
 def main() -> None:
     """Run the small, deliberately developer-facing resolver CLI."""
 
     from ja_media_data.environment import load_cli_environment
-    from ja_media_data.operator.phase_d_registry import build_phase_d_registry
-
     load_cli_environment()
     parser = argparse.ArgumentParser(prog="ja-data")
     commands = parser.add_subparsers(dest="command", required=True)
     sample = commands.add_parser(
-        "resolve-sample", help="dry-run or apply a bounded Garage capture slice"
+        "resolve-sample", help="dry-run a bounded Garage capture slice"
     )
     sample.add_argument("--limit", type=int, default=100)
-    sample.add_argument(
-        "--apply",
-        action="store_true",
-        help="commit capture headers, hints, proposals, and issues to the configured DB",
-    )
     sample.add_argument(
         "--show", choices=("issues", "all", "none"), default="issues"
     )
@@ -54,12 +47,7 @@ def main() -> None:
         help="apply checked-in DuckLake and PostgreSQL control-plane SQL",
     )
 
-    commands.add_parser("targets", help="list executable data products")
     commands.add_parser("campaigns", help="list operator campaigns")
-    recipes = commands.add_parser("recipes", help="list operator recipes as JSON")
-    recipes.add_argument("--query")
-    plan = commands.add_parser("plan", help="preview a campaign plan as JSON")
-    plan.add_argument("campaign_id")
     campaign = commands.add_parser(
         "campaign", help="inspect one operator campaign as JSON"
     )
@@ -67,12 +55,9 @@ def main() -> None:
     campaign.add_argument("--series", dest="series_id")
     web = commands.add_parser("web", help="serve the local operator workbench")
     web.add_argument("--port", type=int, default=8765)
-    run = commands.add_parser("run", help="compile one target and its dependencies")
-    run.add_argument("target", choices=tuple(build_phase_d_registry().targets))
-    run.add_argument(
-        "--force-from",
-        choices=tuple(build_phase_d_registry().stages),
-        help="recompute this stage and every downstream checkpoint in the run",
+    web.add_argument(
+        "--no-schema-init", action="store_true",
+        help="open existing schemas read-only at startup; never apply migrations",
     )
 
     bind = commands.add_parser(
@@ -96,10 +81,6 @@ def main() -> None:
         _scan_bronze(args)
     elif args.command == "bind":
         _bind(args)
-    elif args.command == "targets":
-        from ja_media_data.pipeline_cli import print_targets
-
-        print_targets()
     elif args.command == "campaigns":
         from ja_media_data.operator.cli import print_campaigns
 
@@ -108,22 +89,10 @@ def main() -> None:
         from ja_media_data.operator.cli import print_campaign
 
         print_campaign(args.campaign_id, series_id=args.series_id)
-    elif args.command == "recipes":
-        from ja_media_data.operator.cli import print_recipes
-
-        print_recipes(query=args.query)
-    elif args.command == "plan":
-        from ja_media_data.operator.cli import print_plan
-
-        print_plan(args.campaign_id)
     elif args.command == "web":
         from ja_media_data.operator.cli import run_web
 
-        run_web(port=args.port)
-    elif args.command == "run":
-        from ja_media_data.pipeline_cli import run_target
-
-        run_target(args.target, force_from=args.force_from)
+        run_web(port=args.port, initialize_schema=not args.no_schema_init)
     else:
         _apply_lakehouse_schema()
 
@@ -134,26 +103,15 @@ def _resolve_sample(args: argparse.Namespace) -> None:
     store = bronze_store_from_env()
     provider = AniListEpisodeMetadataProvider()
     documents = tuple(store.scan_documents(limit=args.limit))
-    if args.apply:
-        with repository_from_env() as repository:
-            from ja_media_data.resolution_execution import apply_resolution_batch
-
-            batch, flushed_tables = apply_resolution_batch(
-                documents,
-                store=store,
-                metadata_provider=provider,
-                repository=repository,
-            )
-    else:
-        batch = resolve_batch(
-            documents,
-            store=store,
-            metadata_provider=provider,
-        )
-        flushed_tables = 0
+    batch = resolve_batch(
+        documents,
+        store=store,
+        metadata_provider=provider,
+    )
+    flushed_tables = 0
     results = batch.results
     summary = {
-        "mode": "apply" if args.apply else "dry-run",
+        "mode": "dry-run",
         "sample_size": len(results),
         "flushed_tables": flushed_tables,
         "bronze_written": bool(batch.bronze_write and batch.bronze_write.written),
@@ -203,9 +161,11 @@ def _apply_lakehouse_schema() -> None:
 
     import psycopg
 
-    from ja_media_data.binding_overrides import (
-        apply_postgres_schema,
+    from ja_media_data.storage.binding_overrides import (
         control_schema_from_env,
+    )
+    from ja_media_data.storage.binding_schema import (
+        apply_postgres_schema,
         postgres_url_for_psycopg,
     )
     from ja_media_data.lakehouse import CatalogConfig, apply_schema, connect_catalog

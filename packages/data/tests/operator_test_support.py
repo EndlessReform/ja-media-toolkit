@@ -1,65 +1,73 @@
-"""Shared real-table setup for operator integration tests."""
+"""Shared real-table and ephemeral-Dagster setup for operator integration tests."""
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-from types import SimpleNamespace
+from dataclasses import dataclass
+
+import dagster as dg
 
 from ja_media_data.lakehouse.repository import DuckLakeRepository
-from ja_media_data.phase_d import compile_acceptances, compile_canonical_inputs
-from ja_media_data.resolution_types import (
-    BindingProposal,
-    CaptureObservation,
-    ResolutionBatch,
+from ja_media_data.orchestration.dagster.definitions import build_definitions
+from ja_media_data.orchestration.dagster.gateway import DagsterGateway
+from ja_media_data.orchestration.dagster.runtime import (
+    ProductRuntime,
+    hardcoded_runtime_resource,
 )
 
-
-class ManifestStore:
-    """Small bronze reader sufficient for canonical input compilation."""
-
-    bucket = "bronze"
-
-    def read_manifest(self, key: str, *, expected_etag: str | None = None):
-        assert key.endswith(("old.json", "new.json"))
-        assert expected_etag in {"etag-old", "etag-new"}
-        return {"subtitles": []}
+from dagster_test_support import FakeMetadata, FakeOverrides, FakeStore, documents
 
 
-class Overrides:
-    def __init__(self, capture_id: str | None) -> None:
-        self.capture_id = capture_id
+class NoopOperatorRuntime:
+    """Lifespan stand-in when HTTP tests inject their own application service."""
 
-    def iter_current_overrides(self):
-        yield SimpleNamespace(
-            namespace="anilist", series_id="15451", episode="3",
-            audio_capture_id=self.capture_id, override_id="override-1",
+    def close(self) -> None:
+        """Match the production runtime shutdown contract."""
+
+
+@dataclass
+class CompiledCampaign:
+    """Reusable real campaign fixture with one authoritative Dagster instance."""
+
+    repository: DuckLakeRepository
+    instance: dg.DagsterInstance
+    gateway: DagsterGateway
+    definitions: dg.Definitions
+    store: FakeStore
+    overrides: FakeOverrides
+
+    def run(self, *, raise_on_error: bool = True):
+        return self.definitions.resolve_job_def(
+            "canonicalization_campaign"
+        ).execute_in_process(
+            instance=self.instance, raise_on_error=raise_on_error
         )
 
 
-def compile_campaign(repository: DuckLakeRepository) -> None:
-    """Commit two competing real proposals and their canonical product."""
+def compile_campaign(repository: DuckLakeRepository) -> CompiledCampaign:
+    """Compile competing captures through the real Dagster asset campaign."""
 
-    captures = (
-        ("capture-old", "old", "etag-old", datetime(2026, 1, 1, tzinfo=UTC)),
-        ("capture-new", "new", "etag-new", datetime(2026, 2, 1, tzinfo=UTC)),
+    source = documents()
+    store = FakeStore(source)
+    overrides = FakeOverrides()
+    repository.override_repository = overrides
+    runtime = ProductRuntime(
+        store=store, metadata_provider=FakeMetadata(), frozen_documents=source,
+        repository=repository,
     )
-    repository.replace_bronze_captures([
-        CaptureObservation(
-            capture_id=capture_id, series_namespace="anilist", series_id="15451",
-            manifest_bucket="bronze",
-            manifest_key=f"audio/anime/bronze/15451/metadata/{stem}.json",
-            manifest_etag=etag, manifest_schema_version=2,
-            manifest_modified_at=modified,
-            observed_at=datetime(2026, 3, 1, tzinfo=UTC),
-        ) for capture_id, stem, etag, modified in captures
-    ], "bronze-v1")
-    repository.replace_resolution_tables(ResolutionBatch(
-        hints=(), issues=(), proposals=tuple(BindingProposal(
-            proposal_id=f"proposal-{capture_id}", namespace="anilist",
-            series_id="15451", episode="3", audio_capture_id=capture_id,
-            proposal_method="resolver", proposal_evidence={"fixture": True},
-            input_data_version=etag, recipe_version="resolver-v1",
-        ) for capture_id, _, etag, _ in captures),
-    ), "proposals-v1")
-    compile_acceptances(repository)
-    compile_canonical_inputs(repository, ManifestStore())
+    resource = hardcoded_runtime_resource(runtime)
+    definitions = build_definitions(
+        product_runtime=resource, canary_runtime=resource
+    )
+    instance = dg.DagsterInstance.local_temp()
+    campaign = CompiledCampaign(
+        repository, instance, DagsterGateway(instance), definitions, store, overrides
+    )
+    result = campaign.run()
+    assert result.success
+    return campaign
+
+
+def empty_gateway() -> DagsterGateway:
+    """Return an injected empty instance for domain-only projection tests."""
+
+    return DagsterGateway(dg.DagsterInstance.local_temp())

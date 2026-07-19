@@ -2,9 +2,9 @@
 
 from datetime import UTC, datetime
 
-from ja_media_data.bronze_store import BronzeDocument, BronzeMarker
+from ja_media_data.storage.bronze import BronzeDocument, BronzeMarker
 from ja_media_data.lakehouse.bronze_hydration import hydrate_bronze_captures
-from ja_media_data.resolution_types import ReplaceResult
+from ja_media_data.products.episode_resolution.models import ReplaceResult
 
 
 class FakeStore:

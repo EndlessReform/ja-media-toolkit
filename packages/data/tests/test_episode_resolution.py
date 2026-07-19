@@ -2,8 +2,8 @@
 
 from ja_media_core.bronze import BronzeCaptureManifest, BronzeSeries, BronzeStream
 
-from ja_media_data.episode_metadata import SeriesEpisodeMetadata
-from ja_media_data.episode_resolution import plan_episode_resolution
+from ja_media_data.products.episode_resolution.metadata import SeriesEpisodeMetadata
+from ja_media_data.products.episode_resolution.policy import plan_episode_resolution
 
 
 def manifest(stem: str, *, capture_id: str = "capture-1") -> BronzeCaptureManifest:

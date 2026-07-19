@@ -10,15 +10,23 @@ import psycopg
 import pytest
 from psycopg import sql
 
-from ja_media_data.binding_overrides import (
+from ja_media_data.storage.binding_overrides import (
     BindingOverrideRepository,
+)
+from ja_media_data.storage.binding_schema import (
     apply_postgres_schema,
     postgres_url_for_psycopg,
 )
 from ja_media_data.lakehouse import CatalogConfig, apply_schema, connect_catalog
 from ja_media_data.lakehouse.repository import DuckLakeRepository
-from ja_media_data.phase_d import compile_acceptances
-from ja_media_data.resolution_types import (
+from ja_media_data.products.binding_acceptance.compiler import (
+    ACCEPTANCE_POLICY_VERSION,
+    compile_product as compile_acceptance_product,
+)
+from ja_media_data.products.binding_acceptance.repository import replace_product
+from ja_media_data.products.lineage import MaterializationCatalog, structural_build_key
+from ja_media_data.products.materialization import MaterializationContext
+from ja_media_data.products.episode_resolution.models import (
     BindingProposal,
     BindingConflictError,
     CaptureObservation,
@@ -186,7 +194,22 @@ def test_findings_report_later_auto_collision_with_override(repository) -> None:
         ResolutionBatch(hints=(), proposals=(automatic,), issues=()),
         "automatic-collision-v1",
     )
-    compile_acceptances(repository)
+    heads = MaterializationCatalog(repository.connection).input_heads(
+        "episode_resolution"
+    )
+    product = compile_acceptance_product(repository.connection)
+    replace_product(
+        repository.connection,
+        product,
+        MaterializationContext(
+            attempt_id="test:acceptance", pipeline_run_id="test",
+            recipe_revision=ACCEPTANCE_POLICY_VERSION,
+            build_key=structural_build_key(
+                "accepted_bindings", ACCEPTANCE_POLICY_VERSION, heads
+            ),
+            input_heads=heads,
+        ),
+    )
 
     assert [item.finding_type for item in repository.list_consistency_findings()] == [
         "override_automatic_capture_collision"

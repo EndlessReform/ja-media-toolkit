@@ -6,19 +6,29 @@ from ja_media_data.lakehouse.repository import DuckLakeRepository
 from ja_media_data.operator.canonical_product import CanonicalProductProjector
 from ja_media_data.operator.models import CanonicalizationLens
 from ja_media_data.operator.models import CampaignProgress
-from ja_media_data.operator.currency import evaluate_currency
-from ja_media_data.operator.stage_contracts import STAGE_BY_NAME
-from ja_media_data.pipeline_repository import PipelineRepository
-from ja_media_data.lakehouse.time_travel import table_ref
+from ja_media_data.operator.product_currency import evaluate_currency
+from ja_media_data.orchestration.dagster.gateway import DagsterGateway
+from ja_media_data.orchestration.dagster.presentation import BY_STAGE, StagePresentation
+from ja_media_data.products.lineage import MaterializationCatalog
 from ja_media_data.operator.stage_status import observe_stages
-from ja_media_data.phase_d import CANONICALIZATION_POLICY_VERSION
+from ja_media_data.products.canonical_inputs.compiler import CANONICALIZATION_POLICY_VERSION
 
 
 class CanonicalizationLensProjector:
     """Compose metadata, one product page, and the current stage spine."""
 
-    def __init__(self, repository: DuckLakeRepository) -> None:
+    def __init__(
+        self,
+        repository: DuckLakeRepository,
+        gateway: DagsterGateway,
+        *,
+        spine: tuple[StagePresentation, ...],
+        job_name: str,
+    ) -> None:
         self.repository = repository
+        self.gateway = gateway
+        self.spine = spine
+        self.job_name = job_name
         self.products = CanonicalProductProjector(repository)
 
     def project(
@@ -29,7 +39,8 @@ class CanonicalizationLensProjector:
         """Build a bounded lens for the current or one historical workspace."""
 
         stages = observe_stages(
-            self.repository, snapshot_id=snapshot_id,
+            self.repository, self.gateway, self.spine, job_name=self.job_name,
+            snapshot_id=snapshot_id,
             override_revision=override_revision,
         )
         product = next(item for item in stages if item.stage == "canonical_inputs")
@@ -74,10 +85,11 @@ class CanonicalizationLensProjector:
     ) -> CanonicalizationLens:
         """Build only the paged conclusion product, without campaign summaries."""
 
-        pipeline = PipelineRepository(self.repository.connection)
-        head = pipeline.current_head("canonical_inputs", snapshot_id=snapshot_id)
+        head = MaterializationCatalog(self.repository.connection).current_head(
+            "canonical_inputs", snapshot_id=snapshot_id
+        )
         currency, stale_reason = evaluate_currency(
-            self.repository, STAGE_BY_NAME["canonical_inputs"], head,
+            self.repository, BY_STAGE["canonical_inputs"], head,
             snapshot_id=snapshot_id, override_revision=override_revision,
         )
         gates, total = self.products.page(
@@ -85,24 +97,16 @@ class CanonicalizationLensProjector:
             currency=currency, stale_reason=stale_reason,
             snapshot_id=snapshot_id, override_revision=override_revision,
         )
-        product_run_id = None
-        product_run_number = None
+        producer = None
         if head:
-            checkpoints = table_ref(
-                "run_stage_checkpoints", snapshot_id=snapshot_id,
-                alias="checkpoint",
-            )
-            row = self.repository.connection.execute(
-                f"""SELECT checkpoint.run_id, run.run_number
-                    FROM {checkpoints}
-                    LEFT JOIN pipeline_runs AS run
-                      ON run.run_id = checkpoint.run_id
-                    WHERE checkpoint.materialization_id = ?
-                    ORDER BY checkpoint.finished_at DESC LIMIT 1""",
-                [head.materialization_id],
-            ).fetchone()
-            product_run_id = str(row[0]) if row else None
-            product_run_number = int(row[1]) if row and row[1] else None
+            from ja_media_data.operator.stage_status import dagster_run_id
+            from ja_media_data.orchestration.dagster.gateway import DagsterRunNotFound
+
+            try:
+                run_id = dagster_run_id(head.run_id)
+                producer = self.gateway.get_run(run_id) if run_id else None
+            except DagsterRunNotFound:
+                producer = None
         return CanonicalizationLens(
             policy_version=CANONICALIZATION_POLICY_VERSION,
             progress=CampaignProgress(
@@ -113,8 +117,8 @@ class CanonicalizationLensProjector:
             stages=(), gates=gates, gate_total=total, gate_offset=gate_offset,
             gate_limit=gate_limit, issues=(),
             product_materialization_id=head.materialization_id if head else None,
-            product_run_id=product_run_id,
-            product_run_number=product_run_number,
+            product_run_id=producer.run_id if producer else None,
+            product_run_number=producer.run_number if producer else None,
             product_attempt_id=head.run_id if head else None,
             product_currency=currency, product_stale_reason=stale_reason,
             view_snapshot_id=snapshot_id, view_run_id=view_run_id,

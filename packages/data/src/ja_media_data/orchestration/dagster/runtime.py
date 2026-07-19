@@ -1,0 +1,116 @@
+"""Run-scoped resources shared by the collection asset adapters."""
+
+from __future__ import annotations
+
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
+from dataclasses import dataclass, field
+
+import dagster as dg
+
+from ja_media_data.lakehouse.repository import (
+    DuckLakeRepository,
+    repository_from_env,
+)
+from ja_media_data.products.episode_resolution.metadata import (
+    AniListEpisodeMetadataProvider,
+    EpisodeMetadataProvider,
+)
+from ja_media_data.storage.bronze import (
+    BronzeDocument,
+    BronzeStore,
+    bronze_store_from_env,
+)
+
+
+@dataclass
+class CanaryRuntime:
+    """Read-only source clients for a bounded resolver evaluation."""
+
+    store: BronzeStore
+    metadata_provider: EpisodeMetadataProvider
+    frozen_documents: Sequence[BronzeDocument] | None = None
+
+    def selected_documents(self, limit: int) -> tuple[BronzeDocument, ...]:
+        """Read no more than the requested number of source records."""
+
+        if self.frozen_documents is not None:
+            return tuple(self.frozen_documents[:limit])
+        return tuple(self.store.scan_documents(limit=limit))
+
+
+@dataclass
+class ProductRuntime(CanaryRuntime):
+    """Domain repository plus source clients held for one Dagster run.
+
+    A run opens the DuckLake/PostgreSQL clients once. Assets share those
+    clients because the E1 campaign deliberately uses the in-process executor.
+    Tests and frozen-slice spikes can inject documents without changing asset
+    identity or adding row-key partitions.
+    """
+
+    repository: DuckLakeRepository | None = None
+    _documents: tuple[BronzeDocument, ...] | None = field(default=None, init=False)
+
+    def corpus_documents(self) -> tuple[BronzeDocument, ...]:
+        """Return the complete declared corpus, loading it once per run."""
+
+        if self._documents is None:
+            source = (
+                self.frozen_documents
+                if self.frozen_documents is not None
+                else self.store.scan_documents(limit=None)
+            )
+            self._documents = tuple(source)
+        return self._documents
+
+    def product_repository(self) -> DuckLakeRepository:
+        """Return the repository with a narrow assertion for type checkers."""
+
+        if self.repository is None:
+            raise RuntimeError("product runtime has no repository")
+        return self.repository
+
+
+@contextmanager
+def runtime_from_env() -> Iterator[ProductRuntime]:
+    """Open configured domain clients for one Dagster execution."""
+
+    with repository_from_env() as repository:
+        yield ProductRuntime(
+            store=bronze_store_from_env(),
+            metadata_provider=AniListEpisodeMetadataProvider(),
+            repository=repository,
+        )
+
+
+@contextmanager
+def canary_runtime_from_env() -> Iterator[CanaryRuntime]:
+    """Open only read-only source clients; do not attach DuckLake."""
+
+    yield CanaryRuntime(
+        store=bronze_store_from_env(),
+        metadata_provider=AniListEpisodeMetadataProvider(),
+    )
+
+
+@dg.resource
+def product_runtime_resource(_context: dg.InitResourceContext):
+    """Dagster resource whose lifetime amortizes clients across a local run."""
+
+    with runtime_from_env() as runtime:
+        yield runtime
+
+
+@dg.resource
+def canary_runtime_resource(_context: dg.InitResourceContext):
+    """Resource for bounded evaluation with no product repository."""
+
+    with canary_runtime_from_env() as runtime:
+        yield runtime
+
+
+def hardcoded_runtime_resource(runtime: ProductRuntime) -> dg.ResourceDefinition:
+    """Inject an isolated runtime into in-process E1 integration tests."""
+
+    return dg.ResourceDefinition.hardcoded_resource(runtime)

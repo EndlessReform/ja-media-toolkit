@@ -84,9 +84,9 @@ For developers, the following files are essential for understanding the system b
 ### Lakehouse Operator Web UI
 
 The data package includes a loopback-only operator workbench for inspecting
-compiled products, stage currency, run lineage, canonical binding evidence, and
-failure queues. Repository and package `.env` files are merged automatically;
-more specific values win.
+compiled products, canonical binding decisions, and failure queues. Dagster now
+owns the asset graph and execution history; the workbench joins those public
+run/step facts to bounded DuckLake domain views.
 
 ```sh
 cd packages/data
@@ -96,6 +96,8 @@ uv run ja-data web
 ```
 
 Open [http://127.0.0.1:8765/operator](http://127.0.0.1:8765/operator). The
-current gate is intentionally read-only. Contributor concepts and storage,
-execution, caching, and UI boundaries are documented in
+current gate is intentionally read-only. Start the local Dagster control plane
+first using [`packages/data/DAGSTER.md`](packages/data/DAGSTER.md). Operator
+instructions live in the [docsite guide](site/src/content/docs/setup/operator-workbench.md),
+and contributor boundaries are documented in
 [`packages/data/ARCHITECTURE.md`](packages/data/ARCHITECTURE.md).

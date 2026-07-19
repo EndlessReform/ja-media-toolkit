@@ -8,10 +8,10 @@ from pathlib import PurePosixPath
 
 from ja_media_core.bronze import BronzeManifestError, parse_bronze_manifest
 
-from ja_media_data.bronze_store import BronzeStore
+from ja_media_data.storage.bronze import BronzeStore
 from ja_media_data.lakehouse.repository import DuckLakeRepository
-from ja_media_data.resolution_types import CaptureObservation
-from ja_media_data.resolution_fingerprints import fingerprint_observations
+from ja_media_data.products.episode_resolution.models import CaptureObservation
+from ja_media_data.products.episode_resolution.fingerprints import fingerprint_observations
 
 
 @dataclass(frozen=True)

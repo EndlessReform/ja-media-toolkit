@@ -1,831 +1,370 @@
-# Data layer and operator workbench architecture
+# Data control plane and operator architecture
 
-This guide is the starting point for contributors working in `packages/data`.
-It explains the vocabulary, storage boundaries, execution model, operator UI,
-and the failure cases that shaped them. It is intentionally more explanatory
-than an API reference: the difficult part of this package is not individual SQL
-statements, but maintaining an honest relationship between durable products,
-execution attempts, and what the operator sees.
+This is the contributor entry point for `packages/data`. It explains what the
+system does, which runtime owns each fact, and where new code belongs. The key
+rule is simple: **domain products and decisions are permanent; execution
+frameworks and model runtimes are replaceable.**
 
-The repository-wide architectural rules in [`../../AGENTS.md`](../../AGENTS.md)
-still apply. In particular, data contracts should outlive model/runtime choices,
-and new services should not be introduced merely to query internal lake data.
+## What the package does
 
-## The short mental model
+The data layer turns captured anime media into reusable products:
 
 ```text
-Bronze evidence
-    ↓
-Silver compilers and human decisions
-    ↓
-Gold projections
-    ↓
-Applications
+Garage bronze manifests/media
+  → episode-resolution proposals and quarantine
+  → automatically accepted bindings + human overrides
+  → canonical episode/subtitle inputs
+  → VAD / ASR / alignment / language products
+  → gold consumer projections
 ```
 
-Within the data package:
-
-```text
-target request
-    ↓ backward planning
-global pipeline run
-    ↓
-stage checkpoint → atomic DuckLake transaction → materialization head
-    ↓
-next independently committed checkpoint
-```
-
-The operator workbench is a read model over those facts:
-
-```text
-last committed output
-+ producing run/checkpoint
-+ latest attempt
-+ currency relative to current dependencies
-```
-
-A global run is not one database transaction. A stage checkpoint is.
-
-## Why this structure exists
-
-The first operator slice exposed a misleading but common design failure. The UI
-showed the latest table for every stage, labeled each existing table
-“materialized,” and displayed the final canonical product above them. If an
-upstream stage advanced while a downstream stage failed, the screen looked like
-one successful coherent pipeline even though it contained outputs from several
-executions.
-
-Consider two attempts:
-
-```text
-Run A: stage 1 succeeds → stage 2 succeeds → stage 3 succeeds
-Run B: stage 1 succeeds → stage 2 fails
-```
-
-The correct live workspace after Run B is:
-
-| Stage | Committed output | Latest checkpoint | Currency |
-| --- | --- | --- | --- |
-| 1 | Run B | Run B succeeded | current |
-| 2 | Run A | Run B failed | stale input |
-| 3 | Run A | Run A succeeded | transitively stale |
-
-Three independent facts are needed:
-
-1. **Output lineage:** which successful checkpoint produced the committed rows?
-2. **Execution history:** what happened the last time this stage was attempted?
-3. **Currency:** were the committed rows built from the dependency heads that
-   are current now?
-
-Conflating these facts produces attractive but false status displays. Phase 2
-therefore makes them separate durable concepts and separate UI fields.
-
-## Domain vocabulary
-
-### Product
-
-A product is a durable typed result with a semantic identity. Examples include:
-
-- `episode_resolution`: resolver proposals and quarantined evidence;
-- `accepted_bindings`: proposals admitted by an automatic policy;
-- `canonical_inputs`: selected episode inputs and their subtitle objects; and
-- `subtitle_lid`: language evidence for canonical subtitle inputs.
-
-A logical product may use more than one physical table when the row grains
-differ. `canonical_inputs`, for example, owns:
-
-- `canonical_episode_inputs`, one row per selected episode locator; and
-- `canonical_subtitle_inputs`, zero or more subtitle rows per selected episode.
-
-That is one product contract with two relations, not thirteen per-episode S3
-objects and not one global Parquet file for the entire pipeline.
-
-### Stage
-
-A stage is executable code that transforms declared input products into an
-output product. Stage declarations live in
-[`src/ja_media_data/operator/phase_d_registry.py`](src/ja_media_data/operator/phase_d_registry.py).
-
-The registry, rather than a template or route, owns dependency structure.
-
-### Recipe
-
-A recipe is the named, versioned behavior of a stage. Its revision participates
-in the build key. Changing behavior without changing the recipe revision makes
-the change invisible to automatic staleness detection; recipe revision is
-therefore a data contract, not decorative release metadata.
-
-`--force-from` exists for intentional recomputation when the declared revision
-has not changed, but it is not a substitute for versioning durable behavior.
-
-### Target
-
-A target is an operator-facing sink or useful pause point. The planner walks
-backward from a target through stage dependencies. It is not a hard-coded route
-through a linear pipeline.
-
-Examples in the current registry are `accepted-bindings`, `canonical-inputs`,
-and `subtitle-lid`.
-
-### Campaign
-
-A campaign is saved operator intent plus the lens used to inspect that intent.
-It binds:
-
-1. a target;
-2. a scope;
-3. recipe choices; and
-4. an optional stop boundary.
-
-The current `canonicalization-gate` campaign is a corpus-scoped intent to build
-canonical inputs, presented through a domain-specific binding desk.
-
-A campaign is **not**:
-
-- a database transaction;
-- a mutable percentage-complete record;
-- a scheduler;
-- one execution run; or
-- a cached copy of all stage rows.
-
-Opening a campaign reconstructs a small live read model from product heads,
-stage checkpoints, control-plane revisions, and bounded product pages.
-
-### Pipeline run
-
-A pipeline run is one operator dispatch: for example, “build subtitle LID” or
-“recompute from automatic acceptance through canonicalization.” Operators refer
-to it by a monotonically increasing `Run #N`; the opaque UUID remains an
-internal identity behind the information disclosure. It owns an ordered set of
-stage checkpoint records.
-
-The CLI creates global runs in:
-
-- [`src/ja_media_data/pipeline_cli.py`](src/ja_media_data/pipeline_cli.py) for
-  registered target closures; and
-- [`src/ja_media_data/cli.py`](src/ja_media_data/cli.py) for an applied resolver
-  pass.
-
-### Stage checkpoint
-
-A stage checkpoint records what one run did at one stage:
-
-```text
-running → reused | succeeded | failed
-```
-
-- `reused` points at an existing current materialization.
-- `succeeded` points at a newly committed or newly validated materialization.
-- `failed` has no new materialization. The previous committed output remains.
-
-A stage attempt ID identifies the actual execution. The global run ID groups
-checkpoints initiated by one dispatch.
-
-### Materialization
-
-A materialization is the durable metadata identity for one committed or
-revalidated product head. It records:
-
-- product and scope;
-- materialization ID;
-- producing stage attempt;
-- recipe revision;
-- output fingerprint;
-- structural build key;
-- exact input materialization IDs and semantic fingerprints;
-- control-plane revisions; and
-- DuckLake snapshot ID.
-
-Materialization metadata is append-only. The current head is the newest record
-for `(target, scope)`. Older metadata is retained so lineage and historical
-views do not depend on today’s head.
-
-## Global runs made from local checkpoints
-
-The model is deliberately neither “every stage is unrelated” nor “the entire
-run is atomic.” It is a global run composed from independently atomic stage
-commits.
-
-Suppose the operator runs:
-
-```sh
-uv run ja-data run subtitle-lid --force-from accepted_bindings
-```
-
-The dispatcher creates one `pipeline_runs` row. It walks the target closure in
-dependency order:
-
-```text
-accepted_bindings → canonical_inputs → subtitle_lid
-```
-
-Each checkpoint commits independently. If canonicalization succeeds but LID
-fails while reading a subtitle object:
-
-```text
-accepted_bindings  succeeded/reused
-canonical_inputs   succeeded and becomes the new head
-subtitle_lid       failed; old head remains
-global run         failed
-```
-
-This is useful partial progress, not a botched distributed transaction. The UI
-must show the new canonical head, the old LID head, and the failed LID attempt.
-
-The commit code is in
-[`src/ja_media_data/pipeline_repository.py`](src/ja_media_data/pipeline_repository.py).
-The Phase D compiler entrypoints are in
-[`src/ja_media_data/phase_d.py`](src/ja_media_data/phase_d.py).
-
-### Why not make the entire run atomic?
-
-Future stages may take hours, run on different machines, require a human gate,
-or fan out across many items. Holding one transaction across that work would be
-impossible or operationally harmful. Successful intermediate products are
-valuable checkpoints and should survive later failures.
-
-### Why have a global run at all?
-
-Without it, an operator action that considers five stages creates five unrelated
-log entries. The system cannot explain which stages were reused, which were
-attempted, where execution stopped, or what workspace the action left behind.
-The global run supplies correlation; local checkpoints supply durability.
-
-## DuckLake’s role
-
-DuckLake owns durable automatic products and execution metadata. Its data files
-live as Parquet on Garage-compatible S3 storage, while its transactional catalog
-lives in PostgreSQL. DuckDB is the embedded query/compiler process.
-
-Every committed DuckLake transaction creates a catalog snapshot. A successful
-stage replacement transaction is therefore a natural local checkpoint. Phase 2
-records the snapshot associated with each materialization and the terminal
-snapshot left by each global run.
-
-Relevant primary documentation:
-
-- [DuckLake transactions](https://ducklake.select/docs/stable/duckdb/advanced_features/transactions)
-- [DuckLake snapshots](https://ducklake.select/docs/stable/duckdb/usage/snapshots)
-- [DuckLake time travel](https://ducklake.select/docs/stable/duckdb/usage/time_travel)
-- [DuckLake snapshot expiration](https://ducklake.select/docs/stable/duckdb/maintenance/expire_snapshots)
-- [DuckLake architecture/specification](https://ducklake.select/docs/stable/specification/queries)
-- [DuckDB concurrency](https://duckdb.org/docs/stable/connect/concurrency)
-
-DuckLake supplies transactional snapshots; it does not supply our notions of
-target, recipe, campaign, global run, or stage dependency. Those semantics live
-in the execution kernel.
-
-### Time travel
-
-The operator defaults to the current workspace. Run detail pages link to the
-workspace left by that run. Historical reads use DuckLake table references such
-as:
-
-```sql
-SELECT *
-FROM canonical_episode_inputs AT (VERSION => 42);
-```
-
-The helper in
-[`src/ja_media_data/lakehouse/time_travel.py`](src/ja_media_data/lakehouse/time_travel.py)
-constructs internal trusted table references.
-
-A historical run view is not an invented atomic reconstruction. It is the
-actual mixed-generation catalog snapshot after the run’s last checkpoint.
-
-Snapshots referenced by retained runs must not be expired. No automatic
-retention job is implemented yet; snapshot expiration remains an explicit
-maintenance action until a retention policy is designed and tested.
-
-## PostgreSQL control plane
-
-Human binding overrides are small concurrent decisions with uniqueness
-invariants. They live in ordinary PostgreSQL rather than in a replaceable lake
-table. PostgreSQL enforces one current head per locator and one current locator
-per assigned capture.
-
-The implementation is in
-[`src/ja_media_data/binding_overrides.py`](src/ja_media_data/binding_overrides.py),
-with schema management in
-[`src/ja_media_data/binding_schema.py`](src/ja_media_data/binding_schema.py).
-
-Phase 2 adds a monotonic `binding_overrides` revision. An effective decision
-change advances it in the same PostgreSQL transaction that retires the previous
-head and appends the new head. A duplicate no-op decision does not advance it.
-
-The revision serves three purposes:
-
-1. exact canonicalization build inputs;
-2. cache keys; and
-3. reconstruction of overrides active in a historical run view.
-
-Wall-clock timestamps are intentionally not used as concurrency or cache tokens.
-
-## Fingerprints, build keys, lineage, and staleness
-
-These concepts answer different questions.
-
-### Output fingerprint
-
-The output fingerprint identifies semantic product content. If an upstream run
-is repeated and produces identical effective output, the fingerprint remains
-the same. Downstream products should not become stale merely because a timestamp
-or run ID changed.
-
-### Materialization ID
-
-The materialization ID identifies an exact committed/validated checkpoint. It
-answers lineage questions such as “which acceptance checkpoint did this
-canonical product consume?”
-
-### Build key
-
-The build key answers whether a product was built or validated against the
-dependency heads current at a particular moment:
-
-```text
-SHA-256(
-    product identity,
-    recipe revision,
-    declared input semantic fingerprints,
-    declared control-plane revisions
-)
-```
-
-Input metadata records both materialization IDs and fingerprints:
-
-```json
-{
-  "accepted_bindings": {
-    "materialization_id": "materialization-accepted_bindings-…",
-    "fingerprint": "…"
-  },
-  "bronze_captures": {
-    "materialization_id": "materialization-bronze_captures-…",
-    "fingerprint": "…"
-  },
-  "binding_overrides": {
-    "revision": 17
-  }
-}
-```
-
-Materialization IDs preserve exact lineage. Semantic fingerprints prevent an
-identical rerun from invalidating downstream work.
-
-### Who decides staleness?
-
-The server-side currency evaluator in
-[`src/ja_media_data/operator/currency.py`](src/ja_media_data/operator/currency.py)
-does. It combines:
-
-- dependency declarations from
-  [`operator/stage_contracts.py`](src/ja_media_data/operator/stage_contracts.py);
-- current materialization heads;
-- the registered recipe revision; and
-- relevant control-plane revisions.
-
-It returns product currency independently from execution state:
-
-```text
-missing
-current
-stale_recipe
-stale_input
-stale_override
-```
-
-The planner and UI consume that evaluator. Jinja templates never infer
-staleness from timestamps or status labels.
-
-Directly mutating a product table without advancing its materialization head is
-outside the execution contract and is deliberately invisible to staleness
-evaluation. All durable writers must commit product rows and metadata together.
-
-## Current workspace versus historical run view
-
-The current campaign screen is a live operational view. Different stages may
-legitimately show outputs from different global runs. Each stage card therefore
-shows:
-
-```text
-COMMITTED OUTPUT
-    materialization ID
-    producing global run
-    producing stage attempt
-    current/stale state
-
-LATEST CHECKPOINT
-    global run
-    reused/succeeded/failed state
-    elapsed time and failure
-```
-
-The conclusion product at the top identifies its own materialization, run, and
-attempt. If upstream heads advance, the product remains inspectable but is
-marked stale. It is never silently relabeled as the conclusion of a newer run.
-
-The run detail page shows the ordered local checkpoints and links to a
-historical workspace view at the run’s terminal DuckLake snapshot.
-
-## Query and cache architecture
-
-The first implementation reconstructed the complete campaign for every HTMX
-request. Expanding a three-row product preview to thirteen rows performed catalog
-attachment, stage summaries, counts, proposal joins, and Python slicing. That
-was an application design bug, not an inherent DuckLake cost.
-
-Phase 2 uses independently keyed projections.
-
-### Campaign state token
-
-[`operator/cache_keys.py`](src/ja_media_data/operator/cache_keys.py) reads the
-two authoritative workspace heads:
-
-- the current DuckLake snapshot ID, which advances for every committed
-  automatic-product or execution-metadata transaction; and
-- the PostgreSQL override revision, which advances for every effective human
-  binding decision.
-
-Together they provide exact invalidation—not a time-to-live guess—without
-scanning product rows, reconstructing the campaign, or reading S3 objects.
-
-### Product page
-
-The canonical product endpoint keys a DTO by durable campaign heads, filter,
-offset, and limit. [`operator/canonical_product.py`](src/ja_media_data/operator/canonical_product.py)
-pushes pagination into bounded SQL projections and reads only locator keys,
-aggregates, and the selected canonical rows for that page.
-
-It does not rebuild stage cards or campaign counters.
-
-### Candidate evidence
-
-Candidate payloads have a separate endpoint and cache key:
-
-```text
-proposal head
-+ acceptance head
-+ override revision
-+ locator
-+ historical snapshot, if selected
-```
-
-They are fetched only when the operator expands one locator.
-
-### Stage result page
-
-Stage results are keyed by the selected materialization/snapshot, stage, filter,
-offset, and limit. SQL applies `LIMIT` and `OFFSET`; the server does not load an
-entire product and slice it in Python.
-
-### Cache implementation
-
-[`operator/cache.py`](src/ja_media_data/operator/cache.py) is a thread-safe,
-bounded, process-local LRU storing typed DTOs. It contains no cursors,
-connections, credentials, or correctness state.
-
-Cache invalidation is identity-based: a changed durable head produces a new
-key. No invalidation bus or mutable “dirty” flag is needed. Old entries age out
-under the size bound.
-
-Historical snapshot keys are immutable and particularly safe to cache.
-
-## Persistent connection lifecycle
-
-DuckDB extension loading, DuckLake attachment, PostgreSQL connection setup, and
-S3 secret registration are heavyweight initialization. They must not occur per
-HTTP request.
-
-FastAPI lifespan owns an `OperatorRuntime`:
-
-```text
-OperatorRuntime
-├── RepositoryPool (two attached repositories)
-└── ProjectionCache
-```
-
-Startup in [`operator/http/app.py`](src/ja_media_data/operator/http/app.py):
-
-1. load the layered environment;
-2. apply additive DuckLake and PostgreSQL schemas once;
-3. open two fully attached repository contexts; and
-4. create the bounded projection cache.
-
-Requests borrow one repository exclusively from the LIFO pool through
-[`operator/http/dependencies.py`](src/ja_media_data/operator/http/dependencies.py).
-They return it without closing either underlying connection.
-
-Shutdown closes the pool and clears the disposable cache.
-
-The pool is intentionally two connections. This is a local, usually
-single-operator application; a configurable general-purpose pooling subsystem
-would add machinery without a measured requirement. Each borrowed DuckDB
-connection has only one user at a time.
+The first operator campaign is `canonicalization-gate`. Its checked-in TOML
+selects canonical episode and subtitle assets from the Dagster graph. Its
+workbench lens explains which captures competed, what was admitted, which
+override is active, and which capture became canonical.
 
 ## Technology stack
 
-### Durable storage
+| Concern | Technology | Why it owns the concern |
+| --- | --- | --- |
+| Asset DAG, runs, step events, queues | Dagster | Commodity orchestration and durable execution history |
+| Heavy-step dispatch | Dagster Celery executor + RabbitMQ | A native worker can attach later and drain queued work |
+| Domain tables and snapshots | DuckLake: Parquet in Garage, catalog in PostgreSQL | Open durable products with transactional replacement and time travel |
+| Human decisions | ordinary PostgreSQL | Constraints and transactions for small mutable heads |
+| Operator API/UI | FastAPI, Jinja, HTMX | Domain-specific decisions and bounded read models |
+| Heavy ML implementations | `envs/apple`, `envs/cuda` | Runtime/model dependencies stay outside the durable data package |
 
-- **DuckLake:** transactional lakehouse table/snapshot metadata.
-- **Garage/S3-compatible object storage:** Parquet data files and Bronze media
-  manifests/artifacts.
-- **PostgreSQL:** DuckLake catalog metadata plus a separate ordinary schema for
-  human override heads and revisions.
+Dagster storage and the DuckLake catalog may use the same PostgreSQL server,
+but they are different authorities. Code must never query Dagster's tables
+directly. The workbench uses public `DagsterInstance` APIs through one gateway.
 
-### Query and compilation
+## Environments and configuration
 
-- **DuckDB:** embedded SQL execution and product compilation.
-- **Python 3.13:** compiler and application implementation.
-- **Pydantic:** strict immutable DTO and planner contracts.
-- **psycopg 3:** direct PostgreSQL control-plane access.
+There are exactly three environment names:
+
+- **local** is disposable infrastructure on a contributor machine;
+- **dev** is the persistent shared integration deployment; and
+- **prod** is the eventual production deployment.
+
+Do not introduce `staging` until it has a distinct workload and lifecycle. Do
+not put spike or phase names in database schemas, object prefixes, images, or
+environment variables. Those names outlive the experiment that created them.
+
+Configuration names state both the owner and the resource. There is no generic
+`JA_MEDIA_S3_ENDPOINT_URL`: bronze and DuckLake may use different buckets,
+credentials, or endpoints. Canonical deployment variables are:
+
+| Owner | Required variables |
+| --- | --- |
+| Bronze reader | `JA_MEDIA_BRONZE_S3_ENDPOINT_URL`, `JA_MEDIA_BRONZE_BUCKET`; AWS credential chain; optional `JA_MEDIA_BRONZE_PREFIX` |
+| DuckLake | `JA_MEDIA_DATA_DATABASE_URL`, `JA_MEDIA_DUCKLAKE_DATA_PATH`, `JA_MEDIA_DUCKLAKE_S3_ENDPOINT_URL`, `JA_MEDIA_DUCKLAKE_S3_ACCESS_KEY_ID`, `JA_MEDIA_DUCKLAKE_S3_SECRET_ACCESS_KEY`; optional catalog schema and region |
+| Dagster | `DAGSTER_POSTGRES_URL`, `DAGSTER_HOME`; optional `JA_MEDIA_DAGSTER_UI_URL` |
+| Dispatch | `JA_MEDIA_CELERY_BROKER_URL` |
+| First-party APIs | `JA_MEDIA_SERVICES_ROOT_URL`; a service-specific URL only when bypassing the gateway intentionally |
+
+Container deployments receive these values from their service manager or
+Compose environment. They never mount a person's
+`~/.config/ja-media-toolkit/config.toml`. Local `ja-data` commands merge `.env`
+files from repository root to the invocation directory, with the nearest file
+winning and an already-exported process variable winning over all files.
+
+Database names and object prefixes follow `<system>_<environment>` and
+`<system>/<environment>/`. The planned shared deployment therefore uses
+`ja_media_data_dev`, `ja_media_dagster_dev`, and `ducklake/dev/`; the disposable
+overlay uses `*_local` and `ducklake/local/`.
+
+## Three runtime surfaces
+
+### Durable control plane
+
+The Dagster webserver, daemon, code location, run storage, RabbitMQ, and the
+always-on `server` worker own:
+
+- invariant asset dependencies;
+- campaign job selections;
+- run and step status, logs, retries, cancellation, and queue state;
+- dispatch to capability queues; and
+- materialization events that reference domain materialization IDs.
+
+They do not own binding decisions or reconstruct product rows.
 
 ### Operator application
 
-- **FastAPI/Starlette:** loopback HTTP and lifespan ownership.
-- **Jinja2:** server-rendered pages and fragments.
-- **HTMX:** bounded lazy navigation and fragment replacement.
-- **small static JavaScript:** carousel controls and already-loaded candidate
-  row collapsing; no client-side application state store.
+FastAPI owns:
 
-### Tooling
+- transactional operator commands such as binding overrides;
+- checked-in campaign labels, scopes, recipes/config, and domain lenses;
+- bounded DuckLake/PostgreSQL projections;
+- the graph-derived pipeline spine and curated Dagster run summaries;
+- links from domain rows to Dagster execution detail; and
+- small caches keyed by exact domain and Dagster revisions.
 
-- **uv:** dependency environments, commands, and tests.
-- **pytest:** unit and integration tests.
+FastAPI is not a scheduler or executor. Stopping it does not stop a Dagster run.
+Raw logs and generic retry/cancel controls belong in Dagster rather than being
+reimplemented in HTMX.
 
-The package deliberately does not introduce React, a separate frontend build,
-an ORM, an orchestration service, or a scheduler for the current requirements.
+### Heavy environments
 
-## Source map
+An Apple/CUDA/hosted worker receives a versioned item envelope and scoped
+Garage access. It downloads declared objects, invokes the environment-owned
+backend, uploads outputs under a fingerprinted staging prefix, and writes the
+result marker last. It does not read DuckLake, mutate overrides, select new
+work, or know the campaign DAG.
 
-| Area | Primary files |
-| --- | --- |
-| DuckLake connection/schema | `lakehouse/catalog.py`, `schema/*.sql` |
-| Product repository | `lakehouse/repository.py`, `pipeline_repository.py` |
-| Human override control plane | `binding_overrides.py`, `binding_schema.py`, `postgres_schema/*.sql` |
-| Phase D compilers | `phase_d.py`, `canonicalization.py`, `pipeline_types.py` |
-| Product/stage registry | `operator/registry.py`, `operator/phase_d_registry.py`, `operator/stage_contracts.py` |
-| Planner and currency | `operator/planning.py`, `operator/status.py`, `operator/currency.py` |
-| Campaign read model | `operator/application.py`, `operator/campaigns.py`, `operator/models.py` |
-| Run history | `execution.py`, `operator/run_history.py` |
-| Product projections | `operator/canonical_product.py`, `operator/stage_results.py` |
-| Pool/cache | `operator/runtime.py`, `operator/cache.py`, `operator/cache_keys.py` |
-| HTTP/UI | `operator/http/` |
-| CLI | `cli.py`, `pipeline_cli.py`, `operator/cli.py` |
+The server verifies the marker and objects, then publishes the domain product.
+This keeps a laptop or ephemeral GPU from receiving catalog/control credentials
+and makes a later Slurm/Runpod/Modal dispatcher a transport change rather than
+a product-schema rewrite.
 
-## Schema contracts
+## Product and execution vocabulary
 
-### `pipeline_runs`
+### Product
 
-One row per global dispatch. `terminal_snapshot_id` is the actual workspace
-snapshot left after its final stage checkpoint, regardless of success or
-failure. `run_number` is the monotonically increasing operator handle; `run_id`
-is the stable internal UUID used by links and joins. The singleton
-`pipeline_run_counter` row is advanced in the same transaction that inserts a
-run, so concurrent manual dispatches cannot receive the same number.
+A product is a durable typed domain result. A logical product may own multiple
+relations at different grains. `canonical_inputs`, for example, owns one
+episode table and one zero-to-many subtitle table. It is not one table per
+pipeline stage and not one JSON object per item.
 
-### `run_stage_checkpoints`
+Whole-collection products atomically replace all owned rows. Future
+incremental products commit at their natural key (for example one
+episode/recipe transcript) and retain a row-level current head.
 
-One row per stage considered by a global run. It records ordering, disposition,
-attempt ID, recipe/build inputs, materialization result, timing, and failure.
+### Asset and computation node
 
-### `materializations`
+A Dagster asset names a durable product surface. A multi-asset computation may
+publish several relations atomically. The graph edges exist only in
+`orchestration/dagster/assets.py`; campaign files and UI templates must not
+repeat them.
 
-Append-only current and historical product heads. A new record may represent:
+The UI stage card is presentation metadata for a Dagster computation node. It
+labels the node and names bounded domain tables used for counts. It is not a
+second executable `Stage` hierarchy.
 
-- newly written semantic output; or
-- revalidation of identical output against a new structural build key.
+### Campaign
 
-The latter is important when upstream metadata changes but effective downstream
-content remains identical.
+A campaign is a revisioned, human-named preset over the asset graph:
 
-### `binding_overrides` and `control_revisions`
+- target asset selection;
+- declared scope;
+- recipe/config bindings;
+- optional stop boundary; and
+- operator lens.
 
-Append-only human decision history with retired current heads, uniqueness
-indexes, and an exact monotonic global revision.
+Campaign TOML lives in `packages/data/campaigns/`. Startup validates job and
+asset references against loaded Dagster definitions, then resolves upstream
+closure and order from Dagster. A campaign is not a DAG, scheduler, mutable
+run, or transaction.
 
-## Failure and recovery rules
+### Run
 
-1. Product rows and their materialization record are committed in the same
-   DuckLake transaction.
-2. A stage failure never deletes or partially replaces its previous product.
-3. Earlier successful checkpoints in the same global run remain committed.
-4. A global run failure records the exception after the failed product
-   transaction has rolled back.
-5. Opening the current workspace shows committed heads plus the latest failed
-   attempt; it does not hide failure and does not discard good prior output.
-6. Opening a historical run uses its terminal snapshot and recorded override
-   revision.
-7. Cache entries are never authoritative and may always be discarded.
+A run is one Dagster execution of a campaign job. The read-only E2.1 UI uses
+Dagster's monotonic run-record storage ID as `Run #N`; the UUID remains the
+cross-system identity. If the operator application later launches runs, it may
+attach human context as Dagster tags; it must not create another run table or
+copy step state.
 
-There is a narrow crash window between a successful product commit and attaching
-the returned DuckLake snapshot ID to its materialization metadata. The product
-and materialization identity are already committed; a missing snapshot ID is a
-recoverable metadata condition rather than product loss. Before automated
-snapshot expiration is introduced, add and test a repair command that resolves
-such materializations from DuckLake commit history.
+A run is not atomic across stages or items. If 93 episode products commit and
+item 94 fails, Dagster truthfully reports a failed run while DuckLake truthfully
+reports 93 advanced item heads. The workbench joins both facts.
 
-## Current deliberate limitations
+### Materialization
 
-### Corpus commit granularity
+The domain `materializations` relation records the current and historical
+identity of a product commit:
 
-The implemented Phase D products replace complete corpus tables. A series
-filter in the UI is a read projection, not a series-scoped materialization.
-Partial series reruns require an explicit partitioned commit contract and must
-not be faked with partial deletes inside a corpus-scoped product.
+- target and scope;
+- content fingerprint;
+- recipe revision and structural build key;
+- exact input materialization/fingerprint heads;
+- producing Dagster attempt identity;
+- DuckLake snapshot; and
+- materialization ID referenced by Dagster metadata.
 
-### Manual dispatch
+Dagster events are not sufficient to interpret DuckLake after Dagster storage
+loss, and DuckLake materializations do not replace Dagster run history.
 
-There is no scheduler, sensor, worker queue, or daemon orchestrator. Operators
-run targets explicitly. The durable kernel makes stopped work inspectable and
-reusable without claiming to schedule it.
+### Currency and execution status
 
-### Read-only workbench mutations
+These are deliberately separate:
 
-The current web workbench is read-only. Human overrides are applied through the
-CLI/control-plane repository. When web mutations are added, they must use the
-same revisioned PostgreSQL transaction and show conflict failures explicitly.
+- **currency** asks whether a committed product was built from current inputs,
+  recipe, and decision revision;
+- **execution status** asks what happened during a Dagster run or step; and
+- **lineage** asks which successful run produced the current domain head.
 
-### Snapshot retention
+A failed rerun does not erase an older head. A later upstream commit may make
+that older head stale. The UI must show both rather than label every non-empty
+table “materialized.”
 
-Time travel is implemented, but automatic expiration is not. Referenced run
-snapshots must remain protected. Define retention from measured history/storage
-needs before enabling cleanup.
+Item eligibility belongs to the owning product's DuckLake query. Collection
+Dagster data versions cannot decide whether one episode is current for a given
+model, bias set, and recipe.
 
-### Stage 1 scope
+## Storage contracts
 
-An applied `resolve-sample` pass records a global resolver run/checkpoint.
-Broader Bronze hydration and future resolver entrypoints must use the same
-execution boundary before they become operator-visible writers.
+### Garage
 
-## Contributor workflow
+Garage owns immutable bronze media/manifests, DuckLake Parquet, durable media
+outputs, temporary worker staging, and compact replay bundles for protected
+runs. Celery messages never contain media bytes.
 
-### Environment
+One compressed frozen selection may temporarily identify a large run. An item
+request normally lives only in the queue and an ephemeral local file. A result
+marker is temporary commit protocol, not permanent business history.
 
-The CLI loads `.env` files from repository root through the current working
-directory, with more specific files winning. Do not print `.env` contents.
+### DuckLake
 
-From `packages/data`:
+DuckLake owns rebuildable and queryable domain products, materialization
+lineage, and compacted `worker_handoff_items`. Current heads remain usable when
+Dagster or FastAPI is unavailable. Historical product views use DuckLake
+snapshots referenced by Dagster materialization metadata.
 
-```sh
-uv sync
-uv run ja-data apply-lakehouse-schema
+The historical `pipeline_runs` and `run_stage_checkpoints` relations remain in
+old schema migrations because applied migrations are immutable. E2.1 has no
+writer or reader for them; they are inert legacy tables, not a compatibility
+surface.
+
+### PostgreSQL decision schema
+
+`binding_overrides` and `control_revisions` own active human decisions and
+exact cache invalidation. Partial unique indexes enforce one active locator
+head and prevent one capture from being bound to two locators.
+
+### Worker handoff retention
+
+Individual staging objects are deleted only after:
+
+1. the worker marker and every output object verify;
+2. the domain product commits;
+3. the handoff row compacts into DuckLake; and
+4. the protected run has a verified replay bundle when required.
+
+Protected runs are active runs, explicitly pinned runs, the newest N terminal
+runs, and the newest K successful runs for each active campaign/contract
+generation. This is run-count retention, not a wall-clock grace period.
+
+## Cache design
+
+FastAPI creates a small pool of attached DuckLake repositories and one Dagster
+gateway during lifespan startup. Routes borrow a repository; they do not
+initialize DuckDB, S3, or Dagster per request.
+
+Cache keys are intentionally narrow:
+
+```text
+campaign spine = campaign revision + domain snapshot/override + Dagster cursor
+product page   = materialization/snapshot + override + filter + offset + limit
+candidate row  = proposal head + override + locator
+run summary    = Dagster run ID + item-handoff head
 ```
 
-Schema migrations are checksum protected. Never edit an applied numbered SQL
-file; add the next migration.
+Paging from three rows to fifty is one product query. It does not load run
+history or reconstruct the campaign closure. Candidate expansion reads one
+locator only.
 
-### Inspect targets and plans
+## Module map and dependency direction
 
-```sh
-uv run ja-data targets
-uv run ja-data campaigns
-uv run ja-data plan canonicalization-gate
+```text
+products/                 framework-neutral compilers, models, commits, lineage
+storage/                  bronze, PostgreSQL decisions, compacted handoffs
+lakehouse/                DuckLake attachment, schema, time travel
+orchestration/dagster/    assets, jobs/definitions, metadata, gateway, queues
+workers/                  envelopes and transport-neutral environment invocation
+operator/models/          stable UI/API DTOs
+operator/*.py             bounded projections and application use cases
+operator/http/            FastAPI, Jinja, HTMX, CSS
+campaigns/*.toml          revisioned target/scope/lens presets, no edges
 ```
 
-### Run a target closure
+Allowed dependency direction:
 
-```sh
-uv run ja-data run canonical-inputs
-uv run ja-data run subtitle-lid --force-from canonical_inputs
+```text
+Dagster adapters → products/storage
+operator application → Dagster gateway + products/storage
+environment worker → worker contract + runtime backend
+products/storage ↛ Dagster/FastAPI/Celery
+worker invocation ↛ Dagster/FastAPI/Celery/catalog
 ```
 
-Stage names use underscores in `--force-from`; target names use hyphens.
+Do not introduce `BaseStage`, a Python campaign registry, a second planner, or
+a second execution ledger. New business logic belongs with the product that
+owns its output. New Dagster code should be thin translation and resource
+assembly.
 
-### Start the operator server
+## Local, shared development, and production
 
-```sh
-uv run ja-data web --port 8765
-```
+### Unit and integration tests
 
-Open <http://127.0.0.1:8765/operator>.
+Inject repositories and `DagsterInstance.local_temp()`. Execute real asset jobs
+in process when distribution is irrelevant. These tests prove graph, product,
+failure, and UI contracts; they do not prove delayed native claiming.
 
-The server is loopback-only by design. Startup performs schema verification and
-opens the persistent pool before accepting requests.
+### Local development
 
-### Tests
+Compose runs PostgreSQL, MinIO, RabbitMQ, Dagster webserver/daemon/code
+location, and the server worker. The FastAPI workbench runs from
+`packages/data`. A native Apple worker starts later from the checkout when the
+operator is ready to drain ML work. See [DAGSTER.md](DAGSTER.md).
 
-From the repository root:
+### Shared development and production
 
-```sh
-uv run pytest packages/data/tests
-```
+The durable stack runs on the server. A workstation connects over a private
+network using distinct least-privilege queue and Garage credentials. The
+Dagster Celery dispatcher currently also needs a Dagster-storage credential;
+that credential is dispatcher plumbing and must never enter the environment
+work envelope. The model command itself needs only request, Garage, scratch,
+and runtime/model access.
 
-The integration tests expect the disposable PostgreSQL fixture described by
-the existing lakehouse development setup. Important tests include:
+Remote deployment and infrastructure operation remain user-owned under the
+repository rules.
 
-- identical reruns reuse current product heads;
-- downstream object-read failure preserves prior complete products;
-- a global run retains earlier successful checkpoints after later failure;
-- historical run views return rows from the recorded DuckLake snapshot;
-- override revision advances atomically and not on no-op decisions;
-- HTMX product pages are bounded and candidate evidence is lazy; and
-- schema migrations are idempotent and checksum protected.
+The first shared DEV topology deliberately separates volatility:
 
-When changing execution behavior, test the failure path before polishing the
-success UI. The operator model exists primarily to make partial failure honest.
+- persistent: PostgreSQL databases, RabbitMQ, Dagster webserver, and daemon;
+- existing external data plane: Garage and first-party API gateway;
+- replaceable: code location, `server` worker, and FastAPI workbench; and
+- on demand: native Apple/CUDA workers.
 
-## Design reading
+Ordinary Python/template changes must require only restart of a replaceable
+process. Dependency or base-image changes may rebuild its image. The persistent
+webserver and daemon must not contain application code or require rebuilding
+when a product compiler changes.
 
-These references explain the system-design ideas used here. They are not all
-implementation dependencies.
+## Failure semantics
 
-### Transactions, logs, and derived data
+- No compatible heavy worker: the Dagster step remains queued; existing heads
+  remain available.
+- Worker dies before marker: retry reuses the fingerprinted staging prefix;
+  no domain head advances.
+- Marker written but acknowledgement lost: retry verifies and reuses it.
+- Server verification fails: Dagster step fails and no product head advances.
+- Later step fails: earlier commits remain and the overall run is failed.
+- FastAPI stops: Dagster continues; operator decisions are temporarily
+  unavailable.
+- Dagster UI stops: daemon/workers continue if durable services remain healthy.
+- Dagster storage is lost: product heads remain interpretable from DuckLake;
+  raw execution history is restored from Dagster PostgreSQL backups.
 
-- Martin Kleppmann, *Designing Data-Intensive Applications*, especially the
-  chapters on storage/retrieval, replication, transactions, batch processing,
-  and stream processing. The useful theme here is separating source-of-truth
-  state from rebuildable derived views.
-- Pat Helland, [“Life beyond Distributed Transactions: an Apostate’s Opinion”](https://www.cidrdb.org/cidr2007/papers/cidr07p15.pdf).
-  This motivates explicit local commits and durable progress instead of trying
-  to stretch one transaction across long multi-step work.
-- Hector Garcia-Molina and Kenneth Salem,
-  [“Sagas”](https://www.cs.cornell.edu/andru/cs711/2002fa/reading/sagas.pdf).
-  We do not implement compensating saga actions here, but the paper is useful
-  background for reasoning about global work composed from local transactions.
+## Adding a new product or campaign
 
-### Content identity and reproducible builds
+1. Define the product models, fingerprint, compiler, and idempotent commit under
+   `products/<concern>/`.
+2. Add bounded current/eligibility queries at the product's natural key.
+3. Add a thin Dagster asset that calls the product and emits materialization
+   metadata referencing the domain materialization ID.
+4. Add presentation metadata only if the workbench should expose the node.
+5. Add or revise campaign TOML to select target assets; never copy graph edges.
+6. Test success, retry/reuse, upstream change, partial failure, and the operator
+   projection against real tables.
+7. For heavy work, add a discriminated payload to `workers/contracts.py` and an
+   environment adapter. Do not make the environment import Dagster.
 
-- [Bazel build encyclopedia: dependencies and incremental builds](https://bazel.build/basics/dependencies).
-  The distinction between declared inputs and outputs is directly relevant to
-  structural build keys.
-- [Nix thesis](https://edolstra.github.io/pubs/phd-thesis.pdf), especially the
-  treatment of pure build inputs and store identities. Our lake products are
-  not a Nix store, but semantic fingerprints and explicit input heads solve a
-  related reproducibility problem.
+## Further reading
 
-### Lakehouse and snapshot mechanics
-
-- [DuckLake documentation](https://ducklake.select/docs/stable/)
-- [Apache Iceberg specification](https://iceberg.apache.org/spec/), as
-  comparative reading for snapshot-oriented table formats.
-- [Delta Lake protocol](https://github.com/delta-io/delta/blob/master/PROTOCOL.md),
-  as comparative reading for transaction-log-based lake tables.
-
-DuckLake is the implemented format. Iceberg and Delta are reading material, not
-an invitation to add another storage abstraction.
-
-### UI and operational state
-
-- Richard Cook,
-  [“How Complex Systems Fail”](https://how.complexsystems.fail/). The relevant
-  lesson is that operational interfaces must reveal degraded mixed state rather
-  than summarize it away.
-- Martin Fowler,
-  [CQRS](https://martinfowler.com/bliki/CQRS.html). The workbench uses a modest
-  read-model separation, not a full CQRS architecture; the article is useful for
-  understanding why application DTOs need not mirror write tables.
-- [HTMX documentation](https://htmx.org/docs/), particularly server-rendered
-  fragments, targets, and swaps.
-
-## Rules for extending the system
-
-### Next gate: evidence-bound operator decisions
-
-The next approved gate adds reusable primitives for an operator to resolve
-competing canonical candidates or bindings from the stage-owned evidence view.
-It is not a general workflow or approval engine.
-
-Before implementation, settle and test the decision precondition: a submitted
-choice must identify the locator and the exact proposal/canonical product head
-the operator reviewed. If that evidence changed before commit, the action must
-reject or require a fresh preview rather than silently applying an obsolete
-choice. The durable mutation should continue through the existing PostgreSQL
-`binding_overrides` transaction, including explicit unbind, while DuckLake
-products remain compiler-owned.
-
-After a successful decision, the current canonical product should become
-visibly stale through the override revision already included in its build key.
-The action must not silently launch recomputation. Preview, append decision,
-show provenance, and expose the resulting recomputation boundary are separate
-application use cases. Any broader approval inbox, remote execution, scheduler,
-or destructive action needs a new measured requirement and architectural
-review.
-
-### Adding stages, products, and widgets
-
-When adding a stage or product:
-
-1. Define the durable product grain and provenance fields first.
-2. Register the stage’s exact input products and recipe revision.
-3. Compute a structural build key only from declared durable heads.
-4. Commit rows and materialization metadata atomically.
-5. Record the stage checkpoint under a global run.
-6. Make failure preserve the previous complete product.
-7. Add a bounded read projection; never load an unbounded product into a route.
-8. Key cache entries by durable identities, not time-based guesses.
-9. Add current and stale tests, including identical-output reruns.
-10. Decide whether historical query support is meaningful for the new product.
-
-When adding an operator widget:
-
-1. State whether it shows committed output, an attempt, or both.
-2. Display the producing run/materialization when presenting a conclusion.
-3. Keep currency separate from execution status.
-4. Load stage-owned details only when the operator steps into that stage/cell.
-5. Push filtering and pagination into SQL.
-6. Do not perform object-store reads in an ordinary page request unless the
-   widget explicitly exists to inspect object contents.
-
-If a screen cannot answer “which committed output is this, which attempt last
-ran, and is the output current?”, the screen is not finished.
+- [Dagster assets](https://docs.dagster.io/guides/build/assets)
+- [Dagster jobs and execution](https://docs.dagster.io/guides/build/jobs)
+- [Dagster run executors](https://docs.dagster.io/guides/operate/run-executors)
+- [Celery task retry guidance](https://docs.celeryq.dev/en/stable/userguide/tasks.html)
+- [DuckLake specification](https://ducklake.select/)
+- Martin Fowler, [Data Mesh Principles](https://martinfowler.com/articles/data-mesh-principles.html), for product ownership vocabulary (not as a mandate for services)
+- Pat Helland, [Life Beyond Distributed Transactions](https://www.cidrdb.org/cidr2007/papers/cidr07p15.pdf), for independently committed workflow steps

@@ -5,11 +5,11 @@ import uuid
 
 import pytest
 
-from ja_media_data.bronze_store import BronzeDocument, BronzeMarker
-from ja_media_data.episode_metadata import SeriesEpisodeMetadata
+from ja_media_data.storage.bronze import BronzeDocument, BronzeMarker
+from ja_media_data.products.episode_resolution.metadata import SeriesEpisodeMetadata
 from ja_media_data.lakehouse import CatalogConfig, apply_schema, connect_catalog
 from ja_media_data.lakehouse.repository import DuckLakeRepository
-from ja_media_data.resolution_service import resolve_batch
+from ja_media_data.products.episode_resolution.compiler import resolve_batch
 
 
 class FakeStore:

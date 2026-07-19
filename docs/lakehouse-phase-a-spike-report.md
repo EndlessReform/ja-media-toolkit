@@ -15,7 +15,7 @@ work was isolated to:
 
 The six existing identity-ledger relations in PostgreSQL `public` were not
 modified. The repeatable harness is
-`packages/data/scripts/phase_a_ducklake_spike.py`; its `--reset` mode refuses
+The now-removed disposable spike harness enforced guardrails; its reset mode refused
 catalog schemas without the `_phase_a` suffix and object prefixes without a
 `phase-a` component.
 

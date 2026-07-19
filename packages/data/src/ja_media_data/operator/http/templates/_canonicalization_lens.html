@@ -33,7 +33,7 @@
         <dl>
           <dt>flow</dt><dd>{{ stage.input_rows }} in / {{ stage.output_rows }} out</dd>
           <dt>built by</dt><dd>{% if stage.output_run_id %}<a href="/operator/runs/{{ stage.output_run_id }}">Run #{{ stage.output_run_number }}</a>{% else %}legacy data{% endif %}</dd>
-          <dt>last execution</dt><dd>{% if stage.latest_run_id %}<a href="/operator/runs/{{ stage.latest_run_id }}">Run #{{ stage.latest_run_number }}</a> · {{ stage.latest_run_status }}{% else %}—{% endif %}</dd>
+          <dt>last execution</dt><dd>{% if stage.latest_run_id %}<a href="{{ stage.dagster_url }}" title="Open raw Dagster execution">Run #{{ stage.latest_run_number }}</a> · {{ stage.latest_run_status }}{% else %}—{% endif %}</dd>
           <dt>last elapsed</dt><dd>{% if stage.latest_run_duration_ms is not none %}{{ stage.latest_run_duration_ms }} ms{% else %}—{% endif %}</dd>
         </dl>
         <div class="pipeline-run">{{ internal_ids(stage.output_run_id, stage.latest_attempt_id, stage.materialization_id) }}</div>

@@ -66,11 +66,17 @@ read stable gold contracts.
 
 ### Data products, execution, and storage
 
-- The data layer owns a small explicit execution kernel: target dependencies,
-  input fingerprints, materialization history, retries through idempotent
-  commits, and operator-visible status. Manual dispatch is intentional; do not
-  introduce an orchestrator, scheduler, sensor, or work queue without a new
-  measured requirement and architectural review.
+- Dagster is the accepted data execution control plane as of Phase E2.1. It
+  owns invariant asset dependencies, runs, step status, queues, retries, and
+  generic logs. Do not recreate those concepts in FastAPI, DuckLake, a Python
+  registry, or a CLI planner. Campaign TOML selects target assets and scope;
+  Dagster remains the only owner of graph edges.
+- DuckLake remains the authority for domain products, per-item eligibility,
+  materialization lineage, and time travel. PostgreSQL remains the authority
+  for small transactional operator decisions. Dagster events reference domain
+  materialization IDs but are not a second copy of product rows. Heavy
+  environment commands receive typed item envelopes and scoped Garage access,
+  not DuckLake/control credentials or Dagster framework objects.
 - Durable tables, manifests, and media artifacts belong in the data lake in
   open, inspectable forms. DuckLake tables are Parquet on Garage with their
   transactional catalog in PostgreSQL; DuckDB is the query/compiler process,
@@ -109,6 +115,26 @@ paths, and one-off workflows may temporarily perform direct transformations or
 read lower layers. Keep the boundary visible, document why it is an exception,
 and promote stable reusable behavior into the data layer before multiple
 callers depend on it.
+
+### Resist CLI and control-surface sprawl
+
+Treat CLI commands, HTTP routes, and WebUI actions as one operator-facing API,
+not as independent conveniences. Do not add a dedicated command or endpoint for
+every campaign, stage, recipe, or intermediate product. Prefer a small set of
+general operations driven by inspectable identifiers and shared application
+services—for example, plan/run/inspect a named campaign—so the CLI and WebUI do
+not acquire separate execution semantics.
+
+Before adding a new top-level command or route, identify the distinct operator
+operation it represents and explain why an existing general operation cannot
+express it. Intermediate-stage execution should normally be a parameter or an
+advanced campaign/run option, not another permanent command. Checked-in
+campaign presets should use a human-readable declarative format when their
+contents are data (target, graph or target closure, scope, recipes, and stop
+boundaries); keep Python for executable stage implementations and validations
+that configuration cannot express safely. The registry, planner, CLI, and
+WebUI must consume the same definitions rather than maintaining parallel lists
+or special-case dispatch paths.
 
 ### Architectural decision protocol
 

@@ -1,0 +1,4 @@
+ops:
+  evaluate_resolution_canary:
+    config:
+      limit: 100

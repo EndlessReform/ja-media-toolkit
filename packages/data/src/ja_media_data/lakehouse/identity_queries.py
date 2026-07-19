@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 import duckdb
 
 if TYPE_CHECKING:
-    from ja_media_data.binding_overrides import (
+    from ja_media_data.storage.binding_overrides import (
         BindingOverrideRecord,
         BindingOverrideRepository,
     )

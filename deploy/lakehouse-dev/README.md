@@ -1,15 +1,13 @@
 # Lakehouse development stack
 
-This isolated Compose project provides the disposable infrastructure needed by
-the Phase B DuckLake schema and view tests:
+This isolated Compose project provides disposable infrastructure for DuckLake
+schema, integration, and control-plane tests:
 
 - PostgreSQL 17 as the DuckLake metadata catalog; and
 - MinIO as an optional path-style S3 development surrogate.
 
-It is not part of the shared LAN service deployment. MinIO does not replace the
-Garage compatibility spike: Phase A owns that evidence. The normal Phase B
-tests should use PostgreSQL plus a temporary local filesystem data path; only
-the opt-in storage smoke test needs MinIO.
+It is not part of the shared DEV deployment. Normal tests use PostgreSQL plus a
+temporary local filesystem data path; only opt-in storage tests need MinIO.
 
 ## Start and inspect
 
@@ -31,11 +29,10 @@ Use these host-side settings for development commands and integration tests:
 export JA_MEDIA_DATA_DATABASE_URL='postgresql://ja_media_lakehouse_test:ja_media_lakehouse_test@127.0.0.1:55432/ja_media_lakehouse_test'
 export JA_MEDIA_DUCKLAKE_CATALOG_SCHEMA='ja_media_ducklake_test'
 export JA_MEDIA_DUCKLAKE_DATA_PATH='s3://ja-media-lakehouse-test/ducklake/tests/manual/'
-export JA_MEDIA_S3_ENDPOINT_URL='http://127.0.0.1:59000'
-export JA_MEDIA_S3_ADDRESSING_STYLE='path'
-export AWS_ACCESS_KEY_ID='ja_media_lakehouse_test'
-export AWS_SECRET_ACCESS_KEY='ja-media-lakehouse-test-only'
-export AWS_DEFAULT_REGION='us-east-1'
+export JA_MEDIA_DUCKLAKE_S3_ENDPOINT_URL='http://127.0.0.1:59000'
+export JA_MEDIA_DUCKLAKE_S3_ACCESS_KEY_ID='ja_media_lakehouse_test'
+export JA_MEDIA_DUCKLAKE_S3_SECRET_ACCESS_KEY='ja-media-lakehouse-test-only'
+export JA_MEDIA_DUCKLAKE_S3_REGION='us-east-1'
 ```
 
 The normal Phase B suite supplies a temporary local data path itself and uses
@@ -46,7 +43,7 @@ generates its own isolated catalog schema and object prefix.
 The MinIO console is available at `http://127.0.0.1:59001`. It is for local
 inspection only and must not be exposed beyond the development machine.
 
-## Run Phase C with real bronze and local silver
+## Compile real bronze into local products
 
 Load the configured read-only Garage settings first, then overlay the checked-in
 local destination settings. This keeps standard AWS variables pointed at
@@ -57,7 +54,7 @@ MinIO:
 cd /path/to/ja-media-toolkit
 set -a
 source packages/data/.env
-source deploy/lakehouse-dev/phase-c.env.example
+source deploy/lakehouse-dev/local-ducklake.env.example
 set +a
 
 uv run --directory packages/data ja-data scan-bronze --limit 100
