@@ -7,6 +7,10 @@ semantics, and measured spike conclusions now live in
 operational contract lives in
 [`packages/data/DAGSTER.md`](../../packages/data/DAGSTER.md).
 
+The persistent DEV restart point, remaining infrastructure inputs, live
+acceptance sequence, and E2.2 handoff are recorded in
+[`data-dev-deployment-handoff.md`](data-dev-deployment-handoff.md).
+
 ## Constraints that carry through every gate
 
 - Dagster is the sole execution control plane. FastAPI does not plan a second
@@ -26,7 +30,9 @@ operational contract lives in
 
 ## E2.2 — supported native worker boundary
 
-Replace the E1-B proof surface rather than extending it.
+Build on the frozen transport-neutral contracts. The E1-B Dagster job, storage
+helper, smoke scripts, and object-prefix convention have been removed from the
+production surface.
 
 1. Implement `ja-data worker doctor/start --profile <name>` with checked-in
    profile configuration for capability queues and environment commands.
@@ -37,8 +43,6 @@ Replace the E1-B proof surface rather than extending it.
    compact handoff rows into DuckLake.
 5. Implement protected-run cleanup and prove retry/reuse after worker death and
    acknowledgement loss.
-6. Delete `e1b_delayed_vad`, `JA_MEDIA_E1B_*`, phase-E smoke scripts, and their
-   dedicated object-prefix conventions.
 
 Gate: a multi-episode live slice can wait with no worker, survive control-plane
 restart, drain through a native checkout, publish idempotently, and clean its
@@ -75,16 +79,18 @@ Gate: concurrent decisions cannot silently overwrite each other, the decision
 audit survives Dagster loss, execution failure cannot roll back the decision,
 and the workbench links directly to authoritative Dagster run detail.
 
-## E2.5 — deployment and cutover proof
+## E2.5 — deployment acceptance and cutover proof
 
-1. Add the shared DEV Compose/deployment surface specified in `DAGSTER.md`,
-   separating persistent services from replaceable application processes.
-2. Run canonicalization and native-worker acceptance exclusively through the
+The shared DEV Compose surface now separates Caddy/RabbitMQ/Dagster from the
+replaceable code location, server worker, and operator application. Remaining
+work is live acceptance rather than another deployment design pass.
+
+1. Run canonicalization and native-worker acceptance exclusively through the
    public campaign application service.
-3. Compare product rows/fingerprints with the prior compiler outputs.
-4. Inventory and delete the remaining proof-only executor, storage, scripts,
+2. Compare product rows/fingerprints with the prior compiler outputs.
+3. Inventory and delete the remaining proof-only executor, storage, scripts,
    variables, and fixtures.
-5. Record the exact production prerequisites and rollback boundary.
+4. Record the exact production prerequisites and rollback boundary.
 
 Gate: a code/template change restarts only replaceable DEV services; no
 supported route or CLI needs proof-era execution code; Dagster loss does not

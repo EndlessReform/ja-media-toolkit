@@ -1,0 +1,188 @@
+name: ja-media-data-dev
+
+x-app-environment: &app-environment
+  JA_MEDIA_DATA_CONFIG: /etc/ja-media/config.dev.toml
+  DAGSTER_HOME: /var/lib/dagster/home
+  DAGSTER_POSTGRES_URL: ${DAGSTER_POSTGRES_URL:?set in /etc/ja-media/.env.dev}
+  JA_MEDIA_CELERY_BROKER_URL: pyamqp://ja_media_data_dev:${RABBITMQ_PASSWORD:?set in /etc/ja-media/.env.dev}@rabbitmq:5672/ja-media-dev
+
+x-app-volumes: &app-volumes
+  - ${JA_MEDIA_DEV_CONFIG_DIR:-/etc/ja-media}/config.dev.toml:/etc/ja-media/config.dev.toml:ro
+  - ${JA_MEDIA_DEV_CONFIG_DIR:-/etc/ja-media}/.env.dev:/etc/ja-media/.env.dev:ro
+  - ./workspace.yaml:/etc/ja-media/workspace.yaml:ro
+  - ../../../packages/data/dagster/dagster.yaml:/var/lib/dagster/home/dagster.yaml:ro
+
+x-source-app-volumes: &source-app-volumes
+  - ${JA_MEDIA_DEV_CONFIG_DIR:-/etc/ja-media}/config.dev.toml:/etc/ja-media/config.dev.toml:ro
+  - ${JA_MEDIA_DEV_CONFIG_DIR:-/etc/ja-media}/.env.dev:/etc/ja-media/.env.dev:ro
+  - ./workspace.yaml:/etc/ja-media/workspace.yaml:ro
+  - ../../../packages/data/dagster/dagster.yaml:/var/lib/dagster/home/dagster.yaml:ro
+  - ../../../packages/data/src:/opt/ja-media/packages/data/src:ro
+  - ../../../packages/core/src:/opt/ja-media/packages/core/src:ro
+  - ../../../packages/data/dagster:/opt/ja-media/packages/data/dagster:ro
+
+x-app-service: &app-service
+  image: ja-media/data-dev:dependencies
+  build:
+    context: ../../..
+    dockerfile: packages/data/Dockerfile.dagster
+  init: true
+  restart: unless-stopped
+  env_file: ${JA_MEDIA_DEV_CONFIG_DIR:-/etc/ja-media}/.env.dev
+  environment: *app-environment
+  volumes: *app-volumes
+  depends_on:
+    rabbitmq:
+      condition: service_healthy
+
+services:
+  rabbitmq:
+    image: rabbitmq:4.1-management-alpine
+    hostname: rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ja_media_data_dev
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?set in /etc/ja-media/.env.dev}
+      RABBITMQ_DEFAULT_VHOST: ja-media-dev
+    ports:
+      - ${JA_MEDIA_DEV_AMQP_BIND:-127.0.0.1}:5672:5672
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  code-location:
+    <<: *app-service
+    command:
+      - dagster
+      - api
+      - grpc
+      - --host
+      - 0.0.0.0
+      - --port
+      - "4000"
+      - --module-name
+      - ja_media_data.orchestration.dagster.definitions
+    volumes: *source-app-volumes
+    healthcheck:
+      test: ["CMD", "dagster", "api", "grpc-health-check", "--host", "127.0.0.1", "--port", "4000"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+  dagster-webserver:
+    <<: *app-service
+    command:
+      - dagster-webserver
+      - --host
+      - 0.0.0.0
+      - --port
+      - "53000"
+      - --path-prefix
+      - /dagster
+      - --workspace
+      - /etc/ja-media/workspace.yaml
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      code-location:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:53000/dagster/server_info"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  dagster-daemon:
+    <<: *app-service
+    command: ["dagster-daemon", "run", "--workspace", "/etc/ja-media/workspace.yaml"]
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      code-location:
+        condition: service_healthy
+
+  server-worker:
+    <<: *app-service
+    command:
+      - dagster-celery
+      - worker
+      - start
+      - --config-yaml
+      - /opt/ja-media/packages/data/dagster/celery-container.yaml
+      - --queue
+      - server
+      - --app
+      - dagster_celery.app
+      - --loglevel
+      - INFO
+      - --
+      - --concurrency=1
+    volumes: *source-app-volumes
+
+  schema-init:
+    <<: *app-service
+    restart: "no"
+    command: ["ja-data-schema-init"]
+    volumes: *source-app-volumes
+
+  operator-web:
+    <<: *app-service
+    command:
+      - uvicorn
+      - ja_media_data.operator.http.app:create_operator_app
+      - --factory
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8766"
+    volumes: *source-app-volumes
+    depends_on:
+      code-location:
+        condition: service_healthy
+      schema-init:
+        condition: service_completed_successfully
+
+  gateway:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    ports:
+      - ${JA_MEDIA_DEV_HTTP_BIND:-127.0.0.1}:8080:8080
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      dagster-webserver:
+        condition: service_healthy
+      operator-web:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1:8080/operator"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  preflight:
+    <<: *app-service
+    profiles: ["tools"]
+    restart: "no"
+    command: ["ja-data-preflight"]
+    volumes: *source-app-volumes
+    environment:
+      <<: *app-environment
+      JA_MEDIA_PREFLIGHT_GATEWAY_URL: http://gateway:8080
+    depends_on:
+      gateway:
+        condition: service_healthy
+      schema-init:
+        condition: service_completed_successfully
+
+volumes:
+  rabbitmq-data:
+  caddy-data:
+  caddy-config:

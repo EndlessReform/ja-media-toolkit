@@ -10,7 +10,7 @@ import dagster as dg
 
 from ja_media_data.lakehouse.repository import (
     DuckLakeRepository,
-    repository_from_env,
+    repository_from_settings,
 )
 from ja_media_data.products.episode_resolution.metadata import (
     AniListEpisodeMetadataProvider,
@@ -19,7 +19,7 @@ from ja_media_data.products.episode_resolution.metadata import (
 from ja_media_data.storage.bronze import (
     BronzeDocument,
     BronzeStore,
-    bronze_store_from_env,
+    bronze_store_from_settings,
 )
 
 
@@ -44,9 +44,9 @@ class ProductRuntime(CanaryRuntime):
     """Domain repository plus source clients held for one Dagster run.
 
     A run opens the DuckLake/PostgreSQL clients once. Assets share those
-    clients because the E1 campaign deliberately uses the in-process executor.
-    Tests and frozen-slice spikes can inject documents without changing asset
-    identity or adding row-key partitions.
+    clients because the collection campaign deliberately uses the in-process
+    executor. Tests and bounded canaries can inject documents without changing
+    asset identity or adding row-key partitions.
     """
 
     repository: DuckLakeRepository | None = None
@@ -73,23 +73,23 @@ class ProductRuntime(CanaryRuntime):
 
 
 @contextmanager
-def runtime_from_env() -> Iterator[ProductRuntime]:
+def runtime_from_settings() -> Iterator[ProductRuntime]:
     """Open configured domain clients for one Dagster execution."""
 
-    with repository_from_env() as repository:
+    with repository_from_settings() as repository:
         yield ProductRuntime(
-            store=bronze_store_from_env(),
+            store=bronze_store_from_settings(),
             metadata_provider=AniListEpisodeMetadataProvider(),
             repository=repository,
         )
 
 
 @contextmanager
-def canary_runtime_from_env() -> Iterator[CanaryRuntime]:
+def canary_runtime_from_settings() -> Iterator[CanaryRuntime]:
     """Open only read-only source clients; do not attach DuckLake."""
 
     yield CanaryRuntime(
-        store=bronze_store_from_env(),
+        store=bronze_store_from_settings(),
         metadata_provider=AniListEpisodeMetadataProvider(),
     )
 
@@ -98,7 +98,7 @@ def canary_runtime_from_env() -> Iterator[CanaryRuntime]:
 def product_runtime_resource(_context: dg.InitResourceContext):
     """Dagster resource whose lifetime amortizes clients across a local run."""
 
-    with runtime_from_env() as runtime:
+    with runtime_from_settings() as runtime:
         yield runtime
 
 
@@ -106,11 +106,11 @@ def product_runtime_resource(_context: dg.InitResourceContext):
 def canary_runtime_resource(_context: dg.InitResourceContext):
     """Resource for bounded evaluation with no product repository."""
 
-    with canary_runtime_from_env() as runtime:
+    with canary_runtime_from_settings() as runtime:
         yield runtime
 
 
 def hardcoded_runtime_resource(runtime: ProductRuntime) -> dg.ResourceDefinition:
-    """Inject an isolated runtime into in-process E1 integration tests."""
+    """Inject an isolated runtime into in-process integration tests."""
 
     return dg.ResourceDefinition.hardcoded_resource(runtime)

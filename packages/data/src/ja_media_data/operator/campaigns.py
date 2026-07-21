@@ -1,38 +1,42 @@
-"""Checked-in campaign presets validated against the Dagster asset graph."""
+"""Operator projections of structurally registered Dagster campaigns."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
-import tomllib
 
 import dagster as dg
-from pydantic import BaseModel, ConfigDict, Field
 
+from ja_media_data.campaigns import CAMPAIGNS, OperatorCampaign
 from ja_media_data.operator.models import CampaignCard
 from ja_media_data.orchestration.dagster.presentation import BY_OP, StagePresentation
 
 
-_PACKAGED_DIR = Path(__file__).parents[1] / "campaigns"
-CAMPAIGN_DIR = (
-    _PACKAGED_DIR if _PACKAGED_DIR.is_dir() else Path(__file__).parents[3] / "campaigns"
-)
+@dataclass(frozen=True)
+class CampaignSpec:
+    """Read model derived from one registered :class:`OperatorCampaign`."""
 
-
-class CampaignSpec(BaseModel):
-    """Revisioned operator preset over invariant Dagster asset definitions."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    schema_version: int = Field(ge=1, le=1)
-    campaign_id: str = Field(pattern=r"^[a-z][a-z0-9-]+$")
-    revision: int = Field(ge=1)
+    campaign_id: str
+    revision: int
     label: str
     description: str
     job_name: str
-    target_assets: tuple[str, ...] = Field(min_length=1)
+    target_assets: tuple[str, ...]
     scope_kind: str
     lens_kind: str
+
+    @classmethod
+    def from_campaign(cls, campaign: OperatorCampaign) -> CampaignSpec:
+        presentation = campaign.presentation
+        return cls(
+            campaign_id=campaign.campaign_id,
+            revision=campaign.revision,
+            label=presentation.label,
+            description=presentation.description,
+            job_name=campaign.job.name,
+            target_assets=presentation.conclusion_assets,
+            scope_kind=presentation.scope_kind,
+            lens_kind=presentation.lens_kind,
+        )
 
 
 @dataclass(frozen=True)
@@ -44,11 +48,15 @@ class CampaignDefinition:
 
 
 class CampaignCatalog:
-    """Load TOML presets and reject references absent from loaded definitions."""
+    """Validate registered campaign jobs and expose their operator projections."""
 
-    def __init__(self, definitions: dg.Definitions, directory: Path = CAMPAIGN_DIR) -> None:
+    def __init__(
+        self,
+        definitions: dg.Definitions,
+        campaigns: tuple[OperatorCampaign, ...] = CAMPAIGNS,
+    ) -> None:
         self.definitions = definitions
-        self._campaigns = self._load(directory)
+        self._campaigns = self._load(campaigns)
 
     def all(self) -> tuple[CampaignDefinition, ...]:
         return tuple(self._campaigns[key] for key in sorted(self._campaigns))
@@ -59,42 +67,55 @@ class CampaignCatalog:
         except KeyError as error:
             raise KeyError(campaign_id) from error
 
-    def _load(self, directory: Path) -> dict[str, CampaignDefinition]:
+    def _load(
+        self, registered: tuple[OperatorCampaign, ...]
+    ) -> dict[str, CampaignDefinition]:
         campaigns: dict[str, CampaignDefinition] = {}
-        for path in sorted(directory.glob("*.toml")):
-            spec = CampaignSpec.model_validate(tomllib.loads(path.read_text()))
+        for campaign in registered:
+            spec = CampaignSpec.from_campaign(campaign)
             if spec.campaign_id in campaigns:
                 raise ValueError(f"duplicate campaign ID: {spec.campaign_id}")
             campaigns[spec.campaign_id] = CampaignDefinition(
                 spec=spec, spine=self._resolve_spine(spec)
             )
         if not campaigns:
-            raise ValueError(f"no campaign TOML files found in {directory}")
+            raise ValueError("no operator campaigns registered")
         return campaigns
 
     def _resolve_spine(self, spec: CampaignSpec) -> tuple[StagePresentation, ...]:
-        graph = self.definitions.resolve_asset_graph()
-        available = {key.to_user_string(): key for key in graph.get_all_asset_keys()}
-        missing = sorted(set(spec.target_assets) - available.keys())
-        if missing:
-            raise ValueError(
-                f"campaign {spec.campaign_id} references missing assets: {missing}"
-            )
-        if spec.job_name not in {
-            job.name for job in self.definitions.resolve_all_job_defs()
-        }:
+        jobs = {job.name: job for job in self.definitions.resolve_all_job_defs()}
+        if spec.job_name not in jobs:
             raise ValueError(
                 f"campaign {spec.campaign_id} references missing job: {spec.job_name}"
             )
-        targets = {available[name] for name in spec.target_assets}
-        closure = set(targets)
-        for target in targets:
-            closure.update(graph.get_ancestor_asset_keys(target))
+        job = jobs[spec.job_name]
+        selected = job.asset_layer.selected_asset_keys
+        selected_names = {key.to_user_string() for key in selected}
+        missing = sorted(set(spec.target_assets) - selected_names)
+        if missing:
+            raise ValueError(
+                f"campaign {spec.campaign_id} lens requires unselected assets: {missing}"
+            )
+        expected_tags = {
+            "ja_media/campaign": spec.campaign_id,
+            "ja_media/campaign_revision": str(spec.revision),
+            "ja_media/scope": spec.scope_kind,
+        }
+        mismatched = {
+            key: (job.tags.get(key), value)
+            for key, value in expected_tags.items()
+            if job.tags.get(key) != value
+        }
+        if mismatched:
+            raise ValueError(
+                f"campaign {spec.campaign_id} job tags diverged: {mismatched}"
+            )
+        graph = self.definitions.resolve_asset_graph()
         ordered: list[StagePresentation] = []
         seen: set[str] = set()
         for level in graph.toposorted_asset_keys_by_level:
             for key in sorted(level, key=lambda item: item.to_user_string()):
-                if key not in closure:
+                if key not in selected:
                     continue
                 node = graph.get(key)
                 assets_def = node.assets_def

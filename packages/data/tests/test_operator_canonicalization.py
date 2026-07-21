@@ -189,9 +189,7 @@ def test_combined_lens_accounts_for_quarantined_bronze_input(repository) -> None
 def test_json_html_htmx_and_static_asset_share_one_snapshot(repository) -> None:
     campaign = compile_campaign(repository)
     application = OperatorApplication(repository, campaign.gateway)
-    app = create_operator_app(
-        initialize_schema=False, runtime_factory=NoopOperatorRuntime
-    )
+    app = create_operator_app(runtime_factory=NoopOperatorRuntime)
     app.dependency_overrides[get_application] = lambda: application
 
     with TestClient(app) as client:
@@ -254,9 +252,7 @@ def test_json_html_htmx_and_static_asset_share_one_snapshot(repository) -> None:
 
 
 def test_unknown_campaign_is_404(repository) -> None:
-    app = create_operator_app(
-        initialize_schema=False, runtime_factory=NoopOperatorRuntime
-    )
+    app = create_operator_app(runtime_factory=NoopOperatorRuntime)
     app.dependency_overrides[get_application] = lambda: OperatorApplication(
         repository, empty_gateway()
     )

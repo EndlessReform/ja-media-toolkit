@@ -9,11 +9,13 @@ import psycopg
 from psycopg import sql
 
 
-_PACKAGED_SCHEMA_DIR = Path(__file__).parent / "postgres_schema"
+_PACKAGED_SCHEMA_DIR = (
+    Path(__file__).parents[1] / "migrations" / "control_postgres"
+)
 POSTGRES_SCHEMA_DIR = (
     _PACKAGED_SCHEMA_DIR
     if _PACKAGED_SCHEMA_DIR.is_dir()
-    else Path(__file__).parents[3] / "postgres_schema"
+    else Path(__file__).parents[3] / "migrations" / "control_postgres"
 )
 DEFAULT_CONTROL_SCHEMA = "ja_media_control"
 

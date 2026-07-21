@@ -89,15 +89,14 @@ owns the asset graph and execution history; the workbench joins those public
 run/step facts to bounded DuckLake domain views.
 
 ```sh
-cd packages/data
-uv sync
-uv run ja-data apply-lakehouse-schema
-uv run ja-data web
+docker compose -f deploy/data/local/compose.yaml up -d --wait
 ```
 
-Open [http://127.0.0.1:8765/operator](http://127.0.0.1:8765/operator). The
-current gate is intentionally read-only. Start the local Dagster control plane
-first using [`packages/data/DAGSTER.md`](packages/data/DAGSTER.md). Operator
-instructions live in the [docsite guide](site/src/content/docs/setup/operator-workbench.md),
-and contributor boundaries are documented in
+Open [http://127.0.0.1:8766/operator](http://127.0.0.1:8766/operator). The
+current gate is intentionally read-only. The host-side schema and web commands
+require the explicit local environment overlay in
+[`packages/data/README.md`](packages/data/README.md); do not start them from an
+arbitrary shell. Full operator instructions live in the
+[docsite guide](site/src/content/docs/setup/operator-workbench.md), and
+contributor boundaries are documented in
 [`packages/data/ARCHITECTURE.md`](packages/data/ARCHITECTURE.md).

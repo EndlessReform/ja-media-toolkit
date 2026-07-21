@@ -14,6 +14,8 @@ from typing import Mapping
 
 import dagster as dg
 
+from ja_media_data.settings import DataSettings, get_settings
+
 
 class DagsterGatewayError(RuntimeError):
     """Base for errors safe to translate at the application boundary."""
@@ -67,10 +69,11 @@ class DagsterGateway:
         self._owns_instance = owns_instance
 
     @classmethod
-    def from_env(cls) -> DagsterGateway:
+    def from_settings(cls, settings: DataSettings | None = None) -> DagsterGateway:
         """Open the configured instance once without exposing its storage layout."""
 
-        config_dir = os.environ.get("JA_MEDIA_DAGSTER_HOME")
+        configured = settings or get_settings()
+        config_dir = os.environ.get("DAGSTER_HOME")
         if config_dir is None:
             config_dir = str(Path(__file__).parents[4] / "dagster")
         try:
@@ -79,9 +82,7 @@ class DagsterGateway:
             raise DagsterUnavailable(f"cannot open Dagster instance: {error}") from error
         return cls(
             instance,
-            ui_url=os.environ.get(
-                "JA_MEDIA_DAGSTER_UI_URL", "http://127.0.0.1:53000"
-            ),
+            ui_url=configured.dagster.ui_url,
             owns_instance=True,
         )
 

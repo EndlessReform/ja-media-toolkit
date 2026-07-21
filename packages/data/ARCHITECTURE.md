@@ -18,10 +18,10 @@ Garage bronze manifests/media
   → gold consumer projections
 ```
 
-The first operator campaign is `canonicalization-gate`. Its checked-in TOML
-selects canonical episode and subtitle assets from the Dagster graph. Its
-workbench lens explains which captures competed, what was admitted, which
-override is active, and which capture became canonical.
+The first operator campaign is `canonicalization-gate`. One checked-in
+`OperatorCampaign` constructs its actual Dagster asset job and couples it to
+the workbench lens that explains which captures competed, what was admitted,
+which override is active, and which capture became canonical.
 
 ## Technology stack
 
@@ -50,23 +50,18 @@ Do not introduce `staging` until it has a distinct workload and lifecycle. Do
 not put spike or phase names in database schemas, object prefixes, images, or
 environment variables. Those names outlive the experiment that created them.
 
-Configuration names state both the owner and the resource. There is no generic
-`JA_MEDIA_S3_ENDPOINT_URL`: bronze and DuckLake may use different buckets,
-credentials, or endpoints. Canonical deployment variables are:
+`DataSettings` is the sole application configuration model. Pydantic Settings
+loads process environment over an adjacent `.env.<environment>` secrets file,
+then `config.<environment>.toml`, then typed defaults. Stable endpoints,
+buckets, prefixes, schemas, paths, and UI URLs belong in TOML. Secrets and
+framework connection strings belong in the dotenv file or service manager.
+Nested overrides use Pydantic's standard names such as
+`JA_MEDIA_BRONZE__BUCKET`; `JA_MEDIA_DATA_CONFIG` selects another TOML file.
 
-| Owner | Required variables |
-| --- | --- |
-| Bronze reader | `JA_MEDIA_BRONZE_S3_ENDPOINT_URL`, `JA_MEDIA_BRONZE_BUCKET`; AWS credential chain; optional `JA_MEDIA_BRONZE_PREFIX` |
-| DuckLake | `JA_MEDIA_DATA_DATABASE_URL`, `JA_MEDIA_DUCKLAKE_DATA_PATH`, `JA_MEDIA_DUCKLAKE_S3_ENDPOINT_URL`, `JA_MEDIA_DUCKLAKE_S3_ACCESS_KEY_ID`, `JA_MEDIA_DUCKLAKE_S3_SECRET_ACCESS_KEY`; optional catalog schema and region |
-| Dagster | `DAGSTER_POSTGRES_URL`, `DAGSTER_HOME`; optional `JA_MEDIA_DAGSTER_UI_URL` |
-| Dispatch | `JA_MEDIA_CELERY_BROKER_URL` |
-| First-party APIs | `JA_MEDIA_SERVICES_ROOT_URL`; a service-specific URL only when bypassing the gateway intentionally |
-
-Container deployments receive these values from their service manager or
-Compose environment. They never mount a person's
-`~/.config/ja-media-toolkit/config.toml`. Local `ja-data` commands merge `.env`
-files from repository root to the invocation directory, with the nearest file
-winning and an already-exported process variable winning over all files.
+Dagster's `DAGSTER_HOME`/`DAGSTER_POSTGRES_URL` and Celery's
+`JA_MEDIA_CELERY_BROKER_URL` remain environment variables because those
+frameworks consume them directly. Do not mirror every TOML field into a second
+flat environment API.
 
 Database names and object prefixes follow `<system>_<environment>` and
 `<system>/<environment>/`. The planned shared deployment therefore uses
@@ -81,7 +76,7 @@ The Dagster webserver, daemon, code location, run storage, RabbitMQ, and the
 always-on `server` worker own:
 
 - invariant asset dependencies;
-- campaign job selections;
+- executable campaign job selections;
 - run and step status, logs, retries, cancellation, and queue state;
 - dispatch to capability queues; and
 - materialization events that reference domain materialization IDs.
@@ -93,7 +88,7 @@ They do not own binding decisions or reconstruct product rows.
 FastAPI owns:
 
 - transactional operator commands such as binding overrides;
-- checked-in campaign labels, scopes, recipes/config, and domain lenses;
+- operator labels and domain lenses structurally attached to Dagster jobs;
 - bounded DuckLake/PostgreSQL projections;
 - the graph-derived pipeline spine and curated Dagster run summaries;
 - links from domain rows to Dagster execution detail; and
@@ -142,7 +137,7 @@ second executable `Stage` hierarchy.
 
 ### Campaign
 
-A campaign is a revisioned, human-named preset over the asset graph:
+A campaign is a named Dagster asset job with an operator-supported lens:
 
 - target asset selection;
 - declared scope;
@@ -150,10 +145,17 @@ A campaign is a revisioned, human-named preset over the asset graph:
 - optional stop boundary; and
 - operator lens.
 
-Campaign TOML lives in `packages/data/campaigns/`. Startup validates job and
-asset references against loaded Dagster definitions, then resolves upstream
-closure and order from Dagster. A campaign is not a DAG, scheduler, mutable
-run, or transaction.
+Campaign objects live in `ja_media_data/campaigns/`. Their factory creates the
+actual Dagster job and its identifying tags; the same object is registered in
+Dagster `Definitions` and the operator catalog. The lens declares its required
+conclusion assets, and startup refuses to load if the resolved job does not
+select them. There is no string job pointer or second target list in TOML.
+
+Dagster assets remain the source of graph edges, the campaign job remains the
+source of executable selection, and presentation metadata owns only human copy
+and lens behavior. A campaign is not another DAG, scheduler, mutable run, or
+transaction. Deployment TOML configures infrastructure; it does not define
+program structure.
 
 ### Run
 
@@ -268,12 +270,14 @@ locator only.
 products/                 framework-neutral compilers, models, commits, lineage
 storage/                  bronze, PostgreSQL decisions, compacted handoffs
 lakehouse/                DuckLake attachment, schema, time travel
+migrations/ducklake/      immutable DuckLake product migrations
+migrations/control_postgres/ immutable transactional-decision migrations
 orchestration/dagster/    assets, jobs/definitions, metadata, gateway, queues
 workers/                  envelopes and transport-neutral environment invocation
 operator/models/          stable UI/API DTOs
 operator/*.py             bounded projections and application use cases
 operator/http/            FastAPI, Jinja, HTMX, CSS
-campaigns/*.toml          revisioned target/scope/lens presets, no edges
+campaigns/                Dagster job objects bound to operator presentation
 ```
 
 Allowed dependency direction:
@@ -286,10 +290,11 @@ products/storage ↛ Dagster/FastAPI/Celery
 worker invocation ↛ Dagster/FastAPI/Celery/catalog
 ```
 
-Do not introduce `BaseStage`, a Python campaign registry, a second planner, or
-a second execution ledger. New business logic belongs with the product that
-owns its output. New Dagster code should be thin translation and resource
-assembly.
+Do not introduce `BaseStage`, a string-keyed campaign registry, a second
+planner, or a second execution ledger. The small `CAMPAIGNS` composition root
+registers actual Dagster job objects; it is not an execution registry. New
+business logic belongs with the product that owns its output. New Dagster code
+should be thin translation and resource assembly.
 
 ## Local, shared development, and production
 
@@ -353,7 +358,8 @@ when a product compiler changes.
 3. Add a thin Dagster asset that calls the product and emits materialization
    metadata referencing the domain materialization ID.
 4. Add presentation metadata only if the workbench should expose the node.
-5. Add or revise campaign TOML to select target assets; never copy graph edges.
+5. Create or revise one `OperatorCampaign`; its actual Dagster selection owns
+   execution while its lens declares and validates the conclusion it presents.
 6. Test success, retry/reuse, upstream change, partial failure, and the operator
    projection against real tables.
 7. For heavy work, add a discriminated payload to `workers/contracts.py` and an

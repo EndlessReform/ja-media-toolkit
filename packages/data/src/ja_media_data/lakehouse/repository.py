@@ -11,7 +11,7 @@ import psycopg
 from ja_media_data.storage.binding_overrides import (
     BindingOverrideRepository,
     EffectiveBindingOverrideWriter,
-    control_schema_from_env,
+    control_schema_from_settings,
 )
 from ja_media_data.storage.binding_schema import (
     apply_postgres_schema,
@@ -75,7 +75,7 @@ class DuckLakeRepository(IdentityQueries, EffectiveBindingOverrideWriter):
             ).fetchall()
         )
 @contextmanager
-def repository_from_env(
+def repository_from_settings(
     *, ensure_schema: bool = True
 ) -> Iterator[DuckLakeRepository]:
     """Attach both stores, optionally applying schemas, and close their clients.
@@ -85,8 +85,8 @@ def repository_from_env(
     side effects.
     """
 
-    config = CatalogConfig.from_env()
-    control_schema = control_schema_from_env(catalog_schema=config.metadata_schema)
+    config = CatalogConfig.from_settings()
+    control_schema = control_schema_from_settings(catalog_schema=config.metadata_schema)
     with connect_catalog(
         config, initialize_catalog=ensure_schema
     ) as connection, psycopg.connect(

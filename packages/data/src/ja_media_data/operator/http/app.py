@@ -8,7 +8,6 @@ from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from ja_media_data.lakehouse.repository import repository_from_env
 from ja_media_data.operator.runtime import OperatorRuntime
 from ja_media_data.operator.http.api_routes import router as api_router
 from ja_media_data.operator.http.html_routes import router as html_router
@@ -19,21 +18,16 @@ PACKAGE_DIR = Path(__file__).parent
 
 def create_operator_app(
     *,
-    initialize_schema: bool = True,
     runtime_factory: Callable[[], OperatorRuntime] = OperatorRuntime,
 ) -> FastAPI:
     """Construct the adapter with one application-lifetime operator runtime.
 
-    ``runtime_factory`` is an injection seam for HTTP tests. Production callers
-    keep the default so disabling schema initialization does not accidentally
-    disable the persistent DuckLake and Dagster clients.
+    ``runtime_factory`` is an injection seam for HTTP tests. Schema migration is
+    an explicit deployment one-shot and never part of WebUI startup.
     """
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        if initialize_schema:
-            with repository_from_env():
-                pass
         runtime = runtime_factory()
         app.state.operator_runtime = runtime
         try:

@@ -8,6 +8,7 @@ import uuid
 import pytest
 
 from ja_media_data.lakehouse.catalog import CatalogConfig, apply_schema, connect_catalog
+from ja_media_data.settings import DataSettings
 
 
 def _postgres_url() -> str:
@@ -18,36 +19,41 @@ def _postgres_url() -> str:
     )
 
 
-def test_ducklake_s3_settings_can_differ_from_bronze(monkeypatch) -> None:
-    monkeypatch.setenv("JA_MEDIA_DATA_DATABASE_URL", _postgres_url())
-    monkeypatch.setenv("JA_MEDIA_DUCKLAKE_DATA_PATH", "s3://silver/local/")
-    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "garage-key")
-    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "garage-secret")
-    monkeypatch.setenv("JA_MEDIA_DUCKLAKE_S3_ENDPOINT_URL", "http://minio:9000")
-    monkeypatch.setenv("JA_MEDIA_DUCKLAKE_S3_ACCESS_KEY_ID", "minio-key")
-    monkeypatch.setenv("JA_MEDIA_DUCKLAKE_S3_SECRET_ACCESS_KEY", "minio-secret")
+def test_ducklake_s3_settings_can_differ_from_bronze() -> None:
+    settings = DataSettings(
+        bronze={"endpoint_url": "https://garage.example", "bucket": "media"},
+        ducklake={
+            "postgres_url": _postgres_url(),
+            "data_path": "s3://silver/local/",
+            "s3_endpoint_url": "http://minio:9000",
+            "s3_access_key_id": "minio-key",
+            "s3_secret_access_key": "minio-secret",
+        },
+        services={"root_url": "http://services"},
+    )
 
-    config = CatalogConfig.from_env()
+    config = CatalogConfig.from_settings(settings)
 
     assert config.s3_endpoint_url == "http://minio:9000"
     assert config.s3_key_id == "minio-key"
     assert config.s3_secret == "minio-secret"
 
 
-def test_catalog_uses_stable_lakehouse_prefix_by_default(monkeypatch) -> None:
-    monkeypatch.setenv("JA_MEDIA_DATA_DATABASE_URL", _postgres_url())
-    monkeypatch.setenv("JA_MEDIA_BRONZE_BUCKET", "media")
-    monkeypatch.setenv(
-        "JA_MEDIA_DUCKLAKE_S3_ENDPOINT_URL", "https://garage.example"
+def test_catalog_uses_toml_data_path_without_inference() -> None:
+    settings = DataSettings(
+        bronze={"endpoint_url": "https://garage.example", "bucket": "media"},
+        ducklake={
+            "postgres_url": _postgres_url(),
+            "data_path": "s3://media/audio/anime/lakehouse/",
+            "s3_endpoint_url": "https://garage.example",
+            "s3_region": "garage",
+            "s3_access_key_id": "key",
+            "s3_secret_access_key": "secret",
+        },
+        services={"root_url": "http://services"},
     )
-    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "garage-key")
-    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "garage-secret")
-    monkeypatch.delenv("JA_MEDIA_DUCKLAKE_DATA_PATH", raising=False)
-    monkeypatch.delenv("JA_MEDIA_DUCKLAKE_DATA_PREFIX", raising=False)
-    monkeypatch.delenv("JA_MEDIA_DUCKLAKE_S3_REGION", raising=False)
-    monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
 
-    config = CatalogConfig.from_env()
+    config = CatalogConfig.from_settings(settings)
 
     assert config.data_path == "s3://media/audio/anime/lakehouse/"
     assert config.s3_region == "garage"
@@ -65,7 +71,7 @@ def catalog(tmp_path_factory):
     except Exception as error:
         pytest.fail(
             "Phase C2 requires the disposable PostgreSQL fixture from "
-            f"deploy/lakehouse-dev ({error})"
+            f"deploy/data/local ({error})"
         )
     assert apply_schema(connection) == [
         "001_identity.sql",

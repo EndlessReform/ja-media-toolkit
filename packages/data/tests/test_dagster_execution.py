@@ -1,4 +1,4 @@
-"""Execution semantics for the Phase E1 collection-asset proof."""
+"""Execution semantics for the canonicalization collection assets."""
 
 from __future__ import annotations
 

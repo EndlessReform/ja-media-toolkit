@@ -9,6 +9,8 @@ from typing import Protocol
 from ja_media_core.anilist_search import HttpAniListSearchClient
 from ja_media_core.http import ServiceHttpError
 
+from ja_media_data.settings import DataSettings, get_settings
+
 
 @dataclass(frozen=True)
 class SeriesEpisodeMetadata:
@@ -29,8 +31,17 @@ class EpisodeMetadataProvider(Protocol):
 class AniListEpisodeMetadataProvider:
     """Cache exact-ID metadata reads for one local resolver process."""
 
-    def __init__(self, client: HttpAniListSearchClient | None = None) -> None:
-        self._client = client or HttpAniListSearchClient()
+    def __init__(
+        self,
+        client: HttpAniListSearchClient | None = None,
+        *,
+        settings: DataSettings | None = None,
+    ) -> None:
+        if client is not None:
+            self._client = client
+        else:
+            root_url = (settings or get_settings()).services.root_url.rstrip("/")
+            self._client = HttpAniListSearchClient(f"{root_url}/api/v1/anilist")
 
     @lru_cache(maxsize=512)
     def get(self, namespace: str, series_id: str) -> SeriesEpisodeMetadata | None:

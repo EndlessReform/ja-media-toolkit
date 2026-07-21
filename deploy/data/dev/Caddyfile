@@ -1,0 +1,12 @@
+:8080 {
+	encode zstd gzip
+
+	@dagster path /dagster /dagster/*
+	handle @dagster {
+		reverse_proxy dagster-webserver:53000
+	}
+
+	handle {
+		reverse_proxy operator-web:8766
+	}
+}

@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 import pytest
 
 from ja_media_data.operator.application import OperatorApplication
+from ja_media_data.campaigns import CampaignPresentation, OperatorCampaign
 from ja_media_data.operator.campaigns import CampaignCatalog
 from ja_media_data.operator.http.app import create_operator_app
 from ja_media_data.operator.http.dependencies import get_application
@@ -21,7 +22,7 @@ from ja_media_data.workers.invocation import invoke_environment
 from operator_test_support import NoopOperatorRuntime, compile_campaign
 
 
-def test_campaign_toml_resolves_spine_from_asset_graph() -> None:
+def test_registered_campaign_resolves_spine_from_asset_graph() -> None:
     campaign = CampaignCatalog(build_definitions()).get("canonicalization-gate")
 
     assert campaign.spec.revision == 1
@@ -34,22 +35,28 @@ def test_campaign_toml_resolves_spine_from_asset_graph() -> None:
     ]
 
 
-def test_campaign_rejects_an_unknown_asset(tmp_path) -> None:
-    (tmp_path / "bad.toml").write_text(
-        """schema_version = 1
-campaign_id = "bad-campaign"
-revision = 1
-label = "Bad"
-description = "Bad reference"
-job_name = "canonicalization_campaign"
-target_assets = ["missing_asset"]
-scope_kind = "corpus"
-lens_kind = "canonicalization"
-"""
+def test_campaign_rejects_a_lens_asset_absent_from_its_job() -> None:
+    bad = OperatorCampaign.create(
+        campaign_id="bad-campaign",
+        revision=1,
+        job_name="bad_campaign",
+        selection=dg.AssetSelection.assets(
+            "canonical_episode_inputs"
+        ).required_multi_asset_neighbors(),
+        presentation=CampaignPresentation(
+            label="Bad",
+            description="Bad lens contract",
+            scope_kind="corpus",
+            lens_kind="canonicalization",
+            conclusion_assets=("missing_asset",),
+        ),
+    )
+    definitions = dg.Definitions.merge(
+        build_definitions(), dg.Definitions(jobs=[bad.job])
     )
 
-    with pytest.raises(ValueError, match="missing assets"):
-        CampaignCatalog(build_definitions(), tmp_path)
+    with pytest.raises(ValueError, match="requires unselected assets"):
+        CampaignCatalog(definitions, (bad,))
 
 
 def test_environment_command_round_trips_without_control_plane_credentials() -> None:
@@ -93,9 +100,7 @@ def test_failed_run_displays_advanced_item_heads(repository) -> None:
 
     application = OperatorApplication(repository, campaign.gateway)
     run = application.get_run(failed.run_id)
-    app = create_operator_app(
-        initialize_schema=False, runtime_factory=NoopOperatorRuntime
-    )
+    app = create_operator_app(runtime_factory=NoopOperatorRuntime)
     app.dependency_overrides[get_application] = lambda: application
     with TestClient(app) as client:
         response = client.get(f"/operator/runs/{failed.run_id}")

@@ -12,12 +12,12 @@ from .products import (
     StageObservation,
     StageResultPage,
 )
-from .runs import RunPage, RunSummary, StageCheckpointSummary
+from .runs import RunPage, RunStepSummary, RunSummary
 
 __all__ = [
     "AcceptanceObservation", "CampaignCard", "CampaignProgress",
     "CampaignSnapshot", "CandidateObservation", "CanonicalInputObservation",
     "CanonicalizationGate", "CanonicalizationLens", "ResolutionIssueObservation",
-    "RunPage", "RunSummary", "StageCheckpointSummary", "StageObservation",
+    "RunPage", "RunStepSummary", "RunSummary", "StageObservation",
     "StageResultPage",
 ]

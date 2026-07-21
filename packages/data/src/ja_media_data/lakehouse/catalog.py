@@ -8,7 +8,6 @@ DuckLake inlined rows), and callers interact with them through DuckDB SQL.
 from __future__ import annotations
 
 import hashlib
-import os
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -19,17 +18,16 @@ import duckdb
 import psycopg
 from psycopg import sql
 
+from ja_media_data.settings import DataSettings, get_settings
 
-_PACKAGED_SCHEMA_DIR = Path(__file__).parent / "schema"
+
+_PACKAGED_SCHEMA_DIR = Path(__file__).parents[1] / "migrations" / "ducklake"
 SCHEMA_DIR = (
     _PACKAGED_SCHEMA_DIR
     if _PACKAGED_SCHEMA_DIR.is_dir()
-    else Path(__file__).parents[3] / "schema"
+    else Path(__file__).parents[3] / "migrations" / "ducklake"
 )
 _IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-DEFAULT_DATA_PREFIX = "audio/anime/lakehouse"
-
-
 @dataclass(frozen=True)
 class CatalogConfig:
     """Connection settings for one DuckLake catalog and its data files."""
@@ -56,30 +54,18 @@ class CatalogConfig:
             raise ValueError("S3 data paths require endpoint, key ID, and secret")
 
     @classmethod
-    def from_env(cls) -> CatalogConfig:
-        """Load the shared catalog configuration without printing secrets."""
+    def from_settings(cls, settings: DataSettings | None = None) -> CatalogConfig:
+        """Build catalog configuration from validated deployment settings."""
 
-        postgres_url = _required_env("JA_MEDIA_DATA_DATABASE_URL")
-        data_path = os.environ.get("JA_MEDIA_DUCKLAKE_DATA_PATH")
-        if not data_path:
-            bucket = _required_env("JA_MEDIA_BRONZE_BUCKET")
-            prefix = os.environ.get(
-                "JA_MEDIA_DUCKLAKE_DATA_PREFIX", DEFAULT_DATA_PREFIX
-            ).strip("/")
-            data_path = f"s3://{bucket}/{prefix}/"
+        configured = (settings or get_settings()).ducklake
         return cls(
-            postgres_url=postgres_url,
-            metadata_schema=os.environ.get(
-                "JA_MEDIA_DUCKLAKE_CATALOG_SCHEMA", "ja_media_ducklake"
-            ),
-            data_path=data_path,
-            s3_endpoint_url=os.environ.get("JA_MEDIA_DUCKLAKE_S3_ENDPOINT_URL"),
-            s3_region=os.environ.get("JA_MEDIA_DUCKLAKE_S3_REGION")
-            or os.environ.get("AWS_DEFAULT_REGION", "garage"),
-            s3_key_id=os.environ.get("JA_MEDIA_DUCKLAKE_S3_ACCESS_KEY_ID")
-            or os.environ.get("AWS_ACCESS_KEY_ID"),
-            s3_secret=os.environ.get("JA_MEDIA_DUCKLAKE_S3_SECRET_ACCESS_KEY")
-            or os.environ.get("AWS_SECRET_ACCESS_KEY"),
+            postgres_url=configured.postgres_url,
+            metadata_schema=configured.catalog_schema,
+            data_path=configured.data_path,
+            s3_endpoint_url=configured.s3_endpoint_url,
+            s3_region=configured.s3_region,
+            s3_key_id=configured.s3_access_key_id,
+            s3_secret=configured.s3_secret_access_key,
         )
 
 
@@ -90,13 +76,6 @@ class _PostgresTarget:
     database: str
     user: str
     password: str
-
-
-def _required_env(name: str) -> str:
-    value = os.environ.get(name)
-    if not value:
-        raise RuntimeError(f"{name} must be set")
-    return value
 
 
 def _parse_postgres_url(value: str) -> _PostgresTarget:

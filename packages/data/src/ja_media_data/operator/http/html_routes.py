@@ -47,7 +47,7 @@ def run_detail(
     run_id: str,
     application: OperatorApplication = Depends(get_application),
 ) -> HTMLResponse:
-    """Explain one global run and every local checkpoint it considered."""
+    """Explain one Dagster run and each step execution it contains."""
 
     try:
         run = application.get_run(run_id)

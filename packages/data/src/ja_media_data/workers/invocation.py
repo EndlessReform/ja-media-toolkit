@@ -18,7 +18,7 @@ from ja_media_data.workers.contracts import ResultEnvelope, WorkEnvelope
 
 _FORBIDDEN_ENV = {
     "DAGSTER_POSTGRES_URL",
-    "JA_MEDIA_DATA_DATABASE_URL",
+    "JA_MEDIA_DUCKLAKE__POSTGRES_URL",
     "JA_MEDIA_CONTROL_DATABASE_URL",
 }
 

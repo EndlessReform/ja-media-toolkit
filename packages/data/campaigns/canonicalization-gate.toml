@@ -1,9 +1,0 @@
-schema_version = 1
-campaign_id = "canonicalization-gate"
-revision = 1
-label = "Binding & canonicalization desk"
-description = "Inspect resolver proposals, automatic admission, overrides, and canonical captures."
-job_name = "canonicalization_campaign"
-target_assets = ["canonical_episode_inputs", "canonical_subtitle_inputs"]
-scope_kind = "corpus"
-lens_kind = "canonicalization"

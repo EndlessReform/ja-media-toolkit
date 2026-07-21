@@ -6,7 +6,10 @@ from contextlib import ExitStack, contextmanager
 from queue import LifoQueue
 from typing import Iterator
 
-from ja_media_data.lakehouse.repository import DuckLakeRepository, repository_from_env
+from ja_media_data.lakehouse.repository import (
+    DuckLakeRepository,
+    repository_from_settings,
+)
 from ja_media_data.operator.application import OperatorApplication
 from ja_media_data.operator.cache import ProjectionCache
 from ja_media_data.operator.campaigns import CampaignCatalog
@@ -25,7 +28,7 @@ class RepositoryPool:
         try:
             for _ in range(size):
                 repository = self._stack.enter_context(
-                    repository_from_env(ensure_schema=False)
+                    repository_from_settings(ensure_schema=False)
                 )
                 self._available.put(repository)
         except Exception:
@@ -52,7 +55,7 @@ class OperatorRuntime:
     def __init__(self, *, pool_size: int = 2, cache_entries: int = 512) -> None:
         self.pool = RepositoryPool(pool_size)
         self.cache = ProjectionCache(cache_entries)
-        self.gateway = DagsterGateway.from_env()
+        self.gateway = DagsterGateway.from_settings()
         self.campaigns = CampaignCatalog(build_definitions())
 
     @contextmanager

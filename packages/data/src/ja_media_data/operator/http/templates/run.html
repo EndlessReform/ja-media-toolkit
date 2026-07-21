@@ -21,11 +21,11 @@
   <h2>Stage Executions</h2>
   <table class="data-table run-table">
     <thead><tr><th>#</th><th>Step</th><th>Result</th><th>Elapsed</th><th>Failure</th></tr></thead>
-    <tbody>{% for checkpoint in run.checkpoints %}<tr>
-      <td>{{ checkpoint.ordinal }}</td><td><strong>{{ checkpoint.stage }}</strong></td>
-      <td><span class="status {{ checkpoint.disposition }}">{{ checkpoint.disposition }}</span></td>
-      <td>{% if checkpoint.started_at and checkpoint.finished_at %}{{ ((checkpoint.finished_at - checkpoint.started_at).total_seconds() * 1000) | round | int }} ms{% else %}—{% endif %}</td>
-      <td class="error">{{ checkpoint.error or '—' }}</td>
+    <tbody>{% for step in run.steps %}<tr>
+      <td>{{ step.ordinal }}</td><td><strong>{{ step.stage }}</strong></td>
+      <td><span class="status {{ step.disposition }}">{{ step.disposition }}</span></td>
+      <td>{% if step.started_at and step.finished_at %}{{ ((step.finished_at - step.started_at).total_seconds() * 1000) | round | int }} ms{% else %}—{% endif %}</td>
+      <td class="error">{{ step.error or '—' }}</td>
     </tr>{% endfor %}</tbody>
   </table>
 </section>

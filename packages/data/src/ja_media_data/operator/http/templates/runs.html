@@ -23,7 +23,7 @@
         <td class="nowrap">{{ run.started_at.strftime('%Y-%m-%d %H:%M:%S') }} UTC</td>
         <td><span class="status {{ run.status }}">{{ run.status }}</span></td>
         <td><strong>{{ run.target }}</strong><br><a href="{{ run.dagster_url }}">Dagster detail</a></td>
-        <td>{% for checkpoint in run.checkpoints %}<div><strong>{{ checkpoint.ordinal }} {{ checkpoint.stage }}</strong> · <span class="status {{ checkpoint.disposition }}">{{ checkpoint.disposition }}</span></div>{% endfor %}</td>
+        <td>{% for step in run.steps %}<div><strong>{{ step.ordinal }} {{ step.stage }}</strong> · <span class="status {{ step.disposition }}">{{ step.disposition }}</span></div>{% endfor %}</td>
         <td class="number">{% if run.items_total is not none %}{{ run.items_succeeded }} / {{ run.items_total }} advanced{% else %}—{% endif %}</td>
         <td class="number">{{ run.terminal_snapshot_id or '—' }}</td>
         <td class="number">{% if run.duration_ms is not none %}{{ run.duration_ms }} ms{% else %}—{% endif %}</td>

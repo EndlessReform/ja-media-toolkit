@@ -13,33 +13,28 @@ joins those facts; it does not run a second pipeline engine.
 From the repository root:
 
 ```sh
-docker compose \
-  -f deploy/lakehouse-dev/compose.yaml \
-  -f deploy/lakehouse-dev/compose.dagster.yaml \
-  up -d --build --wait \
-  postgres minio minio-init rabbitmq dagster-schema-init \
-  dagster dagster-daemon dagster-server-worker
+docker compose -f deploy/data/local/compose.yaml up -d --wait
 ```
 
 Dagster is available at <http://127.0.0.1:53000>. It must be running before the
-workbench starts. The data-package environment must contain the same
-host-visible `DAGSTER_POSTGRES_URL` used by the control plane.
+workbench starts. The checked-in local TOML gives the host and containers the
+same disposable DuckLake destination.
 
 ## Start the workbench
 
 ```sh
 cd packages/data
-uv run ja-data apply-lakehouse-schema
+uv run ja-data doctor
 uv run ja-data web
 ```
 
-Open <http://127.0.0.1:8765/operator>. The command automatically merges `.env`
-files from the repository root through `packages/data`; more-specific files
-win, and already-exported variables remain authoritative.
+Open <http://127.0.0.1:8766/operator>. `pydantic-settings` loads stable values
+from `config.local.toml` and secrets from `.env.local`; no shell exports are
+required.
 
-Use `uv run ja-data web --no-schema-init` when opening an existing shared
-catalog whose migrations are managed separately. The server still creates its
-persistent clients at startup but does not apply DuckLake or PostgreSQL DDL.
+The deployment applies migrations through its one-shot schema service. The WebUI
+creates persistent clients at startup but never applies DuckLake or PostgreSQL
+DDL.
 
 ## Read the canonicalization desk
 
@@ -47,8 +42,8 @@ The conclusion product appears first. The initial three-row preview can expand
 to a server-paged product table. Expanding one candidate row performs one
 bounded locator query.
 
-The pipeline spine is derived from the checked-in campaign's target assets and
-Dagster's upstream closure:
+The pipeline spine is derived from the same registered Dagster job that the
+operator lens presents:
 
 ```text
 Resolver proposals → Automatic acceptance → Canonical inputs
@@ -85,10 +80,7 @@ domain products.
 E2.1 is read-only, so launch canonicalization from Dagster:
 
 ```sh
-docker compose \
-  -f deploy/lakehouse-dev/compose.yaml \
-  -f deploy/lakehouse-dev/compose.dagster.yaml \
-  exec -T dagster \
+docker compose -f deploy/data/local/compose.yaml exec -T dagster \
   dagster job execute \
   --module-name ja_media_data.orchestration.dagster.definitions \
   --job canonicalization_campaign

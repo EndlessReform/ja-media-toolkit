@@ -2,7 +2,8 @@
 
 import pytest
 
-from ja_media_data.storage.bronze import BronzeStore, bronze_store_from_env
+from ja_media_data.settings import DataSettings
+from ja_media_data.storage.bronze import BronzeStore, bronze_store_from_settings
 from ja_media_data.storage.bronze import _capture_id, _is_manifest_key
 
 
@@ -44,9 +45,34 @@ def test_manifest_read_rejects_changed_etag() -> None:
         )
 
 
-def test_bronze_endpoint_has_no_machine_specific_fallback(monkeypatch) -> None:
-    monkeypatch.setenv("JA_MEDIA_BRONZE_BUCKET", "media")
-    monkeypatch.delenv("JA_MEDIA_BRONZE_S3_ENDPOINT_URL", raising=False)
+def test_probe_performs_one_bounded_prefix_listing() -> None:
+    class FakeClient:
+        def list_objects_v2(self, **kwargs):
+            assert kwargs == {
+                "Bucket": "media",
+                "Prefix": "audio/anime/bronze/",
+                "MaxKeys": 1,
+            }
 
-    with pytest.raises(RuntimeError, match="must name the bronze S3 endpoint"):
-        bronze_store_from_env()
+    store = object.__new__(BronzeStore)
+    store.bucket = "media"
+    store.prefix = "audio/anime/bronze/"
+    store._client = FakeClient()
+
+    store.probe()
+
+
+def test_bronze_store_uses_typed_settings() -> None:
+    settings = DataSettings(
+        bronze={"endpoint_url": "https://garage.example", "bucket": "media"},
+        ducklake={
+            "postgres_url": "postgresql://local/test",
+            "data_path": "/tmp/ducklake",
+        },
+        services={"root_url": "http://services"},
+    )
+
+    store = bronze_store_from_settings(settings)
+
+    assert store.bucket == "media"
+    assert store.prefix == "audio/anime/bronze/"

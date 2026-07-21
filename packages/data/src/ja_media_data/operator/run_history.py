@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ja_media_data.operator.models import RunPage, RunSummary, StageCheckpointSummary
+from ja_media_data.operator.models import RunPage, RunStepSummary, RunSummary
 from ja_media_data.orchestration.dagster.gateway import DagsterGateway, RunFact
 from ja_media_data.storage.worker_handoffs import WorkerHandoffReader
 from ja_media_data.lakehouse.repository import DuckLakeRepository
@@ -44,8 +44,8 @@ class RunHistoryReader:
             error=run.error, dagster_url=run.url,
             items_succeeded=progress.succeeded if progress else None,
             items_total=progress.total if progress else None,
-            checkpoints=tuple(
-                StageCheckpointSummary(
+            steps=tuple(
+                RunStepSummary(
                     stage=step.step_key, ordinal=index,
                     disposition=step.status, started_at=step.started_at,
                     finished_at=step.finished_at, error=step.error,

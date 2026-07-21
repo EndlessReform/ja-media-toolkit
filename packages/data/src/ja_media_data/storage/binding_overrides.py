@@ -9,7 +9,6 @@ does not justify retaining an ORM or a migration framework.
 
 from __future__ import annotations
 
-import os
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
@@ -22,6 +21,7 @@ from ja_media_data.products.episode_resolution.models import BindingConflictErro
 from ja_media_data.storage.binding_schema import (
     DEFAULT_CONTROL_SCHEMA,
 )
+from ja_media_data.settings import DataSettings, get_settings
 
 
 @dataclass(frozen=True)
@@ -263,10 +263,12 @@ class EffectiveBindingOverrideWriter:
         )
 
 
-def control_schema_from_env(*, catalog_schema: str | None = None) -> str:
-    """Return the non-DuckLake PostgreSQL schema used for operator decisions."""
+def control_schema_from_settings(
+    *, catalog_schema: str | None = None, settings: DataSettings | None = None
+) -> str:
+    """Return the configured PostgreSQL schema used for operator decisions."""
 
-    control_schema = os.environ.get("JA_MEDIA_CONTROL_SCHEMA", DEFAULT_CONTROL_SCHEMA)
+    control_schema = (settings or get_settings()).control.schema_name
     if control_schema == catalog_schema:
         raise ValueError("PostgreSQL control and DuckLake catalog schemas must differ")
     return control_schema

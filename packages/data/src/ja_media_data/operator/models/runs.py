@@ -5,7 +5,7 @@ from datetime import datetime
 from ja_media_data.operator.models.base import OperatorModel
 
 
-class StageCheckpointSummary(OperatorModel):
+class RunStepSummary(OperatorModel):
     """One Dagster step execution within a campaign run."""
 
     stage: str
@@ -28,7 +28,7 @@ class RunSummary(OperatorModel):
     terminal_snapshot_id: int | None = None
     duration_ms: int | None = None
     error: str | None = None
-    checkpoints: tuple[StageCheckpointSummary, ...] = ()
+    steps: tuple[RunStepSummary, ...] = ()
     dagster_url: str
     items_succeeded: int | None = None
     items_total: int | None = None

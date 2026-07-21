@@ -1,4 +1,4 @@
-"""Structural tests for the deliberately small E1 Dagster graph."""
+"""Structural tests for the deliberately small collection asset graph."""
 
 from __future__ import annotations
 

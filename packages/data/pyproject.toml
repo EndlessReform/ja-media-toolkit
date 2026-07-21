@@ -13,13 +13,16 @@ dependencies = [
     "fastapi>=0.136,<1",
     "ja-media-core",
     "jinja2>=3.1,<4",
+    "kombu>=5.6,<6",
     "psycopg[binary]>=3.2,<4",
-    "python-dotenv>=1.2.2",
+    "pydantic-settings>=2.14.1",
     "uvicorn>=0.41,<1",
 ]
 
 [project.scripts]
 ja-data = "ja_media_data.cli:main"
+ja-data-schema-init = "ja_media_data.schema_init:main"
+ja-data-preflight = "ja_media_data.preflight:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -29,9 +32,8 @@ build-backend = "hatchling.build"
 packages = ["src/ja_media_data"]
 
 [tool.hatch.build.targets.wheel.force-include]
-schema = "ja_media_data/lakehouse/schema"
-postgres_schema = "ja_media_data/postgres_schema"
-campaigns = "ja_media_data/campaigns"
+"migrations/ducklake" = "ja_media_data/migrations/ducklake"
+"migrations/control_postgres" = "ja_media_data/migrations/control_postgres"
 
 [tool.uv.sources]
 ja-media-core = { workspace = true }
@@ -39,4 +41,5 @@ ja-media-core = { workspace = true }
 [dependency-groups]
 dev = [
     "httpx2>=2.4,<3",
+    "pytest>=9.1.0",
 ]

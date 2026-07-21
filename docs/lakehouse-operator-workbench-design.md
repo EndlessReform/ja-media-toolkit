@@ -11,12 +11,10 @@ proposed target, fixture campaign, mapped run item, or approval abstraction was
 built. The next approved gate is narrower: reusable evidence-bound operator
 decisions, applied first to competing canonical candidates and bindings.
 
-This document refines Phase D1 of
-[lakehouse-migration-phases.md](lakehouse-migration-phases.md). It describes the
-surface-neutral operator model and its CLI, HTTP, and interactive adapters. The
-first implementation remains deliberately small, but its contracts must not
-assume that the data layer is one linear episode pipeline or that Textual owns
-application logic.
+It describes the surface-neutral operator model and its CLI, HTTP, and
+interactive adapters. The first implementation remains deliberately small,
+but its contracts must not assume that the data layer is one linear episode
+pipeline or that Textual owns application logic.
 
 ## Recommendation
 
@@ -344,12 +342,12 @@ Progress is recomputed from products and gates. Changing a recipe binding
 immediately changes desired fingerprints and exposes stale downstream work; it
 does not mutate historical outputs.
 
-Small human-authored campaigns and named sets belong in the control plane. A
-checked-in TOML form is appropriate for durable shared presets. Ad hoc campaigns
-created in an interactive UI may later use a small ordinary-PostgreSQL table,
-subject to a
-separate reviewed schema decision. Local cursor/filter state belongs only in
-`~/.local/state/ja-media-toolkit/`.
+This preset proposal is superseded for executable campaigns. A supported
+campaign is now an actual Dagster job structurally coupled to an operator lens;
+deployment TOML does not duplicate job identity or asset selection. Future
+saved scopes may live in ordinary PostgreSQL, but they must parameterize a
+registered campaign rather than define another graph. Local cursor/filter state
+belongs only in `~/.local/state/ja-media-toolkit/`.
 
 ## Planning model
 
@@ -474,17 +472,15 @@ The implemented model has two execution levels:
 
 ```text
 Run
-  one global CLI/UI dispatch, human Run #, intent, machine, terminal state
+  one Dagster job execution, monotonic Run #, intent, terminal state
 
-Stage checkpoint
-  one local stage execution, exact input heads and recipe, disposition,
-  optional committed product version, timing, and failure
+Dagster step
+  one computation execution, timing, disposition, and failure
 ```
 
-Each stage checkpoint commits independently; a later failure does not erase an
-earlier successful product. Mapped per-product `RunItem` records remain a future
-option only when a stage demonstrates a real need below its current atomic
-commit grain.
+Domain products commit independently of the enclosing run; a later failure
+does not erase an earlier successful product. Compacted worker handoff rows
+provide per-item progress only for distributed stages that need it.
 
 Standard timings should include total wall time plus optional named phases:
 
@@ -627,7 +623,7 @@ different definitions of current, stale, blocked, or approved.
 The first HTTP adapter is a locally launched process:
 
 ```text
-ja-data web --port 8765    # always binds 127.0.0.1
+ja-data web --port 8766    # always binds 127.0.0.1
 ```
 
 It is not added to the shared Compose deployment, Caddy, or monitoring stack in
@@ -1000,11 +996,11 @@ failure drill-down, refresh, and browser state.
 **Gate:** document the observed interaction that requires or rejects a SPA; do
 not choose based on generic “application complexity.”
 
-### O3 — mapped run records and truthful progress (partly superseded)
+### O3 — mapped run records and truthful progress (superseded)
 
-1. Global `pipeline_runs` and local `run_stage_checkpoints` now provide truthful
-   corpus-stage history without creating a generic orchestrator database.
-   Add lower-granularity run items only after a mapped stage requires them.
+1. Dagster owns run and step history. The old `pipeline_runs` and
+   `run_stage_checkpoints` migrations are inert historical tables with no
+   application reader or writer.
 2. Add standard timing metrics and structured JSONL progress for local runs.
 3. Adapt Phase D stages to explicit commit granularity and run-item reporting.
 4. Add history-derived duration estimates.

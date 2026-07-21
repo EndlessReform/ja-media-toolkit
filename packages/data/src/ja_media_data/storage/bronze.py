@@ -9,13 +9,14 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Iterator
 
 import boto3
 from botocore.config import Config
+
+from ja_media_data.settings import DataSettings, get_settings
 
 
 @dataclass(frozen=True)
@@ -41,13 +42,22 @@ class BronzeStore:
     """List and read bronze commit markers through the S3 API."""
 
     def __init__(
-        self, *, endpoint_url: str, bucket: str, prefix: str, addressing_style: str
+        self,
+        *,
+        endpoint_url: str,
+        bucket: str,
+        prefix: str,
+        addressing_style: str,
+        access_key_id: str | None = None,
+        secret_access_key: str | None = None,
     ) -> None:
         self.bucket = bucket
         self.prefix = prefix.strip("/") + "/"
         self._client = boto3.client(
             "s3",
             endpoint_url=endpoint_url,
+            aws_access_key_id=access_key_id,
+            aws_secret_access_key=secret_access_key,
             config=Config(
                 s3={"addressing_style": addressing_style},
                 response_checksum_validation="when_required",
@@ -87,6 +97,13 @@ class BronzeStore:
                     size=item["Size"],
                     last_modified=item["LastModified"].isoformat(),
                 )
+
+    def probe(self) -> None:
+        """Confirm bounded list access without reading a bronze object body."""
+
+        self._client.list_objects_v2(
+            Bucket=self.bucket, Prefix=self.prefix, MaxKeys=1
+        )
 
     def read_manifest(
         self, key: str, *, expected_etag: str | None = None
@@ -155,22 +172,17 @@ class BronzeStore:
                     return
 
 
-def bronze_store_from_env() -> BronzeStore:
-    """Build the read-only Garage adapter from the shared bronze settings."""
+def bronze_store_from_settings(settings: DataSettings | None = None) -> BronzeStore:
+    """Build the read-only Garage adapter from validated deployment settings."""
 
-    bucket = os.environ.get("JA_MEDIA_BRONZE_BUCKET")
-    if not bucket:
-        raise RuntimeError("JA_MEDIA_BRONZE_BUCKET must name the bronze bucket")
-    endpoint_url = os.environ.get("JA_MEDIA_BRONZE_S3_ENDPOINT_URL")
-    if not endpoint_url:
-        raise RuntimeError(
-            "JA_MEDIA_BRONZE_S3_ENDPOINT_URL must name the bronze S3 endpoint"
-        )
+    configured = (settings or get_settings()).bronze
     return BronzeStore(
-        endpoint_url=endpoint_url,
-        bucket=bucket,
-        prefix=os.environ.get("JA_MEDIA_BRONZE_PREFIX", "audio/anime/bronze"),
-        addressing_style=os.environ.get("JA_MEDIA_S3_ADDRESSING_STYLE", "path"),
+        endpoint_url=configured.endpoint_url,
+        bucket=configured.bucket,
+        prefix=configured.prefix,
+        addressing_style=configured.addressing_style,
+        access_key_id=configured.access_key_id,
+        secret_access_key=configured.secret_access_key,
     )
 
 

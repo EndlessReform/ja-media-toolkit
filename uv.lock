@@ -902,14 +902,16 @@ dependencies = [
     { name = "fastapi" },
     { name = "ja-media-core" },
     { name = "jinja2" },
+    { name = "kombu" },
     { name = "psycopg", extra = ["binary"] },
-    { name = "python-dotenv" },
+    { name = "pydantic-settings" },
     { name = "uvicorn" },
 ]
 
 [package.dev-dependencies]
 dev = [
     { name = "httpx2" },
+    { name = "pytest" },
 ]
 
 [package.metadata]
@@ -923,13 +925,17 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.136,<1" },
     { name = "ja-media-core", editable = "packages/core" },
     { name = "jinja2", specifier = ">=3.1,<4" },
+    { name = "kombu", specifier = ">=5.6,<6" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2,<4" },
-    { name = "python-dotenv", specifier = ">=1.2.2" },
+    { name = "pydantic-settings", specifier = ">=2.14.1" },
     { name = "uvicorn", specifier = ">=0.41,<1" },
 ]
 
 [package.metadata.requires-dev]
-dev = [{ name = "httpx2", specifier = ">=2.4,<3" }]
+dev = [
+    { name = "httpx2", specifier = ">=2.4,<3" },
+    { name = "pytest", specifier = ">=9.1.0" },
+]
 
 [[package]]
 name = "ja-media-media"
