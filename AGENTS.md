@@ -12,13 +12,40 @@ Utilities for processing and managing local media files (e.g., anime, podcasts, 
 - **Media Management**: E.g. splitting audio based on voice activity (VAD), and aligning community subtitles to actual audio.
 - **Mining & Analytics**: Diarizing audio for speaker separation and visualizing content for shadowing or sentence mining.
 
-### Services
-Infrastructure and APIs that facilitate the tools and coordinate data:
-- **Data Mirrors**: Local mirrors of heavyweight datasets (e.g., Kitsunekko) to reduce dependency on upstream git repos.
-- **Metadata Bridges**: Crosswalk services to resolve IDs across various anime databases (TVDB, MAL, AniList, etc.).
-- **Static Surfaces**: Documentation and search interfaces for transcript corpuses.
-
 *Note: These examples are illustrative; the system is designed to evolve as new language learning workflows are identified.*
+
+## Repo structure
+
+See [docs/monorepo-philosophy.md](docs/monorepo-philosophy.md) for the full rationale if needed.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the durable ASR/config/backend boundaries.
+
+**Documentation Strategy:**
+- **User/Developer facing content** (guides, setup, references) lives in `site/src/content/docs/`. This is the default place for documenting new features.
+    - NOTE! This uses Astro Starlight, so the page title in frontmatter is shown by default. Only write headings at H2 or below, don't write a page title as this is redundant.
+- **Internal design/architectural notes** live in `docs/`.
+
+```text
+.
+├── compose.yaml           # Docker orchestration for the full service stack
+├── AGENTS.md              # Agent guidelines and repo map
+├── docs/                  # Internal design & architectural notes
+├── site/                  # User-facing documentation site (Astro/Starlight)
+│   └── Caddyfile          # Unified API Gateway & Static site config
+├── packages/              # Shared libraries (workspace members)
+│   ├── core/              # Shared contracts, config, and transcript formats
+│   ├── data/              # DuckLake compiler and local operator workbench
+│   ├── frontend/          # CLI entrypoints and TUI surfaces
+│   └── media/             # Media processing utilities
+├── envs/                  # Platform-specific runtimes & dependencies
+│   ├── apple/             # MacBook workflows (MLX, Metal, local ASR/VAD)
+│   ├── inference/         # Dedicated inference runtimes
+│   └── services/          # Service deployments (Kitsunekko API, etc.)
+├── examples/              # Fixtures and sample media for smoke-testing
+├── input/                 # Local input storage
+├── output/                # Local output storage
+├── scripts/               # Operational glue and experiments
+└── pyproject.toml         # Workspace coordination
+```
 
 ## Philosophy
 
@@ -29,117 +56,20 @@ Infrastructure and APIs that facilitate the tools and coordinate data:
     - Explain _why_ key decisions were made
     - Ensure config has nontrivial examples
 
-## Data lake
+### Resist sprawl
 
-The repository is evolving from a collection of direct input-to-application
-tools and narrow services into a proper data layer built around **compiled data
-products** and a pragmatic **medallion architecture**. This is a gradual
-migration, not a requirement to rewrite every existing component at once.
-
-Use these layers consistently:
-
-- **Bronze** is immutable or append-oriented captured evidence: source media,
-  extracted streams, provider files, source manifests, and provenance. Bronze
-  may contain strong hints such as an AniList ID without claiming that inferred
-  episode identity, language, timing, or quality is correct.
-- **Silver** is normalized, enriched, validated, or joined data compiled from
-  bronze: normalized inventories, measured LID, episode hints and bindings,
-  aligned subtitles, portable audio, and selected audio/subtitle pairs. Silver
-  results must retain exact input and recipe/model versions.
-- **Gold** is a consumer-ready projection with an explicit policy: episode
-  bundles, Audiobookshelf inputs, application indexes, pinned datasets, and
-  publication layouts. Gold is the normal boundary consumed by human-facing
-  applications and services.
-
-The default direction is therefore:
-
-```text
-bronze evidence -> silver compilation/enrichment -> gold projection -> application
-```
-
-Audiobookshelf and similar consumers should eventually consume gold products,
-not independently repeat `input -> application output` transformations. Avoid
-pushing durable work such as LID, episode resolution, alignment, or selection
-policy into application request paths merely because that is where the first
-caller appeared. Put reusable compilation in the data layer and let consumers
-read stable gold contracts.
-
-### Data products, execution, and storage
-
-- Dagster is the accepted data execution control plane as of Phase E2.1. It
-  owns invariant asset dependencies, runs, step status, queues, retries, and
-  generic logs. Do not recreate those concepts in FastAPI, DuckLake, a Python
-  registry, or a CLI planner. Campaign TOML selects target assets and scope;
-  Dagster remains the only owner of graph edges.
-- DuckLake remains the authority for domain products, per-item eligibility,
-  materialization lineage, and time travel. PostgreSQL remains the authority
-  for small transactional operator decisions. Dagster events reference domain
-  materialization IDs but are not a second copy of product rows. Heavy
-  environment commands receive typed item envelopes and scoped Garage access,
-  not DuckLake/control credentials or Dagster framework objects.
-- Durable tables, manifests, and media artifacts belong in the data lake in
-  open, inspectable forms. DuckLake tables are Parquet on Garage with their
-  transactional catalog in PostgreSQL; DuckDB is the query/compiler process,
-  not a durable database file or separate copy of the data.
-- Resolver episode identity is a replaceable proposal product. A separately
-  versioned automatic policy admits proposals before canonicalization; the
-  Phase D policy intentionally admits every resolver proposal. Human binding
-  decisions are the approved transactional exception: the small
-  `binding_overrides` relation lives directly in PostgreSQL so partial unique
-  indexes can enforce active locator and capture heads. Canonicalization applies
-  an active override (including an explicit unbind) before choosing the latest
-  automatically accepted source capture for each locator.
-- Partitioning should reflect a semantically useful recomputation and backfill
-  boundary. Keep lower-granularity IDs as row-level provenance when making them
-  partitions would harm navigation or create needless orchestration overhead.
-- Preserve strong known grouping hints such as AniList ID in keys or metadata
-  when doing so improves operation and does not falsely promote an inference to
-  accepted identity.
-
-### Resist service and API sprawl
-
-The API surface is already large enough that adding another microservice is no
-longer a neutral choice. Do not create a service merely to make internal bronze
-or silver data queryable to another repository component. Prefer data-layer
-assets, durable lake artifacts, shared contracts, and embedded/local query
-engines unless there is a concrete application or operational requirement for
-an always-on API.
-
-Existing narrow mirrors and metadata bridges—such as Kitsunekko and anime ID
-crosswalk wrappers—may remain as-is while they are useful. Consolidate them only
-when a real migration benefit justifies the disruption. New human-facing APIs
-should normally expose gold contracts rather than raw lake internals.
-
-Escape hatches are allowed. Interactive tools, experiments, latency-sensitive
-paths, and one-off workflows may temporarily perform direct transformations or
-read lower layers. Keep the boundary visible, document why it is an exception,
-and promote stable reusable behavior into the data layer before multiple
-callers depend on it.
-
-### Resist CLI and control-surface sprawl
-
-Treat CLI commands, HTTP routes, and WebUI actions as one operator-facing API,
-not as independent conveniences. Do not add a dedicated command or endpoint for
-every campaign, stage, recipe, or intermediate product. Prefer a small set of
-general operations driven by inspectable identifiers and shared application
-services—for example, plan/run/inspect a named campaign—so the CLI and WebUI do
-not acquire separate execution semantics.
-
-Before adding a new top-level command or route, identify the distinct operator
-operation it represents and explain why an existing general operation cannot
-express it. Intermediate-stage execution should normally be a parameter or an
-advanced campaign/run option, not another permanent command. Checked-in
-campaign presets should use a human-readable declarative format when their
-contents are data (target, graph or target closure, scope, recipes, and stop
-boundaries); keep Python for executable stage implementations and validations
-that configuration cannot express safely. The registry, planner, CLI, and
-WebUI must consume the same definitions rather than maintaining parallel lists
-or special-case dispatch paths.
+This monorepo already has a significant public API surface to maintain. Avoid adding new contracts unless strongly user-requested or clearly necessary.
+- **Services**: Ensure that each service has a clear semantic use.
+    - Do not create services merely to query internal bronze/silver data; prefer data-layer assets, durable artifacts, or embedded query engines. New human-facing APIs should normally expose gold contracts.
+    - Ex. If there is a new data source (e.g. a new subtitle repository for subtitle service, a new crosswalk), see how you can (ideally) add new parameters or (at most) a new endpoint before adding a brand-new service.
+- **CLI/Control Surfaces**: Avoid dedicated commands or endpoints for every campaign, stage, or recipe. Prefer a small set of general operations (e.g., plan/run/inspect) driven by identifiers.
+- **API Design**: New top-level routes/commands must represent a distinct operation that existing ones cannot express. Intermediate-stage execution should be a parameter, debug option, or library, not a command.
+- **Escape Hatches**: Interactive tools or experiments may temporarily read lower layers or perform direct transformations, but these must be visible and promoted to the data layer if they become stable/reused.
+- **Legacy**: Existing narrow mirrors and metadata bridges may remain until a real migration benefit justifies the disruption.
 
 ### Architectural decision protocol
 
-The user wants strong architectural recommendations, not automatic deference,
-but consequential data-layer choices require informed sign-off. Before treating
+Consequential choices require informed sign-off. Before treating
 a high-level choice as settled, explain:
 
 1. the concrete user/domain problem being solved;
@@ -155,10 +85,14 @@ Lead with the recommendation and work backward from the problem. Clearly label
 repository facts, existing proposals, new recommendations, and approved
 decisions. Proposed plan documents provide context; they are not automatically
 approved architecture. Do not respond to disagreement by reflexively abandoning
-a recommendation: reassess the evidence, then defend it concretely or explain
-why another choice is better. The user is learning parts of this stack, so
+a recommendation, but also work to understand the user need that prompted the disagreement before replying. Reassess the evidence, then defend it concretely or explain
+why another choice better suits the user's needs. The user is learning parts of this stack, so
 define framework concepts in terms of this media pipeline before relying on
 framework jargon.
+
+## Data Lake
+
+The system uses a medallion architecture (Bronze $\rightarrow$ Silver $\rightarrow$ Gold) for data processing and management. Most transformations and data compilation should occur within this layer. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for technical details on the storage stack and orchestration.
 
 ## File Size Limits — This Must Never Be Allowed to Happen Again™
 
@@ -251,34 +185,6 @@ The services are typically deployed as a suite of containers coordinated by `com
 - **macOS Note**: If using OrbStack or Docker Desktop on Mac, verify active containers with `docker ps` to confirm port mapping.
 - **Gateway**: The `site/Caddyfile` defines the unified routing. It serves the static docsite and reverse-proxies `/api/v1/*` requests to the backend services (e.g., `anime-crosswalk` and `kitsunekko-subtitles`).
 
-
-## Repo structure
-
-See [docs/monorepo-philosophy.md](docs/monorepo-philosophy.md) for the full rationale if needed.
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the durable ASR/config/backend boundaries.
-
-**Documentation Strategy:**
-- **User/Developer facing content** (guides, setup, references) lives in `site/src/content/docs/`. This is the default place for documenting new features.
-    - NOTE! This uses Astro Starlight, so the page title in frontmatter is shown by default. Only write headings at H2 or below, don't write a page title as this is redundant.
-- **Internal design/architectural notes** live in `docs/`.
-
-```text
-.
-├── compose.yaml           # Docker orchestration for the full service stack
-├── AGENTS.md              # Agent guidelines and repo map
-├── docs/                  # Internal design & architectural notes
-├── site/                  # User-facing documentation site (Astro/Starlight)
-│   └── Caddyfile          # Unified API Gateway & Static site config
-├── packages/              # Shared libraries (workspace members)
-│   ├── core/              # Shared contracts, config, and transcript formats
-│   └── frontend/          # CLI entrypoints and TUI surfaces
-├── envs/                  # Platform-specific runtimes & dependencies
-│   ├── apple/             # MacBook workflows (MLX, Metal, local ASR/VAD)
-│   ├── cuda/              # Nvidia workstation workflows (CUDA ASR)
-│   └── services/          # Service deployments (Kitsunekko API, etc.)
-├── examples/              # Fixtures and sample media for smoke-testing
-└── pyproject.toml         # Workspace coordination
-```
 
 ---
 ## Toolchain
@@ -391,4 +297,4 @@ config at runtime; never hard-code private service URLs into repo files.
 When adding or substantially changing a service, use
 [the add-service skill](.agents/skills/add-service/SKILL.md). It covers the
 complete vertical slice: runtime, core SDK, tests, Compose/Caddy integration,
-`/healthz`, `/metrics`, Prometheus discovery, and docsite updates.
+/healthz, /metrics, Prometheus discovery, and docsite updates.
