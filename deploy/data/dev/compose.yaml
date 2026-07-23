@@ -3,6 +3,7 @@ name: ja-media-data-dev
 x-app-environment: &app-environment
   JA_MEDIA_DATA_CONFIG: /etc/ja-media/config.dev.toml
   DAGSTER_HOME: /var/lib/dagster/home
+  FTLANG_CACHE: /var/cache/ja-media/fasttext
   DAGSTER_POSTGRES_URL: ${DAGSTER_POSTGRES_URL:?set in /etc/ja-media/.env.dev}
   JA_MEDIA_CELERY_BROKER_URL: pyamqp://ja_media_data_dev:${RABBITMQ_PASSWORD:?set in /etc/ja-media/.env.dev}@rabbitmq:5672/ja-media-dev
 
@@ -10,22 +11,12 @@ x-app-volumes: &app-volumes
   - ${JA_MEDIA_DEV_CONFIG_DIR:-/etc/ja-media}/config.dev.toml:/etc/ja-media/config.dev.toml:ro
   - ${JA_MEDIA_DEV_CONFIG_DIR:-/etc/ja-media}/.env.dev:/etc/ja-media/.env.dev:ro
   - ./workspace.yaml:/etc/ja-media/workspace.yaml:ro
-  - ../../../packages/data/dagster/dagster.yaml:/var/lib/dagster/home/dagster.yaml:ro
-
-x-source-app-volumes: &source-app-volumes
-  - ${JA_MEDIA_DEV_CONFIG_DIR:-/etc/ja-media}/config.dev.toml:/etc/ja-media/config.dev.toml:ro
-  - ${JA_MEDIA_DEV_CONFIG_DIR:-/etc/ja-media}/.env.dev:/etc/ja-media/.env.dev:ro
-  - ./workspace.yaml:/etc/ja-media/workspace.yaml:ro
-  - ../../../packages/data/dagster/dagster.yaml:/var/lib/dagster/home/dagster.yaml:ro
-  - ../../../packages/data/src:/opt/ja-media/packages/data/src:ro
-  - ../../../packages/core/src:/opt/ja-media/packages/core/src:ro
-  - ../../../packages/data/dagster:/opt/ja-media/packages/data/dagster:ro
+  - ./dagster.yaml:/var/lib/dagster/home/dagster.yaml:ro
+  - fasttext-cache:/var/cache/ja-media/fasttext
 
 x-app-service: &app-service
-  image: ja-media/data-dev:dependencies
-  build:
-    context: ../../..
-    dockerfile: packages/data/Dockerfile.dagster
+  image: ${JA_MEDIA_DATA_IMAGE:?run ./control reconcile <digest-pinned-image>}
+  pull_policy: missing
   init: true
   restart: unless-stopped
   env_file: ${JA_MEDIA_DEV_CONFIG_DIR:-/etc/ja-media}/.env.dev
@@ -66,7 +57,6 @@ services:
       - "4000"
       - --module-name
       - ja_media_data.orchestration.dagster.definitions
-    volumes: *source-app-volumes
     healthcheck:
       test: ["CMD", "dagster", "api", "grpc-health-check", "--host", "127.0.0.1", "--port", "4000"]
       interval: 5s
@@ -108,6 +98,9 @@ services:
 
   server-worker:
     <<: *app-service
+    # Celery treats SIGTERM as a warm shutdown. Give an in-flight server task
+    # time to finish before Compose escalates to SIGKILL during replacement.
+    stop_grace_period: 5m
     command:
       - dagster-celery
       - worker
@@ -122,13 +115,11 @@ services:
       - INFO
       - --
       - --concurrency=1
-    volumes: *source-app-volumes
 
   schema-init:
     <<: *app-service
     restart: "no"
     command: ["ja-data-schema-init"]
-    volumes: *source-app-volumes
 
   operator-web:
     <<: *app-service
@@ -140,7 +131,6 @@ services:
       - 0.0.0.0
       - --port
       - "8766"
-    volumes: *source-app-volumes
     depends_on:
       code-location:
         condition: service_healthy
@@ -172,7 +162,6 @@ services:
     profiles: ["tools"]
     restart: "no"
     command: ["ja-data-preflight"]
-    volumes: *source-app-volumes
     environment:
       <<: *app-environment
       JA_MEDIA_PREFLIGHT_GATEWAY_URL: http://gateway:8080
@@ -186,3 +175,4 @@ volumes:
   rabbitmq-data:
   caddy-data:
   caddy-config:
+  fasttext-cache:

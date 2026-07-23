@@ -1,0 +1,118 @@
+#!/bin/sh
+# Operate the persistent DEV bundle without a monorepo checkout.
+set -eu
+
+die() {
+    printf 'data-dev: %s\n' "$*" >&2
+    exit 1
+}
+
+need() {
+    command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
+}
+
+bundle_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+config_dir=${JA_MEDIA_DEV_CONFIG_DIR:-/etc/ja-media}
+secret_env="$config_dir/.env.dev"
+image_env="$bundle_dir/.image.env"
+
+# The adjacent state file is authoritative after selection. Do not let an old
+# interactive-shell export silently override it during a later operation.
+unset JA_MEDIA_DATA_IMAGE
+
+need docker
+docker compose version >/dev/null 2>&1 || die "Docker Compose v2 is unavailable"
+[ -f "$secret_env" ] || die "missing protected environment: $secret_env"
+[ -f "$config_dir/config.dev.toml" ] || die "missing configuration: $config_dir/config.dev.toml"
+
+compose() {
+    if [ -f "$image_env" ]; then
+        docker compose \
+            --env-file "$secret_env" \
+            --env-file "$image_env" \
+            --file "$bundle_dir/compose.yaml" \
+            "$@"
+    else
+        docker compose \
+            --env-file "$secret_env" \
+            --file "$bundle_dir/compose.yaml" \
+            "$@"
+    fi
+}
+
+valid_image() {
+    printf '%s\n' "$1" \
+        | grep -Eq '^[^[:space:]]+@sha256:[0-9a-f]{64}$'
+}
+
+selected_image() {
+    [ -f "$image_env" ] || die "no image selected; run: ./control reconcile <image@sha256:digest>"
+    image=$(sed -n 's/^JA_MEDIA_DATA_IMAGE=//p' "$image_env")
+    valid_image "$image" || die "invalid image selection in $image_env"
+    printf '%s\n' "$image"
+}
+
+write_image() {
+    image=$1
+    valid_image "$image" || die "image must be a digest-pinned OCI reference"
+    umask 077
+    temporary=$(mktemp "$bundle_dir/.image.env.XXXXXX")
+    trap 'rm -f "$temporary"' 0 HUP INT TERM
+    printf 'JA_MEDIA_DATA_IMAGE=%s\n' "$image" >"$temporary"
+    mv "$temporary" "$image_env"
+    trap - 0 HUP INT TERM
+}
+
+preflight() {
+    compose --profile tools run --rm --no-deps preflight
+}
+
+update() {
+    [ "$#" -eq 1 ] || die "usage: ./control update <image@sha256:digest>"
+    image=$1
+    valid_image "$image" || die "image must be a digest-pinned OCI reference"
+    previous=none
+    if [ -f "$image_env" ]; then
+        previous=$(selected_image)
+    fi
+
+    docker pull "$image"
+    JA_MEDIA_DATA_IMAGE="$image" compose run --rm --no-deps schema-init
+    write_image "$image"
+    if ! compose up -d --no-deps --force-recreate --wait \
+        code-location server-worker operator-web; then
+        die "application replacement failed; previous image was $previous"
+    fi
+    if ! preflight; then
+        die "preflight failed; inspect the deployment or roll back to $previous"
+    fi
+    printf 'deployed=%s\n' "$image"
+}
+
+reconcile() {
+    [ "$#" -le 1 ] || die "usage: ./control reconcile [image@sha256:digest]"
+    if [ "$#" -eq 1 ]; then
+        docker pull "$1"
+        write_image "$1"
+    else
+        selected_image >/dev/null
+    fi
+    compose pull
+    compose up -d --wait
+    preflight
+    printf 'deployed=%s\n' "$(selected_image)"
+}
+
+command=${1:-}
+if [ "$#" -gt 0 ]; then shift; fi
+case "$command" in
+    update|rollback) update "$@" ;;
+    reconcile) reconcile "$@" ;;
+    preflight) [ "$#" -eq 0 ] || die "usage: ./control preflight"; preflight ;;
+    status)
+        [ "$#" -eq 0 ] || die "usage: ./control status"
+        printf 'selected=%s\n' "$(selected_image)"
+        compose ps
+        ;;
+    *) die "usage: ./control {reconcile [image]|update image|rollback image|preflight|status}" ;;
+esac

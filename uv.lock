@@ -860,33 +860,44 @@ source = { editable = "packages/core" }
 dependencies = [
     { name = "fasttext-langdetect" },
     { name = "httpx" },
-    { name = "numpy" },
     { name = "parse-torrent-title" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pysrt" },
+]
+
+[package.optional-dependencies]
+audio = [
+    { name = "numpy" },
     { name = "soundfile" },
 ]
 
 [package.dev-dependencies]
 dev = [
+    { name = "numpy" },
     { name = "pytest" },
+    { name = "soundfile" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "fasttext-langdetect", specifier = ">=1.0.5" },
     { name = "httpx", specifier = ">=0.28,<1" },
-    { name = "numpy" },
+    { name = "numpy", marker = "extra == 'audio'", specifier = ">=2.4.4" },
     { name = "parse-torrent-title", specifier = ">=2.8.2" },
     { name = "pydantic", specifier = ">=2.13.4" },
     { name = "pydantic-settings", specifier = ">=2.14.1" },
     { name = "pysrt", specifier = ">=1.1.2" },
-    { name = "soundfile", specifier = ">=0.13.1" },
+    { name = "soundfile", marker = "extra == 'audio'", specifier = ">=0.13.1" },
 ]
+provides-extras = ["audio"]
 
 [package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=9.1.0" }]
+dev = [
+    { name = "numpy", specifier = ">=2.4.4" },
+    { name = "pytest", specifier = ">=9.1.0" },
+    { name = "soundfile", specifier = ">=0.13.1" },
+]
 
 [[package]]
 name = "ja-media-data"

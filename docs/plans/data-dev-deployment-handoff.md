@@ -1,7 +1,11 @@
 # Data DEV deployment handoff
 
 Status: repository implementation complete; remote DEV provisioning and live
-acceptance pending. Written 2026-07-19 for continuation in a new task.
+acceptance pending. Written 2026-07-19 for continuation in a new task. The
+checkout-based commands below are historical restart context; the proposed
+OCI publishing flow and checkout-free acceptance prerequisite now live at the
+top of
+[`lakehouse-phase-e2-control-plane-and-workers.md`](lakehouse-phase-e2-control-plane-and-workers.md).
 
 The durable architecture is documented in
 [`packages/data/ARCHITECTURE.md`](../../packages/data/ARCHITECTURE.md), and the
@@ -39,8 +43,8 @@ only the restart point for unfinished deployment work.
 - The obsolete migration plan that recommended retiring Dagster was deleted.
   Durable conclusions were retained in `packages/data/ARCHITECTURE.md`.
 
-The working tree contains this complete increment but has not yet been
-committed. Review `git status` before adding unrelated work.
+This repository-side increment has been committed. Review `git status` before
+starting the packaging prerequisite or E2.2 work.
 
 ## Validation already completed
 
@@ -156,11 +160,11 @@ commands.
 
 ## Commit boundary
 
-After review and live acceptance, commit the current increment as the DEV
-control-plane/configuration cutover. Do not mix E2.2 native-worker behavior into
-that commit. The deployment itself is user-owned; an agent may prepare or
-validate repository changes locally but must not connect to the VM or restart
-remote services.
+The DEV control-plane/configuration cutover is already a distinct repository
+increment. Keep the proposed packaging prerequisite and E2.2 native-worker
+behavior in later reviewable increments. The deployment itself is user-owned;
+an agent may prepare or validate repository changes locally but must not
+connect to the VM or restart remote services.
 
 ## Next gate: E2.2 supported native worker
 

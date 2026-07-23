@@ -114,7 +114,7 @@ Example `envs/apple/pyproject.toml`:
 name = "ja-media-apple"
 requires-python = ">=3.13"
 dependencies = [
-  "ja-media-core",
+  "ja-media-core[audio]",
   "ja-media-frontend",
   "ja-media-media",
   "mlx-audio",
@@ -136,7 +136,7 @@ Example `envs/cuda/pyproject.toml`:
 name = "ja-media-cuda"
 requires-python = ">=3.13"
 dependencies = [
-  "ja-media-core",
+  "ja-media-core[audio]",
   "ja-media-frontend",
   "ja-media-media",
   "torch",
@@ -178,6 +178,12 @@ This keeps dependency ownership obvious:
 - Heavy but platform-neutral inference clients live in `envs/inference`.
 - service dependencies live in `envs/services`.
 - shared packages stay cheap to install.
+
+`ja-media-core` contains source-coordinate audio contracts without installing a
+sample-processing stack. Environments that import `ja_media_core.audio` to
+probe, decode, or materialize samples must request `ja-media-core[audio]`.
+Contract-only consumers such as services, orchestration, and remote inference
+clients should keep the base dependency.
 
 ## Contracts, Not Frameworks
 

@@ -102,9 +102,11 @@ ACLs. Before starting the DEV Compose file, provide:
 5. Backup coverage for both PostgreSQL databases. Compose owns RabbitMQ's
    persistent volume, DEV vhost, and application principal.
 
-No new PostgreSQL server, MinIO deployment, public ingress, or container
-registry is required for the first DEV increment. The deployment home is
-[`deploy/data/dev/`](../../deploy/data/dev/).
+No new PostgreSQL server, MinIO deployment, or public ingress is required. The
+application image is pulled by digest from the configured OCI registry. The
+self-contained deployment home is
+[`deploy/data/dev/`](../../deploy/data/dev/); the VM does not clone this
+repository.
 
 The DEV topology separates volatility:
 
@@ -116,17 +118,15 @@ The DEV topology separates volatility:
 The supported first-time sequence is:
 
 ```sh
-docker compose --env-file /etc/ja-media/.env.dev \
-  -f deploy/data/dev/compose.yaml config --quiet
-docker compose --env-file /etc/ja-media/.env.dev \
-  -f deploy/data/dev/compose.yaml up -d --build --wait
-docker compose --env-file /etc/ja-media/.env.dev \
-  -f deploy/data/dev/compose.yaml --profile tools run --rm preflight
+cd /opt/ja-media-data-dev
+docker login registry.example.internal
+./control reconcile '<registry>/ja-media/data-dev@sha256:<digest>'
 ```
 
-Changing product Python or templates restarts only `code-location`,
-`server-worker`, and `operator-web`. Only Caddy port 8080 and AMQP port 5672
-are published; Dagster's and FastAPI's internal ports are not host APIs.
+Normal `control update` and `control rollback` operations recreate only
+`code-location`, `server-worker`, and `operator-web`; full `reconcile` is for
+deployment-definition changes. Only Caddy port 8080 and AMQP port 5672 are
+published; Dagster's and FastAPI's internal ports are not host APIs.
 
 ## Acceptance contract
 
