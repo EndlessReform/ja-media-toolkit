@@ -1,7 +1,10 @@
+import asyncio
 import json
 from pathlib import Path
 
 from ja_media_core.transcripts import SubtitleCue
+from textual.app import App
+from textual.widgets import TextArea
 
 from subtitle_alignment.review_data import (
     ReviewCase,
@@ -10,6 +13,10 @@ from subtitle_alignment.review_data import (
     track_stats,
 )
 from subtitle_alignment.review_audio import _audio_object_key
+from subtitle_alignment.review_full_tracks import (
+    FullTrackComparisonModal,
+    format_full_track,
+)
 from subtitle_alignment import cli
 
 
@@ -24,6 +31,45 @@ def test_track_stats_make_sparse_anchor_evidence_explicit() -> None:
     assert stats.cues == 2
     assert stats.active_s == 5.0
     assert stats.span_s == 93.0
+
+
+def test_full_track_text_retains_every_cue_and_timestamp() -> None:
+    cues = (
+        SubtitleCue(None, 10, 1.0, 2.5, "first"),
+        SubtitleCue(None, 20, 65.0, 67.0, "second\nline"),
+    )
+
+    rendered = format_full_track(cues)
+
+    assert "[0001]  00:01.000 → 00:02.500\nfirst" in rendered
+    assert "[0002]  01:05.000 → 01:07.000\nsecond\nline" in rendered
+
+
+def test_full_track_modal_mounts_both_independent_panes() -> None:
+    async def run() -> None:
+        cue = SubtitleCue(None, 1, 1.0, 2.0, "anchor body")
+        app = App()
+        async with app.run_test() as pilot:
+            app.push_screen(
+                FullTrackComparisonModal(
+                    anchor=(cue,),
+                    candidate=(SubtitleCue(None, 1, 3.0, 4.0, "candidate body"),),
+                    anchor_name="anchor.srt",
+                    candidate_name="candidate.ass",
+                )
+            )
+            await pilot.pause()
+            assert app.screen.query_one("#full-anchor", TextArea).text.endswith(
+                "anchor body"
+            )
+            assert app.screen.query_one("#full-candidate", TextArea).text.endswith(
+                "candidate body"
+            )
+            await pilot.press("escape")
+            await pilot.pause()
+            assert not isinstance(app.screen, FullTrackComparisonModal)
+
+    asyncio.run(run())
 
 
 def test_judgments_are_append_only_and_joinable(tmp_path) -> None:

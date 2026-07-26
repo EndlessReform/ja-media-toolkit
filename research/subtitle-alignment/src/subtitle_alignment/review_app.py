@@ -237,6 +237,7 @@ class AlignmentReviewApp(AlignmentReviewInteractionMixin, App[None]):
         for label, keys in (
             ("NAV", "h/l cue  j/k method  [/ ] episode  ,/. pair"),
             ("WINDOW", "Ctrl-f/b page  Ctrl-d/u half-page  +/- zoom  gg/G ends"),
+            ("INSPECT", "v full raw anchor/candidate tracks"),
             ("AUDIO", "A fetch+decode  Space play/stop current cue"),
             ("LABEL", "1 usable anchor  2 sparse anchor  3 mismatch  4 needs audio"),
         ):

@@ -115,6 +115,8 @@ the main view separates method choices, the shared subsync timeline, current
 cue, and status rather than flattening them into one header.
 
 - `h` / `l`: previous / next cue, keeping it visible
+- `v`: show the complete raw anchor and candidate side by side; `Tab` switches
+  the independently scrollable panes and `Esc` closes the modal
 - `j` / `k`: next / previous method output
 - `[` / `]`: previous / next episode; `,` / `.` changes candidate pair
 - `Ctrl-f` / `Ctrl-b`, `Ctrl-d` / `Ctrl-u`: page or half-page the timeline

@@ -10,6 +10,7 @@ from ja_media_frontend.widgets.timeline import format_clock
 
 from subtitle_alignment.review_audio import LoadedReviewAudio, load_review_audio
 from subtitle_alignment.review_data import append_judgment
+from subtitle_alignment.review_full_tracks import FullTrackComparisonModal
 
 
 class AlignmentReviewInteractionMixin:
@@ -35,11 +36,25 @@ class AlignmentReviewInteractionMixin:
         elif char == "g": self._handle_g()
         elif char == "G": self.go_end()
         elif char == "A": self.fetch_audio()
+        elif char == "v": self.show_full_tracks()
         elif key == "space" or char == " ": self.toggle_playback()
         elif char in {"1", "2", "3", "4"}: self.save_label(char)
         elif char == "q": self.stop_playback(); self.exit()
         else: handled = False
         if handled: event.stop()
+
+    def show_full_tracks(self) -> None:
+        """Compare complete raw inputs to expose upstream selection failures."""
+
+        self.stop_playback()
+        self.push_screen(
+            FullTrackComparisonModal(
+                anchor=self._anchor,
+                candidate=self._candidate,
+                anchor_name=self.case.anchor_path,
+                candidate_name=self.case.candidate_repo_path,
+            )
+        )
 
     def move_cue(self, delta: int) -> None:
         if not self._output:
