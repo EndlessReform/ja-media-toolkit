@@ -1,6 +1,7 @@
 from ja_media_core.http import ServiceHttpError
 
 from subtitle_alignment.objects import _fetch
+from subtitle_alignment.identity import _parse_track
 from subtitle_alignment.sampling import coverage_decision
 from subtitle_alignment.silver import draw_order
 from subtitle_alignment.values import positive_episode_number
@@ -52,3 +53,18 @@ def test_series_coverage_allows_one_quarter_but_not_more() -> None:
         (3, 4),
     )
     assert coverage_decision((1,), {1}) == ("rejected", ())
+
+
+def test_identity_parser_uses_declared_cached_format(tmp_path) -> None:
+    body = "1\n00:00:01,000 --> 00:00:02,000\nhello\n"
+    path = tmp_path / "object-without-extension"
+    path.write_text(body)
+
+    parsed = _parse_track(
+        tmp_path,
+        {"path": path.name, "format": "subrip"},
+    )
+
+    assert parsed.error is None
+    assert parsed.cue_count == 1
+    assert parsed.active_s == 1.0

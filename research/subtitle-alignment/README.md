@@ -51,6 +51,20 @@ uv run alignment-research inspect .cache/<dataset-id>
 Phase 0 does not run LID or alignment. Those computations consume this frozen
 dataset in later gates.
 
+## Run the Gate 1 identity baseline
+
+This scores unchanged timing only. It does not search offsets or implement any
+retiming model:
+
+```sh
+uv run alignment-research identity \
+  .cache/phase0-1345e0a2045b031e --workers 8
+```
+
+The command writes pair, episode, and series result tables under `output/`,
+renders two PNG charts, writes a procedural Markdown report, and compiles the
+report to the repository's `output/pdf/` directory with Pandoc and XeLaTeX.
+
 ## Measured smoke run
 
 Seed `20260726` against the pinned DEV canonical head drew 29 series to accept

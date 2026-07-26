@@ -6,6 +6,9 @@ import argparse
 import json
 from pathlib import Path
 
+from subtitle_alignment.access import REPO_ROOT
+from subtitle_alignment.identity import run_identity_survey
+from subtitle_alignment.identity_report import write_identity_report
 from subtitle_alignment.snapshot import build_snapshot
 
 
@@ -29,6 +32,13 @@ def main() -> None:
     inspect = commands.add_parser("inspect", help="summarize a local dataset")
     inspect.add_argument("dataset", type=Path)
 
+    identity = commands.add_parser(
+        "identity", help="run and report the naive Gate 1 identity baseline"
+    )
+    identity.add_argument("dataset", type=Path)
+    identity.add_argument("--workers", type=int, default=8)
+    identity.add_argument("--output-root", type=Path, default=Path("output"))
+
     args = parser.parse_args()
     if args.command == "snapshot":
         if args.series_count < 1:
@@ -44,8 +54,24 @@ def main() -> None:
         print(f"dataset={path}")
         return
 
-    manifest = args.dataset.expanduser().resolve() / "manifest.json"
+    dataset = args.dataset.expanduser().resolve()
+    manifest = dataset / "manifest.json"
     if not manifest.is_file():
         parser.error(f"dataset manifest not found: {manifest}")
-    payload = json.loads(manifest.read_text())
-    print(json.dumps(payload["counts"], indent=2, sort_keys=True))
+    if args.command == "inspect":
+        payload = json.loads(manifest.read_text())
+        print(json.dumps(payload["counts"], indent=2, sort_keys=True))
+        return
+    if not 1 <= args.workers <= 32:
+        parser.error("--workers must be between 1 and 32")
+    result = run_identity_survey(
+        dataset,
+        output_root=args.output_root.expanduser().resolve(),
+        workers=args.workers,
+    )
+    pdf = write_identity_report(
+        result,
+        pdf_root=REPO_ROOT / "output" / "pdf",
+    )
+    print(f"results={result}")
+    print(f"pdf={pdf}")
