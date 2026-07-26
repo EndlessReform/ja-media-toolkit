@@ -10,6 +10,8 @@ requires-python = ">=3.13"
 dependencies = [
     "ja-media-core",
     "ja-media-data",
+    "ja-media-frontend",
+    "ja-media-media[playback]",
     "matplotlib>=3.11.1",
     "textual>=8.2.7",
 ]
@@ -24,6 +26,8 @@ build-backend = "uv_build"
 [tool.uv.sources]
 ja-media-core = { workspace = true }
 ja-media-data = { workspace = true }
+ja-media-frontend = { path = "../../packages/frontend", editable = true }
+ja-media-media = { workspace = true }
 
 [dependency-groups]
 dev = [

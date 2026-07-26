@@ -94,8 +94,9 @@ full-episode anchors. Those outputs remain scored so they can be inspected.
 
 ## Inspect flagged pairs
 
-The local annotator consumes the DuckDB and staged subtitles above; it does not
-rerun ALASS/ffsubsync or fetch audio:
+The local annotator consumes the DuckDB and staged subtitles above and does not
+rerun ALASS/ffsubsync. Run this command from either the repository root or this
+research directory; relative result paths are resolved in both places:
 
 ```sh
 uv run alignment-research annotate \
@@ -103,21 +104,30 @@ uv run alignment-research annotate \
 ```
 
 Flagged pairs appear first and are the default filter. Pass `--all-pairs` to
-include the rest. The view shows the embedded anchor and selected method output
-on the same timeline, plus anchor/candidate cue count, active duration, episode
-span, realized offsets, score, and source path.
+include the rest. A persistent left rail selects and locates `AniList:episode`;
+the main view separates method choices, the shared subsync timeline, current
+cue, and status rather than flattening them into one header.
 
-- `j` / `k`: next / previous pair
-- `]` / `[`: next / previous method output
-- `h` / `l`, `+` / `-`, `f`: pan, zoom, or show the full episode
-- `b`: jump to the next realized offset-block boundary
-- `a`, `s`, `m`, `u`: append `anchor_usable`, `anchor_sparse`,
+- `h` / `l`: previous / next cue, keeping it visible
+- `j` / `k`: next / previous method output
+- `[` / `]`: previous / next episode; `,` / `.` changes candidate pair
+- `Ctrl-f` / `Ctrl-b`, `Ctrl-d` / `Ctrl-u`: page or half-page the timeline
+- `+` / `-`, `gg` / `G`: zoom or jump to the start/end
+- `A`: lazily fetch and decode indexed derived audio for the selected episode
+- `Space`: play/stop the selected cue through subsync's existing audio player
+- `1` / `2` / `3` / `4`: append `anchor_usable`, `anchor_sparse`,
   `candidate_mismatch`, or `needs_audio`
 - `q`: quit
 
 Labels append to `RESULT/annotations.jsonl` by default. They are diagnostic
 input-cohort labels, not subjective alignment verdicts; audio-backed blinded
-review comes after sparse anchors are removed from the method comparison.
+review comes after sparse anchors are removed from the method comparison. Audio
+is never fetched on startup or episode navigation. `A` first uses subsync's
+indexed anime-audio cache. If that artifact does not exist, it follows the
+Phase 0 episode's pinned manifest and caches only that episode's immutable
+bronze audio under `.cache/<dataset>/objects/audio/`. Both paths use subsync's
+full-file PCM materialization and sounddevice player; subsequent loads reuse the
+local compressed artifact.
 
 ## Measured smoke run
 

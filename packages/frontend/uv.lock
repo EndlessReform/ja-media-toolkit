@@ -605,6 +605,7 @@ dependencies = [
     { name = "fastapi" },
     { name = "httpx" },
     { name = "ja-media-core", extra = ["audio"] },
+    { name = "ja-media-media", extra = ["playback"] },
     { name = "numpy" },
     { name = "parse-torrent-title" },
     { name = "pydantic" },
@@ -630,6 +631,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.28,<1" },
     { name = "ja-media-apple", marker = "extra == 'apple'", editable = "../../envs/apple" },
     { name = "ja-media-core", extras = ["audio"], editable = "../core" },
+    { name = "ja-media-media", extras = ["playback"], editable = "../media" },
     { name = "numpy" },
     { name = "parse-torrent-title", specifier = ">=2.8.2" },
     { name = "pydantic", specifier = ">=2.13.4" },
@@ -647,6 +649,23 @@ dev = [{ name = "pytest", specifier = ">=9.1.0" }]
 name = "ja-media-media"
 version = "0.1.0"
 source = { editable = "../media" }
+dependencies = [
+    { name = "ja-media-core" },
+]
+
+[package.optional-dependencies]
+playback = [
+    { name = "numpy" },
+    { name = "sounddevice" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "ja-media-core", editable = "../core" },
+    { name = "numpy", marker = "extra == 'playback'", specifier = ">=2.4.4" },
+    { name = "sounddevice", marker = "extra == 'playback'", specifier = ">=0.5.5" },
+]
+provides-extras = ["playback"]
 
 [[package]]
 name = "jinja2"

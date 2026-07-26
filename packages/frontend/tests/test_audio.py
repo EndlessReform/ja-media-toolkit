@@ -44,9 +44,9 @@ class AudioTest(unittest.TestCase):
                 return Mock(returncode=0, stdout=pcm, stderr=b"")
 
             with (
-                patch("ja_media_frontend.audio.shutil.which", return_value="ffmpeg"),
+                patch("ja_media_media.playback.shutil.which", return_value="ffmpeg"),
                 patch(
-                    "ja_media_frontend.audio.run_process",
+                    "ja_media_media.playback.run_process",
                     side_effect=fake_run,
                 ) as run,
             ):
@@ -68,7 +68,7 @@ class AudioTest(unittest.TestCase):
     def test_materialize_audio_bails_loudly_when_ffmpeg_is_missing(self) -> None:
         with TemporaryDirectory() as tmpdir:
             source = Path(tmpdir) / "episode.mkv"
-            with patch("ja_media_frontend.audio.shutil.which", return_value=None):
+            with patch("ja_media_media.playback.shutil.which", return_value=None):
                 with self.assertRaisesRegex(RuntimeError, "ffmpeg not found"):
                     materialize_audio(source)
 
@@ -80,9 +80,9 @@ class AudioTest(unittest.TestCase):
                 return Mock(returncode=1, stdout=b"", stderr=b"Stream map failed")
 
             with (
-                patch("ja_media_frontend.audio.shutil.which", return_value="ffmpeg"),
+                patch("ja_media_media.playback.shutil.which", return_value="ffmpeg"),
                 patch(
-                    "ja_media_frontend.audio.run_process",
+                    "ja_media_media.playback.run_process",
                     side_effect=fake_run,
                 ),
             ):

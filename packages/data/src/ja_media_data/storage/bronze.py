@@ -9,8 +9,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
+import tempfile
 from typing import Any, Iterator
 
 import boto3
@@ -140,6 +143,31 @@ class BronzeStore:
                 f"read {observed_etag!r}"
             )
         return response["Body"].read().decode("utf-8-sig")
+
+    def download_file(self, key: str, target: Path) -> str:
+        """Atomically cache one committed object and return its observed ETag.
+
+        This is the binary counterpart to :meth:`read_text`. Callers derive the
+        key from a pinned manifest; the adapter only enforces the configured
+        bronze prefix and streams bytes without holding media in memory.
+        """
+
+        if not key.startswith(self.prefix):
+            raise ValueError(f"object is outside the bronze prefix: {key}")
+        response = self._client.get_object(Bucket=self.bucket, Key=key)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(dir=target.parent, delete=False) as handle:
+            temporary = Path(handle.name)
+            body = response["Body"]
+            for chunk in iter(lambda: body.read(1024 * 1024), b""):
+                handle.write(chunk)
+            handle.flush()
+            os.fsync(handle.fileno())
+        try:
+            os.replace(temporary, target)
+        finally:
+            temporary.unlink(missing_ok=True)
+        return response.get("ETag", "").strip('"')
 
     def scan_documents(self, *, limit: int | None) -> Iterator[BronzeDocument]:
         """Read each selected marker once, including legacy IDs.

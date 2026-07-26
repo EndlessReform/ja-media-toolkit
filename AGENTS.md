@@ -94,6 +94,13 @@ framework jargon.
 
 The system uses a medallion architecture (Bronze $\rightarrow$ Silver $\rightarrow$ Gold) for data processing and management. Most transformations and data compilation should occur within this layer. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for technical details on the storage stack and orchestration.
 
+## Git workflow
+
+- Never create or rename a branch to a name containing `/`. Use flat,
+  hyphenated branch names such as `subtitle-alignment-research`. Slash-delimited
+  branch names are prohibited in this repository because they are ambiguous
+  with working-directory paths and break local tooling.
+
 ## File Size Limits — This Must Never Be Allowed to Happen Again™
 
 Large files conceal missing boundaries and make review, testing, and reuse

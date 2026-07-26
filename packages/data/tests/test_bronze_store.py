@@ -1,5 +1,7 @@
 """Unit tests for bronze identity and commit-marker filtering."""
 
+from io import BytesIO
+
 import pytest
 
 from ja_media_data.settings import DataSettings
@@ -60,6 +62,29 @@ def test_probe_performs_one_bounded_prefix_listing() -> None:
     store._client = FakeClient()
 
     store.probe()
+
+
+def test_binary_download_is_atomic_and_prefix_scoped(tmp_path) -> None:
+    class FakeClient:
+        def get_object(self, **kwargs):
+            assert kwargs == {
+                "Bucket": "media",
+                "Key": "audio/anime/bronze/1/show.flac",
+            }
+            return {"ETag": '"audio-etag"', "Body": BytesIO(b"audio")}
+
+    store = object.__new__(BronzeStore)
+    store.bucket = "media"
+    store.prefix = "audio/anime/bronze/"
+    store._client = FakeClient()
+    target = tmp_path / "cache" / "show.flac"
+
+    etag = store.download_file(
+        "audio/anime/bronze/1/show.flac", target
+    )
+
+    assert etag == "audio-etag"
+    assert target.read_bytes() == b"audio"
 
 
 def test_bronze_store_uses_typed_settings() -> None:

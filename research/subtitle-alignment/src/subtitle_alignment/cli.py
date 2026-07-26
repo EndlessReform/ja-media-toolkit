@@ -6,6 +6,9 @@ import argparse
 import json
 from pathlib import Path
 
+RESEARCH_ROOT = Path(__file__).resolve().parents[2]
+
+
 def main() -> None:
     """Run one research operation without expanding the public ja-media CLI."""
 
@@ -77,7 +80,7 @@ def main() -> None:
     if args.command == "annotate":
         from subtitle_alignment.review_app import run_annotator
 
-        result = args.result.expanduser().resolve()
+        result = _resolve_result(args.result)
         database = result / "gate1-matrix.duckdb"
         if not database.is_file():
             parser.error(f"matrix database not found: {database}")
@@ -141,3 +144,16 @@ def main() -> None:
     )
     print(f"results={result}")
     print(f"pdf={pdf}")
+
+
+def _resolve_result(value: Path) -> Path:
+    """Resolve result paths from either the repo root or research project."""
+
+    expanded = value.expanduser()
+    candidates = [expanded.resolve()]
+    if not expanded.is_absolute():
+        candidates.append((RESEARCH_ROOT / expanded).resolve())
+    for candidate in candidates:
+        if (candidate / "gate1-matrix.duckdb").is_file():
+            return candidate
+    return candidates[0]

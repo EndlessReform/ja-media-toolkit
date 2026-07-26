@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 from ja_media_core.transcripts import SubtitleCue
 
@@ -8,6 +9,8 @@ from subtitle_alignment.review_data import (
     append_judgment,
     track_stats,
 )
+from subtitle_alignment.review_audio import _audio_object_key
+from subtitle_alignment import cli
 
 
 def test_track_stats_make_sparse_anchor_evidence_explicit() -> None:
@@ -45,3 +48,20 @@ def test_judgments_are_append_only_and_joinable(tmp_path) -> None:
     rows = [json.loads(line) for line in path.read_text().splitlines()]
     assert [row["label"] for row in rows] == ["anchor_sparse", "needs_audio"]
     assert all(row["pair_id"] == "pair" for row in rows)
+
+
+def test_bronze_audio_key_is_sibling_of_metadata_directory() -> None:
+    assert _audio_object_key(
+        "audio/anime/bronze/186/metadata/show.json", "show.ac3"
+    ) == "audio/anime/bronze/186/show.ac3"
+
+
+def test_result_path_resolves_from_repository_root(tmp_path, monkeypatch) -> None:
+    research_root = tmp_path / "research" / "subtitle-alignment"
+    result = research_root / "output" / "gate1-matrix"
+    result.mkdir(parents=True)
+    (result / "gate1-matrix.duckdb").touch()
+    monkeypatch.setattr(cli, "RESEARCH_ROOT", research_root)
+    monkeypatch.chdir(tmp_path)
+
+    assert cli._resolve_result(Path("output/gate1-matrix")) == result
