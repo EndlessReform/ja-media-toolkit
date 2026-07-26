@@ -65,6 +65,27 @@ The command writes pair, episode, and series result tables under `output/`,
 renders two PNG charts, writes a procedural Markdown report, and compiles the
 report to the repository's `output/pdf/` directory with Pandoc and XeLaTeX.
 
+## Run the Gate 1 executable matrix
+
+The matrix draws 100 pairs evenly across identity-score deciles, executes the
+restricted ALASS and ffsubsync arms, and rescores every output with the same
+repository-owned ALASS-derived scorer:
+
+```sh
+uv run alignment-research matrix \
+  .cache/phase0-1345e0a2045b031e \
+  --identity-result output/gate1-identity-v3-phase0-1345e0a2045b031e \
+  --sample-size 100 --workers 8
+```
+
+Results include normalized DuckDB, CSV, and Parquet tables plus staged input,
+aligned-output, and log artifacts. `review-queue.parquet`,
+`review-variants.parquet`, and `cue-transforms.parquet` are the handoff to the
+annotator UI. The generated `gate1-matrix-paper.typ` reads its tables directly
+from the CSV/JSON products and compiles with
+`@preview/bloated-neurips:0.8.0`; rerun `typst compile` in the result directory
+after changing the paper source or generated tables.
+
 ## Measured smoke run
 
 Seed `20260726` against the pinned DEV canonical head drew 29 series to accept

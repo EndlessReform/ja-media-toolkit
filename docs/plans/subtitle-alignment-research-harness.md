@@ -1,8 +1,8 @@
 # Scrappy subtitle-alignment research harness
 
 Status: active experiment, not a product pipeline or campaign. The frozen Phase
-0 sample and naive Gate 1 identity survey are complete; LID and executable
-aligner comparisons remain pending.
+0 sample, naive Gate 1 identity survey, and restricted executable matrix are
+complete; LID and blinded manual review remain pending.
 
 ## Recommendation
 
@@ -503,27 +503,28 @@ Completed:
    Kitsunekko, retaining all draw failures and episode holes;
 3. cached 996 Kitsunekko candidates for 501 canonical episodes; and
 4. evaluated and reported all 1,436 naive identity pairs with the existing
-   ALASS-derived scorer, including parse failures and episode/series grains.
+   ALASS-derived scorer, including parse failures and episode/series grains;
+5. ran 11 restricted identity/ALASS/ffsubsync arms on 100 pairs evenly sampled
+   across identity-score deciles and rescored every output with the same
+   repository-owned objective; and
+6. compiled a data-driven Typst paper and wrote pair-, method-, and cue-grain
+   Parquet/DuckDB products for the annotator.
 
 This already proves the central machinery claim: a Silver intermediate produced
 by Dagster can feed a useful local experiment without a Gold layer or a second
 orchestration system.
 
-Stop and inspect results again after this next bounded slice:
+The next bounded slice is the annotator:
 
 1. LID all cached Kitsunekko candidates and retain every exclusion/failure in
    the denominator;
-2. add subprocess adapters for the installed, version-pinned `alass-cli` and
-   `ffsubsync` commands without importing either implementation;
-3. run the global-translation-only restrictions for both tools on the fixed
-   100-pair stratum;
-4. add the common-framerate and three split-penalty arms only in the staged
-   order above;
-5. infer and persist the actual output transform from input/output cue clocks,
-   including scale, median offset, number of offset blocks, maximum absolute
-   offset, runtime, and failures; and
-6. review raw versus method outputs in the reused subsync UI and save labels.
+2. consume `review_queue`, `review_variants`, and `cue_transforms` without
+   rerunning either executable;
+3. review raw versus method outputs in the reused subsync UI and save
+   append-only labels; and
+4. regenerate the procedural paper from those labels before choosing a method
+   or cutoff.
 
-Do not add audio/VAD, cue-edge clipping, group transfer, or a home-grown affine
-or piecewise optimizer in this slice. The installed executables already expose
-the transform classes needed to learn whether those abstractions are useful.
+Do not add audio/VAD, cue-edge clipping, group transfer, or another transform
+arm before this review. The current matrix is already wide enough to decide
+which abstractions are useful.

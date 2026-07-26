@@ -15,9 +15,10 @@ from ja_media_core.subsync import (
     subtitle_anchor_fit_score,
     subtitle_goodness_of_fit,
 )
-from ja_media_core.transcripts import SubtitleCue, parse_ass, parse_srt
+from ja_media_core.transcripts import SubtitleCue
 
 from subtitle_alignment.identity_store import write_identity_results
+from subtitle_alignment.track_io import read_subtitle_cues
 
 
 SURVEY_VERSION = "identity-v3"
@@ -175,12 +176,9 @@ def _score_episode(task: EpisodeTask) -> list[dict[str, object]]:
 def _parse_track(root: Path, item: dict[str, object]) -> ParsedTrack:
     started = perf_counter()
     try:
-        text = (root / str(item["path"])).read_bytes().decode(
-            "utf-8-sig", errors="replace"
+        cue_tuple = read_subtitle_cues(
+            root / str(item["path"]), str(item["format"])
         )
-        format_name = str(item["format"]).lower()
-        cues = parse_srt(text) if format_name in {"srt", "subrip"} else parse_ass(text)
-        cue_tuple = tuple(cues)
         active_s = sum(max(0.0, cue.duration_s) for cue in cue_tuple)
         span_s = max((cue.end_s for cue in cue_tuple), default=0.0) - min(
             (cue.start_s for cue in cue_tuple), default=0.0
