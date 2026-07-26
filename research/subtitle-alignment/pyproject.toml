@@ -1,0 +1,29 @@
+[project]
+name = "subtitle-alignment"
+version = "0.1.0"
+description = "Disposable experiments over canonical subtitle timing products"
+readme = "README.md"
+authors = [
+    { name = "Jacob Keisling", email = "contact@keisling.me" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "ja-media-core",
+    "ja-media-data",
+]
+
+[project.scripts]
+alignment-research = "subtitle_alignment:main"
+
+[build-system]
+requires = ["uv_build>=0.11.32,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.uv.sources]
+ja-media-core = { workspace = true }
+ja-media-data = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.0",
+]
