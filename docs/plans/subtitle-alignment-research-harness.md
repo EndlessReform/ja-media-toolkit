@@ -13,8 +13,8 @@ labels.
 
 It should answer four questions before alignment becomes a Dagster product:
 
-1. How many Kitsunekko candidates already fit, need a constant shift, show
-   multiplicative drift, or need local retiming?
+1. How many Kitsunekko candidates already fit, need a constant translation,
+   show a whole-file clock-rate error, or need local retiming?
 2. Where work is needed, does ALASS or ffsubsync produce better subjective
    results, and does VAD evidence correlate with that result?
 3. Where is the practical cutoff beyond which neither method helps?
@@ -245,7 +245,7 @@ language of the timing anchor need not match the candidate, although English
 SDH density and Japanese dialogue density can differ; manual review must test
 whether the anchored English track is a better timing signal than audio VAD.
 
-### Bounded tuning matrix
+### Restricted tuning matrix
 
 Do not take a Cartesian product of every CLI flag. Run a fixed 100-pair
 microbenchmark/review stratum in this order:
@@ -260,8 +260,36 @@ microbenchmark/review stratum in this order:
 
 For ffsubsync, bound every search with `--max-offset-seconds`; start at 30
 seconds and add a separately labelled 60-second rescue arm only for failures.
-ALASS has no corresponding CLI search bound, so the harness rejects rather than
-trusts an output whose inferred absolute offset exceeds the declared bound.
+ALASS has no corresponding CLI search bound. The harness therefore records a
+post-hoc `offset_bound_exceeded` diagnostic when at least one realized cue
+translation has absolute magnitude greater than 30 seconds. This does **not**
+mean 30 seconds of accumulated drift, and it does not reject or exclude the
+output from scoring. The threshold is a review-priority heuristic until human
+evidence establishes any operational bound.
+
+### Matrix-v2 diagnostic finding: sparse anchors
+
+The first 100-pair matrix exposed an input-eligibility bug before it established
+an aligner ranking. Every embedded track was allowed to act as a full-episode
+timing anchor. Some are signs, songs, or other sparse tracks: observed flagged
+examples include 3 anchor cues against 344 candidate cues, 40 against 340, and
+35 against 298. With so little full-episode timing evidence, unrestricted ALASS
+can maximize incidental overlap by translating the candidate hundreds of
+seconds. Those values are not plausible measured media drift.
+
+The realized transform is reconstructed cue by cue from the candidate and
+aligned output clocks. A large negative nominal translation also causes ALASS
+to clamp early negative timestamps to zero. Consequently a nominal
+`--no-split` global run can appear as several realized offset blocks near the
+start. This is output serialization behavior, not evidence that ALASS secretly
+selected a piecewise transform.
+
+The immediate gate is therefore anchor eligibility. The annotator shows cue
+count, active duration, episode span, and anchor/candidate timelines and records
+`anchor_usable` or `anchor_sparse` without rerunning methods. Do not choose an
+aligner or automatic cutoff from matrix-v2. After review, define the smallest
+measured eligibility rule and rerun the fixed sample with unusable anchors
+excluded or categorized separately.
 
 Hold ALASS `--interval=1` and `--speed-optimization=1`, and ffsubsync
 `--split-length-penalty=0.25` and `--split-subsample=1`, during the transform
@@ -508,22 +536,23 @@ Completed:
    across identity-score deciles and rescored every output with the same
    repository-owned objective; and
 6. compiled a data-driven Typst paper and wrote pair-, method-, and cue-grain
-   Parquet/DuckDB products for the annotator.
+   Parquet/DuckDB products for the annotator; and
+7. corrected the 30-second condition from a rejection status to a per-cue
+   translation diagnostic and added an artifact-only timeline annotator.
 
 This already proves the central machinery claim: a Silver intermediate produced
 by Dagster can feed a useful local experiment without a Gold layer or a second
 orchestration system.
 
-The next bounded slice is the annotator:
+The next bounded slice is review and rerun:
 
 1. LID all cached Kitsunekko candidates and retain every exclusion/failure in
    the denominator;
-2. consume `review_queue`, `review_variants`, and `cue_transforms` without
-   rerunning either executable;
-3. review raw versus method outputs in the reused subsync UI and save
-   append-only labels; and
-4. regenerate the procedural paper from those labels before choosing a method
-   or cutoff.
+2. inspect the >30-second cue-shift cases first, label sparse/unusable anchors,
+   and formulate an anchor-eligibility rule from those observations;
+3. rerun the fixed method matrix with ineligible anchors separated from the
+   aligner comparison; and
+4. add audio-backed blinded labels only after the input cohort is credible.
 
 Do not add audio/VAD, cue-edge clipping, group transfer, or another transform
 arm before this review. The current matrix is already wide enough to decide

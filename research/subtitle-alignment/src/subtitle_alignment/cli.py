@@ -6,14 +6,6 @@ import argparse
 import json
 from pathlib import Path
 
-from subtitle_alignment.access import REPO_ROOT
-from subtitle_alignment.identity import run_identity_survey
-from subtitle_alignment.identity_report import write_identity_report
-from subtitle_alignment.matrix import run_method_matrix
-from subtitle_alignment.matrix_report import write_matrix_paper
-from subtitle_alignment.snapshot import build_snapshot
-
-
 def main() -> None:
     """Run one research operation without expanding the public ja-media CLI."""
 
@@ -50,8 +42,25 @@ def main() -> None:
     matrix.add_argument("--workers", type=int, default=8)
     matrix.add_argument("--output-root", type=Path, default=Path("output"))
 
+    annotate = commands.add_parser(
+        "annotate", help="inspect precomputed pair-method artifacts"
+    )
+    annotate.add_argument("result", type=Path)
+    annotate.add_argument(
+        "--all-pairs",
+        action="store_true",
+        help="include pairs without a >30-second cue-shift flag",
+    )
+    annotate.add_argument(
+        "--labels",
+        type=Path,
+        help="append-only JSONL destination (default: RESULT/annotations.jsonl)",
+    )
+
     args = parser.parse_args()
     if args.command == "snapshot":
+        from subtitle_alignment.snapshot import build_snapshot
+
         if args.series_count < 1:
             parser.error("--series-count must be positive")
         if not 1 <= args.download_workers <= 32:
@@ -65,6 +74,21 @@ def main() -> None:
         print(f"dataset={path}")
         return
 
+    if args.command == "annotate":
+        from subtitle_alignment.review_app import run_annotator
+
+        result = args.result.expanduser().resolve()
+        database = result / "gate1-matrix.duckdb"
+        if not database.is_file():
+            parser.error(f"matrix database not found: {database}")
+        labels = (
+            args.labels.expanduser().resolve()
+            if args.labels
+            else result / "annotations.jsonl"
+        )
+        run_annotator(result, flagged_only=not args.all_pairs, labels=labels)
+        return
+
     dataset = args.dataset.expanduser().resolve()
     manifest = dataset / "manifest.json"
     if not manifest.is_file():
@@ -76,6 +100,10 @@ def main() -> None:
     if not 1 <= args.workers <= 32:
         parser.error("--workers must be between 1 and 32")
     if args.command == "matrix":
+        from subtitle_alignment.access import REPO_ROOT
+        from subtitle_alignment.matrix import run_method_matrix
+        from subtitle_alignment.matrix_report import write_matrix_paper
+
         if not 10 <= args.sample_size <= 1000:
             parser.error("--sample-size must be between 10 and 1000")
         output_root = args.output_root.expanduser().resolve()
@@ -98,6 +126,10 @@ def main() -> None:
         print(f"results={result}")
         print(f"pdf={pdf}")
         return
+    from subtitle_alignment.access import REPO_ROOT
+    from subtitle_alignment.identity import run_identity_survey
+    from subtitle_alignment.identity_report import write_identity_report
+
     result = run_identity_survey(
         dataset,
         output_root=args.output_root.expanduser().resolve(),

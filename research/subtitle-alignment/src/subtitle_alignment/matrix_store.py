@@ -104,11 +104,9 @@ def _derived_tables(connection: duckdb.DuckDBPyConnection) -> None:
                   count(*) FILTER (run.status LIKE 'scored%') AS scored_pairs,
                   count(*) FILTER (run.status = 'scored_transform_error')
                     AS transform_errors,
-                  count(*) FILTER (run.status = 'bounded_reject') AS bounded_rejects,
-                  count(*) FILTER (
-                    run.status NOT LIKE 'scored%' AND run.status != 'bounded_reject'
-                  )
-                    AS failed_pairs,
+                  count(*) FILTER (run.offset_bound_exceeded)
+                    AS offset_bound_flags,
+                  count(*) FILTER (run.status NOT LIKE 'scored%') AS failed_pairs,
                   median(run.anchor_fit_score) FILTER (run.status LIKE 'scored%')
                     AS median_score,
                   median(run.gain_over_identity) FILTER (run.status LIKE 'scored%')
@@ -180,13 +178,11 @@ def _derived_tables(connection: duckdb.DuckDBPyConnection) -> None:
 def _summary(connection, *, manifest, versions, workers, elapsed_s, matrix_version):
     pairs = connection.execute("SELECT count(*) FROM pair_sample").fetchone()[0]
     methods = connection.execute("SELECT count(*) FROM method_definitions").fetchone()[0]
-    scored, transform_errors, rejected, failed = connection.execute(
+    scored, transform_errors, offset_flags, failed = connection.execute(
         """SELECT count(*) FILTER (status LIKE 'scored%'),
                   count(*) FILTER (status='scored_transform_error'),
-                  count(*) FILTER (status='bounded_reject'),
-                  count(*) FILTER (
-                    status NOT LIKE 'scored%' AND status != 'bounded_reject'
-                  )
+                  count(*) FILTER (offset_bound_exceeded),
+                  count(*) FILTER (status NOT LIKE 'scored%')
              FROM method_runs"""
     ).fetchone()
     best = connection.execute(
@@ -203,7 +199,7 @@ def _summary(connection, *, manifest, versions, workers, elapsed_s, matrix_versi
         "run_count": pairs * methods,
         "scored_runs": scored,
         "transform_errors": transform_errors,
-        "bounded_rejects": rejected,
+        "offset_bound_flags": offset_flags,
         "failed_runs": failed,
         "workers": workers,
         "elapsed_seconds": elapsed_s,

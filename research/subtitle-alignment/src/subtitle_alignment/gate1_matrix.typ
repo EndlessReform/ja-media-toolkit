@@ -41,7 +41,7 @@
     arms on #summary.at("pair_count") anchor-candidate pairs drawn across the
     identity-score distribution. Every output is rescored by the repository's
     common ALASS-derived objective. The experiment writes normalized method and
-    cue-grain products for a subsequent blinded annotator; it does not define an
+    cue-grain products consumed by the local annotator; it does not define an
     automatic acceptance cutoff.
   ],
   accepted: none,
@@ -121,9 +121,12 @@ maximum score for the pair; it is not a human preference.
 
 We infer the realized transform from input and output cue clocks rather than
 assuming flags behaved identically. Offset blocks count adjacent cue regions
-whose translations differ by more than 21 ms. External ALASS outputs beyond
-the declared 30-second absolute offset bound remain inspectable but are marked
-as bounded rejects.
+whose translations differ by more than 21 ms. The maximum offset is the
+largest absolute translation applied to any individual candidate cue; it is
+not accumulated drift. Because ALASS cannot bound its search, a cue translated
+more than 30 seconds receives a diagnostic flag but remains scored. Large
+negative translations can clamp early cues at zero, making one nominal global
+translation appear as several realized offset blocks.
 
 #figure(
   caption: [Runtime and transform complexity, procedurally compiled from method runs.],
@@ -133,7 +136,7 @@ as bounded rejects.
     stroke: none,
     inset: (x: 3pt, y: 2.5pt),
     toprule,
-    table.header([Method], [Median ms], [p90 ms], [Blocks], [Scaled], [Max offset]),
+    table.header([Method], [Median ms], [p90 ms], [Blocks], [Scaled], [Max cue shift]),
     midrule,
     ..methods.map(row => (
       cell(row.at("method")),
@@ -150,18 +153,18 @@ as bounded rejects.
 #figure(
   caption: [Method status accounting. Transform gaps are scoreable outputs whose cue counts changed during rewriting.],
   table(
-    columns: (3.2fr, 0.65fr, 0.85fr, 0.65fr, 0.55fr),
+    columns: (3.0fr, 0.65fr, 0.85fr, 0.85fr, 0.55fr),
     align: (left, right, right, right, right),
     stroke: none,
     inset: (x: 3pt, y: 2.5pt),
     toprule,
-    table.header([Method], [Scored], [Transform gaps], [Rejected], [Failed]),
+    table.header([Method], [Scored], [Transform gaps], [>30 s cue shift], [Failed]),
     midrule,
     ..methods.map(row => (
       cell(row.at("method")),
       cell(integer(row.at("scored_pairs"))),
       cell(integer(row.at("transform_errors"))),
-      cell(integer(row.at("bounded_rejects"))),
+      cell(integer(row.at("offset_bound_flags"))),
       cell(integer(row.at("failed_pairs"))),
     )).flatten(),
     botrule,
@@ -192,27 +195,9 @@ Aggregated by transform class, the same underlying run table yields:
   ),
 ) <transform-table>
 
-= Procedural interpretation
+= Artifact contract
 
-The method with the largest median scorer gain is
-*#summary.at("best_median_gain_method")*, at
-#decimal(str(summary.at("best_median_gain"))) over identity. This is a queueing
-signal for annotation, not evidence of subjective superiority. The matrix
-contains #summary.at("run_count") pair-method cells:
-#summary.at("scored_runs") scored, #summary.at("bounded_rejects") bounded
-rejects, and #summary.at("failed_runs") execution or parse failures. Of the
-scored outputs, #summary.at("transform_errors") changed cue count and therefore
-lack a cue-by-cue transform map while remaining available for review.
-
-The scorer rewards interval agreement with the embedded anchor. It cannot tell
-whether differently authored tracks preserve readable lead-in/out, whether a
-local offset damages a previously correct scene, or whether the candidate is
-semantically the right Japanese subtitle. Those questions belong to blinded
-review.
-
-= Annotator handoff
-
-The paper is a view over the same durable products intended for the next UI:
+The paper is a view over the same durable products consumed by the local UI:
 
 - `review-queue.parquet`: one row per sampled pair with best method, score gain,
   method spread, decile, and staged input paths;
@@ -222,9 +207,8 @@ The paper is a view over the same durable products intended for the next UI:
   and block boundaries; and
 - `gate1-matrix.duckdb`: all source, result, summary, and review relations.
 
-The annotator can therefore order work, switch variants, and jump to offset
-boundaries without rerunning ALASS or ffsubsync. Human labels should join by
-`pair_id` and `method` and remain append-only. LID gates candidates before any
-policy decision; audio/VAD, duration-derived or continuous scaling, and joint
-clock-plus-piecewise arms remain out of scope until blinded labels justify
-them.
+An annotator can order work, switch variants, and jump to offset boundaries
+without rerunning ALASS or ffsubsync. Human labels join by `pair_id` and
+`method` and remain append-only. The paper intentionally reports procedure and
+generated tables only; corpus interpretation belongs in separately versioned
+review notes.

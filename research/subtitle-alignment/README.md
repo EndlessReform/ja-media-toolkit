@@ -86,6 +86,39 @@ from the CSV/JSON products and compiles with
 `@preview/bloated-neurips:0.8.0`; rerun `typst compile` in the result directory
 after changing the paper source or generated tables.
 
+The `>30 s cue shift` column is a diagnostic count, not drift and not a failed
+run. It means that reconstructing the output clocks found at least one
+individual candidate cue translated by more than 30 seconds. Matrix-v2 showed
+that the largest values came from sparse signs/song tracks being used as
+full-episode anchors. Those outputs remain scored so they can be inspected.
+
+## Inspect flagged pairs
+
+The local annotator consumes the DuckDB and staged subtitles above; it does not
+rerun ALASS/ffsubsync or fetch audio:
+
+```sh
+uv run alignment-research annotate \
+  output/gate1-matrix-v3-phase0-1345e0a2045b031e-n100
+```
+
+Flagged pairs appear first and are the default filter. Pass `--all-pairs` to
+include the rest. The view shows the embedded anchor and selected method output
+on the same timeline, plus anchor/candidate cue count, active duration, episode
+span, realized offsets, score, and source path.
+
+- `j` / `k`: next / previous pair
+- `]` / `[`: next / previous method output
+- `h` / `l`, `+` / `-`, `f`: pan, zoom, or show the full episode
+- `b`: jump to the next realized offset-block boundary
+- `a`, `s`, `m`, `u`: append `anchor_usable`, `anchor_sparse`,
+  `candidate_mismatch`, or `needs_audio`
+- `q`: quit
+
+Labels append to `RESULT/annotations.jsonl` by default. They are diagnostic
+input-cohort labels, not subjective alignment verdicts; audio-backed blinded
+review comes after sparse anchors are removed from the method comparison.
+
 ## Measured smoke run
 
 Seed `20260726` against the pinned DEV canonical head drew 29 series to accept
