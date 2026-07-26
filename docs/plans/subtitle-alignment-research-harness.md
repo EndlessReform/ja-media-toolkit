@@ -258,10 +258,10 @@ microbenchmark/review stratum in this order:
 5. only if scaling and splitting each help independently, one joint
    scale-plus-piecewise arm at the best reviewed penalty.
 
-For ffsubsync, bound every search with `--max-offset-seconds`; start at 30
-seconds and add a separately labelled 60-second rescue arm only for failures.
-ALASS has no corresponding CLI search bound. The harness therefore records a
-post-hoc `offset_bound_exceeded` diagnostic when at least one realized cue
+The first diagnostic run showed source offsets beyond the original 30-second
+ffsubsync search bound. Gate 1 now gives ffsubsync a 3600-second whole-episode
+horizon; ALASS's offset search was already unbounded. The harness still records
+a post-hoc `offset_bound_exceeded` diagnostic when at least one realized cue
 translation has absolute magnitude greater than 30 seconds. This does **not**
 mean 30 seconds of accumulated drift, and it does not reject or exclude the
 output from scoring. The threshold is a review-priority heuristic until human

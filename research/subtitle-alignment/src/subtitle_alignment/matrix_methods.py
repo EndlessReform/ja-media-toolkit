@@ -8,6 +8,11 @@ import subprocess
 from time import perf_counter
 
 
+# Deliberately larger than any Gate 1 episode. The old 30-second limit remains
+# only as a post-hoc review flag; it no longer constrains ffsubsync's search.
+FULL_EPISODE_OFFSET_LIMIT_S = "3600"
+
+
 @dataclass(frozen=True)
 class MethodSpec:
     """One deliberately restricted aligner arm."""
@@ -44,7 +49,7 @@ def method_specs() -> tuple[MethodSpec, ...]:
         MethodSpec(
             "ffsubsync-global", "ffsubsync", "global", False, False, None,
             ("--no-fix-framerate", "--skip-infer-framerate-ratio",
-             "--max-offset-seconds", "30"),
+             "--max-offset-seconds", FULL_EPISODE_OFFSET_LIMIT_S),
         ),
         MethodSpec(
             "alass-clock-global", "alass", "clock+global", True, False, None,
@@ -53,7 +58,8 @@ def method_specs() -> tuple[MethodSpec, ...]:
         MethodSpec(
             "ffsubsync-clock-global", "ffsubsync", "clock+global", True,
             False, None,
-            ("--skip-infer-framerate-ratio", "--max-offset-seconds", "30"),
+            ("--skip-infer-framerate-ratio", "--max-offset-seconds",
+             FULL_EPISODE_OFFSET_LIMIT_S),
         ),
     ]
     for penalty in (5, 10, 20):
@@ -69,7 +75,7 @@ def method_specs() -> tuple[MethodSpec, ...]:
                     "piecewise", False, True, penalty,
                     ("--no-fix-framerate", "--skip-infer-framerate-ratio",
                      "--split-penalty", str(penalty),
-                     "--max-offset-seconds", "30"),
+                     "--max-offset-seconds", FULL_EPISODE_OFFSET_LIMIT_S),
                 ),
             ]
         )

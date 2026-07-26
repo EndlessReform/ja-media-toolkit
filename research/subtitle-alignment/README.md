@@ -73,9 +73,10 @@ report to the repository's `output/pdf/` directory with Pandoc and XeLaTeX.
 
 ## Run the Gate 1 executable matrix
 
-The matrix draws 100 pairs evenly across identity-score deciles, executes the
-restricted ALASS and ffsubsync arms, and rescores every output with the same
-repository-owned ALASS-derived scorer:
+The matrix first keeps the best identity-scored anchor/candidate pair for each
+episode, then draws 100 pairs evenly across those identity-score deciles. It
+executes the restricted ALASS and ffsubsync arms and rescores every output with
+the same repository-owned ALASS-derived scorer:
 
 ```sh
 uv run alignment-research matrix \

@@ -33,7 +33,7 @@ class MatrixPair:
 def select_pairs(
     dataset: Path, identity_result: Path, *, sample_size: int
 ) -> list[MatrixPair]:
-    """Select a stable score-stratified cohort without inspecting method results."""
+    """Select episode-best identity pairs, then score-stratify that cohort."""
 
     buckets = min(10, sample_size)
     per_bucket = (sample_size + buckets - 1) // buckets
@@ -46,14 +46,26 @@ def select_pairs(
             "AS phase0 (READ_ONLY)"
         )
         rows = connection.execute(
-            f"""WITH bucketed AS (
+            f"""WITH scored AS (
                   SELECT score.*,
-                         ntile({buckets}) OVER (ORDER BY anchor_fit_score)
-                           AS identity_decile,
                          hash(concat(anchor_id, cast(candidate_id AS VARCHAR)))
                            AS tie_break
                     FROM identity_pair_scores AS score
                    WHERE status = 'scored'
+                ), episode_best AS (
+                  SELECT *, row_number() OVER (
+                           PARTITION BY anilist_id, episode
+                           ORDER BY anchor_fit_score DESC,
+                                    goodness_of_fit DESC NULLS LAST,
+                                    tie_break
+                         ) AS identity_rank
+                    FROM scored
+                ), bucketed AS (
+                  SELECT episode_best.*,
+                         ntile({buckets}) OVER (ORDER BY anchor_fit_score)
+                           AS identity_decile
+                    FROM episode_best
+                   WHERE identity_rank = 1
                 ), ranked AS (
                   SELECT *, row_number() OVER (
                            PARTITION BY identity_decile ORDER BY tie_break

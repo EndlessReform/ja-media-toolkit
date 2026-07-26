@@ -21,7 +21,7 @@ from subtitle_alignment.matrix_transform import TransformFacts, infer_transform
 from subtitle_alignment.track_io import read_subtitle_cues
 
 
-MATRIX_VERSION = "matrix-v3"
+MATRIX_VERSION = "matrix-v4"
 
 
 @dataclass(frozen=True)
@@ -156,8 +156,7 @@ def _consume_output(pair, spec, invocation, output, anchor_cues, candidate_cues)
             anchor_fit_score=score,
             gain_over_identity=score - pair.identity_score,
         )
-        if spec.tool == "alass":
-            row["offset_bound_exceeded"] = facts.max_abs_offset_s > 30.0
+        row["offset_bound_exceeded"] = facts.max_abs_offset_s > 30.0
         return row, cue_rows
     except (OSError, UnicodeError, ValueError) as error:
         base.update(status="parse_error", error=f"{type(error).__name__}: {error}")
@@ -201,8 +200,8 @@ def _base_row(pair, spec, runtime_ms, output):
         "max_abs_offset_s": None,
         "offset_blocks": None,
         "reconstruction_rmse_ms": None,
-        # ALASS has no search-bound flag equivalent to ffsubsync's. This is a
-        # post-hoc diagnostic, not a rejection and not accumulated clock drift.
+        # Post-hoc review diagnostic only: every aligner now searches beyond
+        # this threshold, and no output is rejected or clipped because of it.
         "offset_bound_exceeded": None,
     }
 
