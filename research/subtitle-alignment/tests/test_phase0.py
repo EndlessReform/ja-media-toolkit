@@ -1,9 +1,15 @@
+import pytest
+
 from ja_media_core.http import ServiceHttpError
 
 from subtitle_alignment.objects import _fetch
 from subtitle_alignment.identity import _parse_track
 from subtitle_alignment.sampling import coverage_decision
-from subtitle_alignment.silver import draw_order
+from subtitle_alignment.silver import (
+    SilverPool,
+    apply_temporary_series_allowlist,
+    draw_order,
+)
 from subtitle_alignment.values import positive_episode_number
 
 
@@ -13,6 +19,21 @@ def test_series_sample_is_seeded_and_order_independent() -> None:
 
     assert first == second
     assert set(first) == {1, 2, 3, 4, 5}
+
+
+def test_do_not_merge_allowlist_filters_pool_and_fails_closed(tmp_path) -> None:
+    pool = SilverPool(
+        head=object(),  # type: ignore[arg-type]
+        series_episodes={5: (1, 2), 3: (1, 2), 8: (1, 2)},
+    )
+    allowlist = tmp_path / "DELETETHIS-subs-only-anilist-ids.txt"
+    allowlist.write_text("# temporary\n8\n3 # retained\n")
+
+    filtered = apply_temporary_series_allowlist(pool, allowlist)
+
+    assert list(filtered.series_episodes) == [3, 8]
+    with pytest.raises(RuntimeError, match="gate is missing"):
+        apply_temporary_series_allowlist(pool, tmp_path / "missing.txt")
 
 
 def test_episode_number_accepts_only_positive_integers() -> None:

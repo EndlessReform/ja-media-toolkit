@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 import random
 
 import duckdb
@@ -101,6 +102,42 @@ def load_anilist_pool(
             series_id: tuple(sorted(set(grouped[series_id]))) for series_id in ordered
         },
     )
+
+
+def apply_temporary_series_allowlist(
+    pool: SilverPool, allowlist_path: Path
+) -> SilverPool:
+    """DO NOT MERGE: restrict Phase 0 while broken Bronze v1 is replaced.
+
+    This deliberately fails closed. Deleting or renaming the local allowlist
+    must never turn a supposedly filtered run into a full-corpus run.
+    """
+
+    if not allowlist_path.is_file():
+        raise RuntimeError(
+            "DO NOT MERGE temporary subtitle-series gate is missing: "
+            f"{allowlist_path}"
+        )
+    allowed: set[int] = set()
+    for line_number, raw in enumerate(allowlist_path.read_text().splitlines(), start=1):
+        value = raw.partition("#")[0].strip()
+        if not value:
+            continue
+        if not value.isascii() or not value.isdigit() or int(value) < 1:
+            raise ValueError(
+                f"invalid AniList ID at {allowlist_path}:{line_number}: {raw!r}"
+            )
+        allowed.add(int(value))
+    if not allowed:
+        raise RuntimeError(f"temporary series allowlist is empty: {allowlist_path}")
+    filtered = {
+        series_id: episodes
+        for series_id, episodes in pool.series_episodes.items()
+        if series_id in allowed
+    }
+    if not filtered:
+        raise RuntimeError("temporary series allowlist matched no Silver series")
+    return SilverPool(head=pool.head, series_episodes=filtered)
 
 
 def load_selection(

@@ -20,8 +20,15 @@ from subtitle_alignment.objects import cache_embedded
 from subtitle_alignment.sampling import qualify_series
 from subtitle_alignment.silver import (
     SilverSelection,
+    apply_temporary_series_allowlist,
     load_anilist_pool,
     load_selection,
+)
+
+
+# DO NOT MERGE: delete this gate when Bronze v2 replaces the broken v1 corpus.
+_TEMPORARY_SERIES_ALLOWLIST = (
+    Path(__file__).resolve().parents[2] / "DELETETHIS-subs-only-anilist-ids.txt"
 )
 
 
@@ -34,6 +41,7 @@ def build_snapshot(
     connection = access.connect_catalog()
     try:
         pool = load_anilist_pool(connection, seed=seed)
+        pool = apply_temporary_series_allowlist(pool, _TEMPORARY_SERIES_ALLOWLIST)
     finally:
         connection.close()
 
