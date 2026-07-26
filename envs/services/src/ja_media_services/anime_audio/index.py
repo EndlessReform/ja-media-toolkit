@@ -69,12 +69,17 @@ def reconcile(connection: sqlite3.Connection, library_root: Path) -> Reconciliat
 
     with connection:
         connection.execute("DELETE FROM artifact")
+        connection.execute("DELETE FROM subtitle")
         connection.execute("DELETE FROM series")
         connection.execute("DELETE FROM reconciliation_error")
         connection.executemany(_SERIES_INSERT, [item.series_row for item in manifests])
         connection.executemany(
             _ARTIFACT_INSERT,
             [row for item in manifests for row in item.artifact_rows],
+        )
+        connection.executemany(
+            _SUBTITLE_INSERT,
+            [row for item in manifests for row in item.subtitle_rows],
         )
         connection.executemany(
             "INSERT INTO reconciliation_error VALUES (?, ?, ?, ?, ?)", errors
@@ -131,6 +136,7 @@ def refresh_manifest(
         _remove_manifest(connection, relative)
         connection.execute(_SERIES_INSERT, indexed.series_row)
         connection.executemany(_ARTIFACT_INSERT, indexed.artifact_rows)
+        connection.executemany(_SUBTITLE_INSERT, indexed.subtitle_rows)
     return True
 
 
@@ -257,4 +263,12 @@ INSERT INTO artifact(
   anilist_id, episode_key, profile, relative_path, size_bytes, duration_ms,
   codec, bitrate_bps, channels, sample_rate_hz, sha256, created_at
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+"""
+
+_SUBTITLE_INSERT = """
+INSERT INTO subtitle(
+  anilist_id, episode_key, subtitle_id, language, title, codec, is_default,
+  relative_path, size_bytes, source_stream_index, source_stream_ordinal, sha256,
+  created_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """

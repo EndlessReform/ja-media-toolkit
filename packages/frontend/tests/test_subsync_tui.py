@@ -360,7 +360,7 @@ class SubsyncTuiTest(unittest.TestCase):
                 SubtitleLanguage.NON_JAPANESE,
             ],
         )
-        self.assertIs(app.track, bilingual)
+        self.assertIs(app.track, japanese)
 
     def test_language_sort_is_disabled_by_default(self) -> None:
         with TemporaryDirectory() as tmpdir:

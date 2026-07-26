@@ -8,6 +8,7 @@ wheels/
 
 # Virtual environments
 .venv
+.dagster-home/
 
 # Data
 input
@@ -22,6 +23,7 @@ envs/services/data
 *.manifest.jsonl
 *.shards.json
 *.sources/
+.tmp*
 
 # OS
 *.DS_Store
@@ -31,3 +33,8 @@ docs/repo-symlinks/*
 
 # Secrets
 .env
+.env.*
+!.env.*.example
+packages/data/config.local.toml
+packages/data/config.dev.toml
+DELETETHIS*

@@ -30,35 +30,15 @@ def main() -> None:
     if args.command == "get-id":
         from ja_media_frontend.anilist_search_cli import run_search
 
-        query = args.query
-        if args.file:
-            if query:
-                from rich.console import Console
-                Console(stderr=True).print("[bold red]Error:[/bold red] Provide either a search query OR a file path (-f), not both.")
-                return
-            import PTN
-            from pathlib import Path
-            from rich.console import Console
-            console = Console(stderr=True)
-            stem = Path(args.file).stem
-            parsed = PTN.parse(stem)
-            query = parsed.get("title")
-            if not query:
-                console.print(f"[bold red]Error:[/bold red] Could not parse a title from filename [yellow]{stem}[/yellow]")
-                return
-
-        if not query:
-            from rich.console import Console
-            Console(stderr=True).print("[bold red]Error:[/bold red] No search query provided. Use a positional argument or -f.")
-            return
-
         run_search(
-            query=query,
+            query=args.query,
+            file_path=args.file,
             top_k=args.top_k,
             include_movies=args.include_movies,
             include_ova=args.include_ova,
             all_formats=args.all_formats,
             force_anilist=args.force_anilist,
+            extra_fields=tuple(args.field),
             output_format=args.format,
         )
         return

@@ -17,6 +17,7 @@ class IndexedManifest:
 
     series_row: tuple[Any, ...]
     artifact_rows: tuple[tuple[Any, ...], ...]
+    subtitle_rows: tuple[tuple[Any, ...], ...]
 
 
 def load_manifest(root: Path, path: Path) -> IndexedManifest:
@@ -37,6 +38,7 @@ def load_manifest(root: Path, path: Path) -> IndexedManifest:
         stat.st_size,
     )
     artifacts = []
+    subtitles = []
     for episode in manifest.episodes:
         resolved = artifact_path(path.parent, episode.artifact.relative_path)
         if not resolved.is_file():
@@ -59,7 +61,30 @@ def load_manifest(root: Path, path: Path) -> IndexedManifest:
                 episode.created_at,
             )
         )
-    return IndexedManifest(series_row, tuple(artifacts))
+        for subtitle in episode.subtitles:
+            resolved_subtitle = artifact_path(path.parent, subtitle.relative_path)
+            if not resolved_subtitle.is_file():
+                raise FileNotFoundError(
+                    f"subtitle missing for episode {episode.episode_key}"
+                )
+            subtitles.append(
+                (
+                    manifest.series.anilist_id,
+                    episode.episode_key,
+                    subtitle.subtitle_id,
+                    subtitle.language,
+                    subtitle.title,
+                    subtitle.codec,
+                    int(subtitle.default),
+                    subtitle.relative_path,
+                    subtitle.size_bytes,
+                    subtitle.source_stream_index,
+                    subtitle.source_stream_ordinal,
+                    subtitle.sha256,
+                    episode.created_at,
+                )
+            )
+    return IndexedManifest(series_row, tuple(artifacts), tuple(subtitles))
 
 
 def relative_manifest(root: Path, path: Path) -> str:

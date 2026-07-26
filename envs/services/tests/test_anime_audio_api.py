@@ -6,9 +6,30 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from ja_media_services.anime_audio.app import create_app
-from ja_media_services.anime_audio.db import fetch_inventory, initialize, set_metadata
+from ja_media_services.anime_audio.db import initialize, set_metadata
+from ja_media_services.anime_audio.inventory import fetch_inventory
 from ja_media_services.anime_audio.settings import AnimeAudioSettings
 from anime_audio_support import manifest, write_series
+
+
+def _subtitle(
+    subtitle_id: str,
+    *,
+    language: str = "eng",
+    stream_index: int = 3,
+) -> dict[str, object]:
+    return {
+        "subtitle_id": subtitle_id,
+        "relative_path": f"_subs/S01E001.{subtitle_id}.{language}.srt",
+        "size_bytes": 42,
+        "codec": "ass",
+        "language": language,
+        "title": language.upper(),
+        "default": language == "eng",
+        "source_stream_index": stream_index,
+        "source_stream_ordinal": stream_index - 3,
+        "sha256": None,
+    }
 
 
 def _client(tmp_path: Path, *, manifest: dict[str, object] | None = None) -> TestClient:
@@ -51,6 +72,45 @@ def test_indexes_lookup_and_serves_content(tmp_path: Path) -> None:
     )
     assert partial.status_code == 206
     assert partial.content == b"audio"
+
+
+def test_indexes_and_serves_embedded_subtitles(tmp_path: Path) -> None:
+    payload = manifest(
+        subtitles=[
+            _subtitle("stream-3", language="eng", stream_index=3),
+            _subtitle("stream-4", language="kor", stream_index=4),
+        ]
+    )
+    client = _client(tmp_path, manifest=payload)
+
+    episode = client.get("/series/1/episodes/1").json()
+    subtitles = client.get("/series/1/episodes/1/subtitles")
+    content = client.get("/series/1/episodes/1/subtitles/stream-3/content")
+    bulk = client.get(
+        "/series/1/episodes/1/subtitles/content?id=stream-4&id=stream-3"
+    )
+    all_content = client.get("/series/1/episodes/1/subtitles/content?getall=true")
+
+    assert episode["subtitles"][0]["subtitle_id"] == "stream-3"
+    assert subtitles.status_code == 200
+    assert [item["language"] for item in subtitles.json()] == ["eng", "kor"]
+    assert subtitles.json()[0]["content_url"].endswith(
+        "/series/1/episodes/1/subtitles/stream-3/content"
+    )
+    assert content.content.startswith(b"1\n00:00:00,000")
+    assert [item["subtitle"]["subtitle_id"] for item in bulk.json()] == [
+        "stream-4",
+        "stream-3",
+    ]
+    assert len(all_content.json()) == 2
+
+
+def test_subtitle_bulk_content_requires_selector(tmp_path: Path) -> None:
+    client = _client(tmp_path, manifest=manifest(subtitles=[_subtitle("stream-3")]))
+
+    response = client.get("/series/1/episodes/1/subtitles/content")
+
+    assert response.status_code == 400
 
 
 def test_reconcile_removes_stale_rows_after_complete_scan(tmp_path: Path) -> None:
@@ -107,6 +167,7 @@ def test_metrics_expose_index_state(tmp_path: Path) -> None:
     assert response.status_code == 200
     assert "anime_audio_index_ready 1.0" in response.text
     assert "anime_audio_artifacts_total 1.0" in response.text
+    assert "anime_audio_subtitles_total 0.0" in response.text
     assert "anime_audio_watcher_running 0.0" in response.text
     assert "anime_audio_last_incremental_scan_timestamp_seconds 0.0" in response.text
     assert "anime_audio_manifest_refresh_failures_total 0.0" in response.text
@@ -190,6 +251,7 @@ def test_inventory_is_empty_when_nothing_indexed(tmp_path: Path) -> None:
         "series_count": 0,
         "episode_count": 0,
         "artifact_count": 0,
+        "subtitle_count": 0,
         "series": [],
     }
 
@@ -212,6 +274,7 @@ def test_inventory_projects_all_series_with_deterministic_ordering(
     assert body["series_count"] == 2
     assert body["episode_count"] == 4
     assert body["artifact_count"] == 4
+    assert body["subtitle_count"] == 0
     # Series ordered by anilist_id, not directory name.
     assert [series["anilist_id"] for series in body["series"]] == [2, 10]
     first = body["series"][0]
@@ -221,6 +284,7 @@ def test_inventory_projects_all_series_with_deterministic_ordering(
     assert list(first["artifact_profiles"]) == ["portable-aac-v1"]
     assert first["episode_count"] == 2
     assert first["artifact_count"] == 2
+    assert first["subtitle_count"] == 0
 
 
 def test_inventory_omits_filesystem_paths(tmp_path: Path) -> None:
@@ -264,6 +328,7 @@ def test_inventory_projects_multiple_profiles_per_series(tmp_path: Path) -> None
     assert inventory["series_count"] == 1
     assert inventory["episode_count"] == 2
     assert inventory["artifact_count"] == 3
+    assert inventory["subtitle_count"] == 0
     series = inventory["series"][0]
     assert list(series["episode_keys"]) == ["1", "2"]
     assert list(series["artifact_profiles"]) == [

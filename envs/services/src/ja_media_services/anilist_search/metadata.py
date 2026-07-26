@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Iterable
 from typing import Any
 
 import duckdb
@@ -38,14 +39,43 @@ def _available_columns(con: duckdb.DuckDBPyConnection) -> tuple[str, ...]:
 def _requested_columns(
     con: duckdb.DuckDBPyConnection, requested_fields: tuple[str, ...] | None
 ) -> tuple[str, ...]:
+    return validate_metadata_fields(con, requested_fields, default_to_all=True)
+
+
+def parse_field_list(fields: str | Iterable[str] | None) -> tuple[str, ...] | None:
+    """Normalize comma-separated or list-shaped API field selections."""
+
+    if fields is None:
+        return None
+    if isinstance(fields, str):
+        parsed = tuple(field.strip() for field in fields.split(",") if field.strip())
+    else:
+        parsed = tuple(
+            field.strip()
+            for value in fields
+            for field in str(value).split(",")
+            if field.strip()
+        )
+    return parsed or None
+
+
+def validate_metadata_fields(
+    con: duckdb.DuckDBPyConnection,
+    requested_fields: tuple[str, ...] | None,
+    *,
+    default_to_all: bool = False,
+) -> tuple[str, ...]:
+    """Return validated public metadata columns for API projections."""
+
     available = _available_columns(con)
     available_set = set(available)
     public_columns = tuple(_public_columns(available))
+    public_set = set(public_columns)
     if requested_fields is None:
-        return public_columns
+        return public_columns if default_to_all else ()
 
     unknown = sorted(set(requested_fields) - available_set)
-    forbidden = sorted(set(requested_fields) & RESERVED_DETAIL_COLUMNS)
+    forbidden = sorted(set(requested_fields) - public_set - set(unknown))
     if unknown or forbidden:
         bad = ", ".join([*unknown, *forbidden])
         raise ValueError(f"Unknown AniList metadata field(s): {bad}")

@@ -292,34 +292,34 @@ wheels = [
 
 [package.optional-dependencies]
 cudart = [
-    { name = "nvidia-cuda-runtime", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+    { name = "nvidia-cuda-runtime" },
 ]
 cufft = [
-    { name = "nvidia-cufft", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+    { name = "nvidia-cufft" },
 ]
 cufile = [
-    { name = "nvidia-cufile", marker = "sys_platform == 'linux'" },
+    { name = "nvidia-cufile" },
 ]
 cupti = [
-    { name = "nvidia-cuda-cupti", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+    { name = "nvidia-cuda-cupti" },
 ]
 curand = [
-    { name = "nvidia-curand", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+    { name = "nvidia-curand" },
 ]
 cusolver = [
-    { name = "nvidia-cusolver", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+    { name = "nvidia-cusolver" },
 ]
 cusparse = [
-    { name = "nvidia-cusparse", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+    { name = "nvidia-cusparse" },
 ]
 nvjitlink = [
-    { name = "nvidia-nvjitlink", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+    { name = "nvidia-nvjitlink" },
 ]
 nvrtc = [
-    { name = "nvidia-cuda-nvrtc", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+    { name = "nvidia-cuda-nvrtc" },
 ]
 nvtx = [
-    { name = "nvidia-nvtx", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+    { name = "nvidia-nvtx" },
 ]
 
 [[package]]
@@ -525,7 +525,7 @@ source = { editable = "../../envs/apple" }
 dependencies = [
     { name = "httpx" },
     { name = "huggingface-hub" },
-    { name = "ja-media-core" },
+    { name = "ja-media-core", extra = ["audio"] },
     { name = "ja-media-frontend" },
     { name = "ja-media-media" },
     { name = "librosa" },
@@ -542,7 +542,7 @@ dependencies = [
 requires-dist = [
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "huggingface-hub", specifier = ">=1.14.0" },
-    { name = "ja-media-core", editable = "../core" },
+    { name = "ja-media-core", extras = ["audio"], editable = "../core" },
     { name = "ja-media-frontend", editable = "." },
     { name = "ja-media-media", editable = "../media" },
     { name = "librosa", specifier = ">=0.11.0" },
@@ -565,11 +565,15 @@ source = { editable = "../core" }
 dependencies = [
     { name = "fasttext-langdetect" },
     { name = "httpx" },
-    { name = "numpy" },
     { name = "parse-torrent-title" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pysrt" },
+]
+
+[package.optional-dependencies]
+audio = [
+    { name = "numpy" },
     { name = "soundfile" },
 ]
 
@@ -577,11 +581,19 @@ dependencies = [
 requires-dist = [
     { name = "fasttext-langdetect", specifier = ">=1.0.5" },
     { name = "httpx", specifier = ">=0.28,<1" },
-    { name = "numpy" },
+    { name = "numpy", marker = "extra == 'audio'", specifier = ">=2.4.4" },
     { name = "parse-torrent-title", specifier = ">=2.8.2" },
     { name = "pydantic", specifier = ">=2.13.4" },
     { name = "pydantic-settings", specifier = ">=2.14.1" },
     { name = "pysrt", specifier = ">=1.1.2" },
+    { name = "soundfile", marker = "extra == 'audio'", specifier = ">=0.13.1" },
+]
+provides-extras = ["audio"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "numpy", specifier = ">=2.4.4" },
+    { name = "pytest", specifier = ">=9.1.0" },
     { name = "soundfile", specifier = ">=0.13.1" },
 ]
 
@@ -592,7 +604,7 @@ source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
     { name = "httpx" },
-    { name = "ja-media-core" },
+    { name = "ja-media-core", extra = ["audio"] },
     { name = "numpy" },
     { name = "parse-torrent-title" },
     { name = "pydantic" },
@@ -617,7 +629,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.136.3" },
     { name = "httpx", specifier = ">=0.28,<1" },
     { name = "ja-media-apple", marker = "extra == 'apple'", editable = "../../envs/apple" },
-    { name = "ja-media-core", editable = "../core" },
+    { name = "ja-media-core", extras = ["audio"], editable = "../core" },
     { name = "numpy" },
     { name = "parse-torrent-title", specifier = ">=2.8.2" },
     { name = "pydantic", specifier = ">=2.13.4" },

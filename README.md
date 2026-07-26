@@ -32,6 +32,7 @@ Background services that provide data or compute resources, often deployed in co
 ├── site/               # User-facing documentation site (The "How")
 ├── packages/           # Shared logic and shared libraries
 │   ├── core/           # Shared contracts, transcript formats, and config
+│   ├── data/           # DuckLake compiler and local operator workbench
 │   └── frontend/       # CLI entrypoints and TUI surfaces
 ├── envs/               # Platform-specific runtimes & dependencies
 │   ├── apple/          # MacBook workflows (MLX, Metal, local ASR/VAD)
@@ -79,3 +80,23 @@ For developers, the following files are essential for understanding the system b
 - `docs/ARCHITECTURE.md`: The durable boundaries between ASR, config, and backends.
 - `docs/audio-library/README.md`: Derived anime audio filesystem, metadata, and conversion contracts.
 - `AGENTS.md`: Guidelines for LLMs and agents operating within this codebase.
+
+### Lakehouse Operator Web UI
+
+The data package includes a loopback-only operator workbench for inspecting
+compiled products, canonical binding decisions, and failure queues. Dagster now
+owns the asset graph and execution history; the workbench joins those public
+run/step facts to bounded DuckLake domain views.
+
+```sh
+docker compose -f deploy/data/local/compose.yaml up -d --wait
+```
+
+Open [http://127.0.0.1:8766/operator](http://127.0.0.1:8766/operator). The
+current gate is intentionally read-only. The host-side schema and web commands
+require the explicit local environment overlay in
+[`packages/data/README.md`](packages/data/README.md); do not start them from an
+arbitrary shell. Full operator instructions live in the
+[docsite guide](site/src/content/docs/setup/operator-workbench.md), and
+contributor boundaries are documented in
+[`packages/data/ARCHITECTURE.md`](packages/data/ARCHITECTURE.md).

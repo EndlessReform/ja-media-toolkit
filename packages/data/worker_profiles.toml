@@ -1,0 +1,11 @@
+[profiles.local-cpu]
+broker_host = "100.101.141.65"
+broker_port = 5672
+broker_user = "ja_media_data_dev"
+broker_vhost = "ja-media-dev"
+queue = "cpu-light"
+operations = ["subtitle_language_id"]
+concurrency = 1
+staging_bucket = "ja-media-dev"
+staging_prefix = "worker-staging/dev"
+staging_region = "garage"

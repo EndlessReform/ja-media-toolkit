@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol, Sequence
 
-from ja_media_core.audio import AudioChunk
+from ja_media_core.audio_contracts import AudioChunk
 
 
 AsrTask = Literal["transcribe", "translate"]

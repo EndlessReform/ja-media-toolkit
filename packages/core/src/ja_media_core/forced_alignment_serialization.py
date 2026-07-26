@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Any, Mapping
 
-from ja_media_core.audio import AudioChunk, AudioFormat, AudioSource
+from ja_media_core.audio_contracts import AudioChunk, AudioFormat, AudioSource
 from ja_media_core.forced_alignment import (
     AlignmentArtifactRef,
     AlignmentDiagnostic,

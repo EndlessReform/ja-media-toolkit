@@ -1,0 +1,29 @@
+{% extends 'base.html' %}
+{% block title %}Campaign Index{% endblock %}
+{% block header %}
+<div class="breadcrumb">Operator Home » Campaign Index</div>
+<header class="page-header">
+  <h1>Campaign Index</h1>
+  <p>Saved operator intents reconstructed from durable products and decisions.</p>
+</header>
+{% endblock %}
+{% block content %}
+<section class="forum-panel" aria-labelledby="campaigns-heading">
+  <h2 id="campaigns-heading">Active Campaigns</h2>
+  <table class="data-table campaign-table">
+    <thead><tr><th>Campaign</th><th>Target</th><th>Scope</th><th>Description</th><th>Open</th></tr></thead>
+    <tbody>
+      {% for campaign in campaigns %}
+      <tr>
+        <td><a href="/operator/campaigns/{{ campaign.campaign_id }}"><strong>{{ campaign.name }}</strong></a><br><code>{{ campaign.campaign_id }}</code></td>
+        <td><span class="status neutral">{{ campaign.target }}</span></td>
+        <td>{{ campaign.scope }}</td>
+        <td>{{ campaign.description }}</td>
+        <td class="nowrap"><a href="/operator/campaigns/{{ campaign.campaign_id }}">[ enter desk » ]</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+<div class="notice"><strong>NOTE:</strong> Campaign progress is derived from catalog products at page load. Opening a desk does not dispatch work.</div>
+{% endblock %}

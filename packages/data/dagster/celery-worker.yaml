@@ -1,0 +1,8 @@
+# Native local worker: RabbitMQ is published on loopback by the overlay.
+execution:
+  config:
+    broker:
+      env: JA_MEDIA_CELERY_BROKER_URL
+    backend: rpc://
+    config_source:
+      worker_prefetch_multiplier: 1

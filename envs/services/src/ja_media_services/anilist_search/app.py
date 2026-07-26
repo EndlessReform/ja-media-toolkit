@@ -10,7 +10,9 @@ import duckdb
 from aiolimiter import AsyncLimiter
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.gzip import GZipMiddleware
 
+from ja_media_services.anilist_search.bulk_routes import register_bulk_routes
 from ja_media_services.anilist_search.db import (
     open_db,
     rebuild_from_cached_csv,
@@ -24,10 +26,13 @@ from ja_media_services.anilist_search.exact_fallback import (
     ExactFallbackUnavailable,
     resolve_exact_fallback,
 )
+from ja_media_services.anilist_search.export_routes import register_export_routes
 from ja_media_services.anilist_search.fallback_cache import FallbackTtlPolicy
 from ja_media_services.anilist_search.metadata import (
     anime_metadata_exists,
     fetch_anime_metadata,
+    parse_field_list,
+    validate_metadata_fields,
 )
 from ja_media_services.anilist_search.observability import (
     FallbackObserver,
@@ -150,6 +155,7 @@ def create_app() -> FastAPI:
         version="0.1.0",
         lifespan=lifespan,
     )
+    app.add_middleware(GZipMiddleware, minimum_size=1024)
 
     @app.get("/search")
     async def search_endpoint(
@@ -162,10 +168,26 @@ def create_app() -> FastAPI:
             False,
             description="Query AniList directly instead of the local BM25 index",
         ),
+        extra_fields_query: str | None = Query(
+            None,
+            alias="extraFields",
+            description=(
+                "Comma-separated public metadata fields to add to each candidate, "
+                "for example 'popularity,averageScore,siteUrl'."
+            ),
+        ),
     ) -> list[dict]:
         con = app_state.con
         if con is None:
             raise HTTPException(status_code=503, detail="Index not ready")
+
+        try:
+            extra_fields = validate_metadata_fields(
+                con,
+                parse_field_list(extra_fields_query),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         if force_anilist:
             anilist_client = app_state.anilist_client
@@ -184,14 +206,18 @@ def create_app() -> FastAPI:
                     client=anilist_client,
                     ttl_policy=ttl_policy,
                     observer=app_state.fallback_observer,
+                    extra_fields=extra_fields,
                 )
             except SearchFallbackUnavailable as exc:
                 raise HTTPException(status_code=503, detail=str(exc)) from exc
 
         formats = resolve_formats(include_movies, include_ova, all_formats)
         with app_state._lock:
-            results = search(con, query, k, formats)
+            results = search(con, query, k, formats, extra_fields=extra_fields)
         return results
+
+    register_bulk_routes(app, app_state)
+    register_export_routes(app, app_state)
 
     @app.get("/anime/{anilist_id}")
     async def anime_detail_endpoint(
@@ -208,11 +234,7 @@ def create_app() -> FastAPI:
         if con is None:
             raise HTTPException(status_code=503, detail="Index not ready")
 
-        requested_fields = None
-        if fields:
-            requested_fields = tuple(
-                field.strip() for field in fields.split(",") if field.strip()
-            )
+        requested_fields = parse_field_list(fields)
 
         with app_state._lock:
             local_exists = anime_metadata_exists(con, anilist_id)

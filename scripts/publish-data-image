@@ -1,0 +1,70 @@
+#!/bin/sh
+# Publish the checkout-free data control-plane image to an OCI registry.
+# Docker owns credentials and transport. This wrapper owns only repository
+# policy: clean source, revision tags, and digest verification.
+set -eu
+
+die() {
+    printf 'publish-data-image: %s\n' "$*" >&2
+    exit 1
+}
+
+need() {
+    command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
+}
+
+need docker
+need git
+need jq
+docker buildx version >/dev/null 2>&1 || die "Docker Buildx is unavailable"
+
+registry=${JA_MEDIA_REGISTRY:-}
+platform=${JA_MEDIA_DATA_PLATFORM:-linux/amd64}
+[ -n "$registry" ] || die "JA_MEDIA_REGISTRY is required"
+case "$registry" in
+    *://*) die "JA_MEDIA_REGISTRY must not include a URL scheme" ;;
+    */) die "JA_MEDIA_REGISTRY must not end with a slash" ;;
+esac
+
+repo_root=$(git rev-parse --show-toplevel 2>/dev/null) \
+    || die "run this command from a Git worktree"
+cd "$repo_root"
+[ -z "$(git status --porcelain --untracked-files=all)" ] \
+    || die "refusing to publish a dirty worktree"
+
+revision=$(git rev-parse HEAD)
+short_revision=$(git rev-parse --short=12 HEAD)
+repository="$registry/ja-media/data-dev"
+immutable="$repository:git-$short_revision"
+integration="$repository:dev"
+metadata=$(mktemp "${TMPDIR:-/tmp}/ja-media-publish.XXXXXX")
+trap 'rm -f "$metadata"' 0 HUP INT TERM
+
+docker buildx build \
+    --platform "$platform" \
+    --file packages/data/Dockerfile.dagster \
+    --build-arg "VCS_REF=$revision" \
+    --tag "$immutable" \
+    --tag "$integration" \
+    --metadata-file "$metadata" \
+    --push \
+    .
+
+digest=$(jq -er '."containerimage.digest" | select(startswith("sha256:"))' "$metadata") \
+    || die "Buildx did not report a valid image digest"
+
+verify_tag() {
+    manifest=$(docker buildx imagetools inspect "$1" --format '{{json .Manifest}}') \
+        || die "could not inspect pushed tag: $1"
+    remote_digest=$(printf '%s\n' "$manifest" | jq -er '.digest // .Digest') \
+        || die "could not read pushed digest: $1"
+    [ "$remote_digest" = "$digest" ] \
+        || die "digest mismatch for $1: expected $digest, received $remote_digest"
+}
+
+verify_tag "$immutable"
+verify_tag "$integration"
+
+printf 'image=%s\n' "$immutable"
+printf 'digest=%s\n' "$digest"
+printf 'deploy=%s@%s\n' "$repository" "$digest"

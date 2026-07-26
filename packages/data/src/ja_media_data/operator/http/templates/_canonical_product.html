@@ -1,0 +1,46 @@
+<div id="product-desk">
+  {% if product_peek is defined %}
+    {% set peek_active = product_peek %}
+  {% elif request is defined %}
+    {% set peek_active = not request.url.path.endswith('/products') %}
+  {% else %}
+    {% set peek_active = true %}
+  {% endif %}
+  <details class="desk-section" open>
+    <summary class="subhead">
+      <span>Episode Binding Desk</span>
+      <span class="collapse-open">[ collapse ▲ ]</span>
+      <span class="collapse-closed">[ expand ▼ ]</span>
+    </summary>
+    {% if snapshot.lens.gates %}
+    <div class="table-scroll{% if peek_active and snapshot.lens.gate_total > 3 %} product-peek{% endif %}">
+      <table class="data-table binding-table">
+        <thead><tr><th>Status</th><th>Locator</th><th>Selected Capture</th><th>Binding Source</th><th>Override</th><th>Admitted</th><th>Selection / Block Reason</th><th>Candidates</th></tr></thead>
+        {% for gate in snapshot.lens.gates %}
+        <tbody class="candidate-group">
+          <tr class="gate-summary">
+            <td><span class="status {{ gate.status }}">{{ gate.status | replace('_', ' ') }}</span></td>
+            <td><strong>{% if gate.series_url %}<a href="{{ gate.series_url }}" target="_blank" rel="noreferrer">{{ gate.namespace }}:{{ gate.series_id }}</a>{% else %}{{ gate.namespace }}:{{ gate.series_id }}{% endif %}:{{ gate.episode.zfill(2) if gate.episode.isdecimal() else gate.episode }}</strong></td>
+            <td><code{% if gate.selected_manifest_url %} title="{{ gate.selected_manifest_url }}"{% endif %}>{{ gate.selected_capture_id or '—' }}</code></td>
+            <td>{{ gate.binding_source or '—' }}</td><td><code>{{ gate.active_override or 'none' }}</code></td>
+            <td class="number">{{ gate.admitted_count }} / {{ gate.candidate_count }}</td>
+            <td>{{ gate.selection_reason }}</td>
+            <td class="candidate-cell"><button type="button" class="candidate-toggle" title="Show or hide {{ gate.candidate_count }} candidate rows" data-candidate-target="candidate-{{ gate.namespace }}-{{ gate.series_id }}-{{ gate.episode }}" hx-get="/operator/campaigns/{{ snapshot.campaign.campaign_id }}/candidates/{{ gate.namespace }}/{{ gate.series_id }}/{{ gate.episode }}" hx-target="#candidate-{{ gate.namespace }}-{{ gate.series_id }}-{{ gate.episode }}" hx-swap="outerHTML" hx-include="#view-run-id"><span aria-hidden="true">▶</span><span class="visually-hidden">Show or hide candidates</span></button></td>
+          </tr>
+        </tbody>
+        <tbody id="candidate-{{ gate.namespace }}-{{ gate.series_id }}-{{ gate.episode }}" class="candidate-rows-placeholder"></tbody>
+        {% endfor %}
+      </table>
+    </div>
+    {% if peek_active and snapshot.lens.gate_total > 3 %}
+    <div class="product-peek-more"><span>PREVIEW {{ [snapshot.lens.gates | length, 3] | min }} OF {{ snapshot.lens.gate_total }}</span><a href="/operator/campaigns/{{ snapshot.campaign.campaign_id }}/products?limit=50" hx-get="/operator/campaigns/{{ snapshot.campaign.campaign_id }}/products?limit=50" hx-target="#product-desk" hx-swap="outerHTML" hx-include="#series-id, #view-run-id">[ SHOW PRODUCT ]</a></div>
+    {% else %}
+    <nav class="pager" aria-label="Canonical product pages">
+      <span>rows {{ snapshot.lens.gate_offset + 1 }}–{{ snapshot.lens.gate_offset + snapshot.lens.gates | length }} / {{ snapshot.lens.gate_total }}</span>
+      {% if snapshot.lens.gate_offset > 0 %}<a href="/operator/campaigns/{{ snapshot.campaign.campaign_id }}/products?offset={{ [snapshot.lens.gate_offset - snapshot.lens.gate_limit, 0] | max }}&amp;limit={{ snapshot.lens.gate_limit }}" hx-get="/operator/campaigns/{{ snapshot.campaign.campaign_id }}/products?offset={{ [snapshot.lens.gate_offset - snapshot.lens.gate_limit, 0] | max }}&amp;limit={{ snapshot.lens.gate_limit }}" hx-target="#product-desk" hx-swap="outerHTML" hx-include="#series-id, #view-run-id">[ ◀ PREV ]</a>{% endif %}
+      {% if snapshot.lens.gate_offset + snapshot.lens.gates | length < snapshot.lens.gate_total %}<a href="/operator/campaigns/{{ snapshot.campaign.campaign_id }}/products?offset={{ snapshot.lens.gate_offset + snapshot.lens.gate_limit }}&amp;limit={{ snapshot.lens.gate_limit }}" hx-get="/operator/campaigns/{{ snapshot.campaign.campaign_id }}/products?offset={{ snapshot.lens.gate_offset + snapshot.lens.gate_limit }}&amp;limit={{ snapshot.lens.gate_limit }}" hx-target="#product-desk" hx-swap="outerHTML" hx-include="#series-id, #view-run-id">[ NEXT ▶ ]</a>{% endif %}
+    </nav>
+    {% endif %}
+    {% else %}<div class="empty-state"><strong>NO BINDING INPUT.</strong> Compile resolver proposals before canonicalization can select a capture.</div>{% endif %}
+  </details>
+</div>

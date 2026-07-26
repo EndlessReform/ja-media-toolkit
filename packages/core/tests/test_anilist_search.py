@@ -3,7 +3,11 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from ja_media_core.anilist_search import AnimeMetadata, HttpAniListSearchClient
+from ja_media_core.anilist_search import (
+    AnimeMetadata,
+    BulkSearchResponse,
+    HttpAniListSearchClient,
+)
 from ja_media_core.config import JaMediaConfig, ServicesConfig
 
 
@@ -100,6 +104,151 @@ class AniListSearchContractTest(unittest.TestCase):
             "include_ova=false&all_formats=false&force_anilist=true"
         )
         self.assertEqual(response.results, ())
+
+    def test_search_request_encodes_extra_fields(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {"ANILIST_SEARCH_BASE_URL": "http://127.0.0.1:8000"},
+            clear=True,
+        ):
+            client = HttpAniListSearchClient()
+
+        with patch.object(
+            client,
+            "_get_json",
+            return_value=[
+                {
+                    "anilist_id": 1,
+                    "title_english": "Aria",
+                    "title_native": "ARIA",
+                    "title_romaji": "Aria",
+                    "season": None,
+                    "season_year": None,
+                    "format": "TV",
+                    "score": 1.2,
+                    "popularity": 101,
+                }
+            ],
+        ) as get_json:
+            response = client.search(
+                "Aria",
+                top_k=1,
+                extra_fields=("popularity", "averageScore"),
+            )
+
+        get_json.assert_called_once_with(
+            "/search?query=Aria&k=1&include_movies=false&include_ova=false&"
+            "all_formats=false&force_anilist=false&extraFields=popularity%2CaverageScore"
+        )
+        self.assertEqual(response.results[0].get("popularity"), 101)
+
+    def test_bulk_search_posts_local_only_batch_contract(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {"ANILIST_SEARCH_BASE_URL": "http://127.0.0.1:8000"},
+            clear=True,
+        ):
+            client = HttpAniListSearchClient()
+
+        with patch.object(
+            client._http,
+            "post_json",
+            return_value={
+                "results": [
+                    {
+                        "query": "Aria",
+                        "results": [
+                            {
+                                "anilist_id": 1,
+                                "title_english": "Aria",
+                                "title_native": "ARIA",
+                                "title_romaji": "Aria",
+                                "season": None,
+                                "season_year": None,
+                                "format": "TV",
+                                "score": 1.2,
+                            }
+                        ],
+                    },
+                    {"query": "missing", "results": []},
+                ]
+            },
+        ) as post_json:
+            response = client.search_bulk(("Aria", "missing"), top_k=1)
+
+        post_json.assert_called_once_with(
+            "/search/bulk",
+            {
+                "queries": ["Aria", "missing"],
+                "k": 1,
+                "include_movies": False,
+                "include_ova": False,
+                "all_formats": False,
+            },
+            timeout_s=None,
+        )
+        self.assertIsInstance(response, BulkSearchResponse)
+        self.assertEqual(response.results[0].results[0].anilist_id, 1)
+        self.assertEqual(response.results[1].results, ())
+
+    def test_bulk_search_posts_extra_fields(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {"ANILIST_SEARCH_BASE_URL": "http://127.0.0.1:8000"},
+            clear=True,
+        ):
+            client = HttpAniListSearchClient()
+
+        with patch.object(
+            client._http,
+            "post_json",
+            return_value={"results": []},
+        ) as post_json:
+            client.search_bulk(
+                ("Aria",),
+                top_k=1,
+                extra_fields=("popularity", "siteUrl"),
+            )
+
+        post_json.assert_called_once_with(
+            "/search/bulk",
+            {
+                "queries": ["Aria"],
+                "k": 1,
+                "include_movies": False,
+                "include_ova": False,
+                "all_formats": False,
+                "extraFields": ["popularity", "siteUrl"],
+            },
+            timeout_s=None,
+        )
+
+    def test_bulk_timeout_override_propagates_to_post_json(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {"ANILIST_SEARCH_BASE_URL": "http://127.0.0.1:8000"},
+            clear=True,
+        ):
+            client = HttpAniListSearchClient(bulk_timeout_s=120.0)
+
+        with patch.object(
+            client._http,
+            "post_json",
+            return_value={"results": []},
+        ) as post_json:
+            client.search_bulk(("Aria",), top_k=1)
+
+        post_json.assert_called_once_with(
+            "/search/bulk",
+            {
+                "queries": ["Aria"],
+                "k": 1,
+                "include_movies": False,
+                "include_ova": False,
+                "all_formats": False,
+            },
+            timeout_s=120.0,
+        )
 
 
 if __name__ == "__main__":

@@ -64,3 +64,27 @@ def test_service_http_client_preserves_service_error_context() -> None:
         ),
     ):
         client.get_json("/healthz")
+
+
+def test_service_http_client_per_call_timeout_override_wins() -> None:
+    response = httpx.Response(
+        200,
+        json={"status": "ok"},
+        request=httpx.Request("POST", "http://service.test/bulk"),
+    )
+    context = MagicMock()
+    context.__enter__.return_value.request.return_value = response
+    client = ServiceHttpClient(
+        "http://service.test",
+        timeout_s=5,
+        error_label="Service request failed",
+    )
+
+    with patch("ja_media_core.http.httpx.Client", return_value=context) as factory:
+        client.post_json("/bulk", {"q": 1}, timeout_s=None)
+
+    factory.assert_called_once_with(
+        timeout=None,
+        trust_env=False,
+        follow_redirects=True,
+    )

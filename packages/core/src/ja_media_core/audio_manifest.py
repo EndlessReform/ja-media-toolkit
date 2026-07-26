@@ -13,6 +13,7 @@ from ja_media_core.audio_library import (
     AudioProfile,
     CoverArtifact,
     ManifestEpisode,
+    SubtitleArtifactRecord,
 )
 
 SCHEMA_VERSION = 1
@@ -80,7 +81,7 @@ def manifest_to_mapping(manifest: AnimeAudioManifest) -> dict[str, object]:
 
 
 def _episode_to_mapping(episode: ManifestEpisode) -> dict[str, object]:
-    return {
+    result: dict[str, object] = {
         "episode_key": episode.episode_key,
         "source": {
             "relative_path": episode.source_relative_path,
@@ -94,6 +95,9 @@ def _episode_to_mapping(episode: ManifestEpisode) -> dict[str, object]:
         "artifact": asdict(episode.artifact),
         "created_at": episode.created_at,
     }
+    if episode.subtitles:
+        result["subtitles"] = [asdict(subtitle) for subtitle in episode.subtitles]
+    return result
 
 
 def _episode_from_mapping(payload: object) -> ManifestEpisode:
@@ -103,6 +107,11 @@ def _episode_from_mapping(payload: object) -> ManifestEpisode:
     artifact = payload.get("artifact")
     if not isinstance(source, Mapping) or not isinstance(artifact, Mapping):
         raise ValueError("manifest episode requires source and artifact objects")
+    raw_subtitles = payload.get("subtitles", ())
+    if not isinstance(raw_subtitles, (list, tuple)):
+        raise ValueError("manifest episode subtitles must be a list")
+    if any(not isinstance(item, Mapping) for item in raw_subtitles):
+        raise ValueError("manifest subtitle records must be objects")
     return ManifestEpisode(
         episode_key=str(payload["episode_key"]),
         source_relative_path=str(source["relative_path"]),
@@ -114,6 +123,10 @@ def _episode_from_mapping(payload: object) -> ManifestEpisode:
         audio_language=source.get("audio_language"),
         artifact=ArtifactRecord(**dict(artifact)),
         created_at=str(payload["created_at"]),
+        subtitles=tuple(
+            SubtitleArtifactRecord(**dict(item))
+            for item in raw_subtitles
+        ),
     )
 
 

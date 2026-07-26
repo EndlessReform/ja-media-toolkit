@@ -21,6 +21,7 @@ SPAN_STYLES = (
     "blue",
     "bright_blue",
 )
+REFERENCE_SPAN_STYLES = ("grey39", "grey62")
 ACTIVE_SPAN_STYLE = "bold black on yellow"
 GAP_STYLE = "dim"
 SPAN_BLOCK = "▀"
@@ -53,10 +54,12 @@ class TimelineWidget(Static):
         super().__init__(**kwargs)
         self.empty_message = empty_message
         self._spans: Sequence[TimedSpan] = ()
+        self._reference_spans: Sequence[TimedSpan] = ()
         self._active_span: TimedSpan | None = None
         self._start_s = 0.0
         self._duration_s = 10.0
         self._title = "Timeline"
+        self._reference_title = "embedded"
 
     def set_timeline(
         self,
@@ -66,14 +69,18 @@ class TimelineWidget(Static):
         duration_s: float,
         title: str = "Timeline",
         active_span: TimedSpan | None = None,
+        reference_spans: Sequence[TimedSpan] = (),
+        reference_title: str = "embedded",
     ) -> None:
         """Replace the rendered timeline state and refresh the widget."""
 
         self._spans = spans
+        self._reference_spans = reference_spans
         self._active_span = active_span
         self._start_s = max(0.0, start_s)
         self._duration_s = max(0.001, duration_s)
         self._title = title
+        self._reference_title = reference_title
         self.update(self.render_timeline())
 
     def render_timeline(self) -> Panel:
@@ -91,13 +98,33 @@ class TimelineWidget(Static):
                 (format_clock(end_s), "cyan"),
                 f"  ({self._duration_s:.1f}s shown)",
             ),
-            self.activity_bar(
-                width=width,
-                start_s=self._start_s,
-                end_s=end_s,
-            ),
-            self.tick_bar(width=width, start_s=self._start_s, end_s=end_s),
         ]
+        if self._reference_spans:
+            lines.extend(
+                (
+                    Text(self._reference_title, style="dim"),
+                    self.activity_bar(
+                        self._reference_spans,
+                        width=width,
+                        start_s=self._start_s,
+                        end_s=end_s,
+                        styles=REFERENCE_SPAN_STYLES,
+                    ),
+                )
+            )
+        lines.extend(
+            (
+                Text("candidate", style="dim"),
+                self.activity_bar(
+                    self._spans,
+                    width=width,
+                    start_s=self._start_s,
+                    end_s=end_s,
+                    active_span=self._active_span,
+                ),
+                self.tick_bar(width=width, start_s=self._start_s, end_s=end_s),
+            )
+        )
         return Panel(Group(*lines), title=self._title, expand=True)
 
     def bar_width(self) -> int:
@@ -106,24 +133,38 @@ class TimelineWidget(Static):
         available_width = self.size.width
         return max(24, (available_width or 96) - 8)
 
-    def activity_bar(self, *, width: int, start_s: float, end_s: float) -> Text:
+    def activity_bar(
+        self,
+        spans: Sequence[TimedSpan] | None = None,
+        *,
+        width: int,
+        start_s: float,
+        end_s: float,
+        active_span: TimedSpan | None = None,
+        styles: Sequence[str] = SPAN_STYLES,
+    ) -> Text:
         """Render span occupancy, highlighting the active span."""
 
+        uses_current_timeline = spans is None
+        spans = self._spans if uses_current_timeline else spans
+        if uses_current_timeline and active_span is None:
+            active_span = self._active_span
         text = Text()
         step_s = (end_s - start_s) / width
         for cell in range(width):
             span_index = self._visible_span_index(
+                spans,
                 start_s + cell * step_s,
                 start_s + (cell + 1) * step_s,
             )
             if span_index is None:
                 text.append(GAP_BLOCK, style=GAP_STYLE)
                 continue
-            span = self._spans[span_index]
+            span = spans[span_index]
             style = (
                 ACTIVE_SPAN_STYLE
-                if span is self._active_span
-                else SPAN_STYLES[span_index % len(SPAN_STYLES)]
+                if span is active_span
+                else styles[span_index % len(styles)]
             )
             text.append(SPAN_BLOCK, style=style)
         return text
@@ -151,12 +192,13 @@ class TimelineWidget(Static):
 
     def _visible_span_index(
         self,
+        spans: Sequence[TimedSpan],
         cell_start_s: float,
         cell_end_s: float,
     ) -> int | None:
         best_index = None
         best_overlap_s = 0.0
-        for index, span in enumerate(self._spans):
+        for index, span in enumerate(spans):
             overlap_s = min(span.end_s, cell_end_s) - max(
                 span.start_s,
                 cell_start_s,
