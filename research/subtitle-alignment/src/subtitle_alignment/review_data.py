@@ -155,7 +155,7 @@ def _load_boundaries(connection) -> dict[tuple[str, str], tuple[float, ...]]:
 
 def _case(rows, boundaries) -> ReviewCase:
     first = rows[0]
-    variants = tuple(
+    variants = tuple(sorted((
         Variant(
             pair_id=str(row["pair_id"]), method=str(row["method"]),
             method_order=int(row["method_order"]), output_path=str(row["output_path"]),
@@ -168,7 +168,7 @@ def _case(rows, boundaries) -> ReviewCase:
             block_starts_s=boundaries.get((str(row["pair_id"]), str(row["method"])), ()),
         )
         for row in rows
-    )
+    ), key=_variant_sort_key))
     return ReviewCase(
         pair_id=str(first["pair_id"]), anilist_id=int(first["anilist_id"]),
         episode=int(first["episode"]), anchor_path=str(first["anchor_path"]),
@@ -178,3 +178,10 @@ def _case(rows, boundaries) -> ReviewCase:
         candidate_repo_path=str(first["candidate_repo_path"]),
         identity_decile=int(first["identity_decile"]), variants=variants,
     )
+
+
+def _variant_sort_key(variant: Variant) -> tuple[bool, float, int]:
+    """Pin identity first, then put the strongest scored alternatives first."""
+
+    score = variant.score if variant.score is not None else float("-inf")
+    return variant.method != "identity", -score, variant.method_order

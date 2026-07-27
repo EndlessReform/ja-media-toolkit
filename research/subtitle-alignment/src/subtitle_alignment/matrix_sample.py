@@ -33,10 +33,9 @@ class MatrixPair:
 def select_pairs(
     dataset: Path, identity_result: Path, *, sample_size: int
 ) -> list[MatrixPair]:
-    """Select episode-best identity pairs, then score-stratify that cohort."""
+    """Select episode-best pairs across score strata, preferring new series."""
 
     buckets = min(10, sample_size)
-    per_bucket = (sample_size + buckets - 1) // buckets
     connection = duckdb.connect(
         str(identity_result / "gate1-identity.duckdb"), read_only=True
     )
@@ -66,31 +65,24 @@ def select_pairs(
                            AS identity_decile
                     FROM episode_best
                    WHERE identity_rank = 1
-                ), ranked AS (
-                  SELECT *, row_number() OVER (
-                           PARTITION BY identity_decile ORDER BY tie_break
-                         ) AS sample_rank
-                    FROM bucketed
                 )
-                SELECT ranked.anilist_id, ranked.episode, ranked.anchor_id,
-                       cast(ranked.candidate_id AS VARCHAR),
-                       ranked.anchor_serialization,
-                       ranked.candidate_extension,
+                SELECT bucketed.anilist_id, bucketed.episode, bucketed.anchor_id,
+                       cast(bucketed.candidate_id AS VARCHAR),
+                       bucketed.anchor_serialization,
+                       bucketed.candidate_extension,
                        anchor.relative_path, candidate.relative_path,
-                       ranked.candidate_repo_path, ranked.identity_decile,
-                       ranked.anchor_fit_score, ranked.goodness_of_fit
-                  FROM ranked
+                       bucketed.candidate_repo_path, bucketed.identity_decile,
+                       bucketed.anchor_fit_score, bucketed.goodness_of_fit
+                  FROM bucketed
                   JOIN phase0.embedded_subtitles AS anchor
-                    ON anchor.subtitle_input_id = ranked.anchor_id
+                    ON anchor.subtitle_input_id = bucketed.anchor_id
                   JOIN phase0.kitsunekko_candidates AS candidate
-                    ON candidate.subtitle_id = cast(ranked.candidate_id AS VARCHAR)
-                 WHERE sample_rank <= {per_bucket}
-                 ORDER BY sample_rank, identity_decile, tie_break
-                 LIMIT {sample_size}"""
+                    ON candidate.subtitle_id = cast(bucketed.candidate_id AS VARCHAR)
+                 ORDER BY identity_decile, tie_break"""
         ).fetchall()
     finally:
         connection.close()
-    return [
+    pairs = [
         MatrixPair(
             pair_id=_pair_id(str(row[2]), str(row[3])),
             anilist_id=int(row[0]), episode=int(row[1]),
@@ -102,6 +94,33 @@ def select_pairs(
         )
         for row in rows
     ]
+    return _diverse_stratified_sample(pairs, sample_size, buckets)
+
+
+def _diverse_stratified_sample(
+    pairs: list[MatrixPair], sample_size: int, buckets: int
+) -> list[MatrixPair]:
+    """Round-robin score buckets, taking unseen series first within each bucket."""
+
+    pools = {
+        bucket: [pair for pair in pairs if pair.identity_decile == bucket]
+        for bucket in range(1, buckets + 1)
+    }
+    selected: list[MatrixPair] = []
+    seen_series: set[int] = set()
+    while len(selected) < sample_size and any(pools.values()):
+        for bucket in range(1, buckets + 1):
+            pool = pools[bucket]
+            if not pool or len(selected) == sample_size:
+                continue
+            index = next(
+                (i for i, pair in enumerate(pool) if pair.anilist_id not in seen_series),
+                0,
+            )
+            pair = pool.pop(index)
+            selected.append(pair)
+            seen_series.add(pair.anilist_id)
+    return selected
 
 
 def stage_pair(dataset: Path, root: Path, pair: MatrixPair) -> tuple[Path, Path]:

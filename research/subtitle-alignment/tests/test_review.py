@@ -9,6 +9,7 @@ from textual.widgets import TextArea
 from subtitle_alignment.review_data import (
     ReviewCase,
     Variant,
+    _variant_sort_key,
     append_judgment,
     track_stats,
 )
@@ -90,6 +91,26 @@ def test_stale_playback_tick_cannot_claim_missing_audio_is_ready() -> None:
 
     assert harness._audio_status == "A load audio"
     assert harness._audio_key is None
+
+
+def test_variants_pin_identity_then_rank_scored_methods_descending() -> None:
+    def variant(method: str, score: float | None, order: int) -> Variant:
+        return Variant(
+            pair_id="pair", method=method, method_order=order,
+            output_path=f"{method}.srt", status="scored", score=score, gain=None,
+            scale=None, median_offset_s=None, min_offset_s=None, max_offset_s=None,
+            max_abs_offset_s=None, offset_blocks=None,
+            offset_bound_exceeded=False, block_starts_s=(),
+        )
+
+    variants = [
+        variant("weak", 0.2, 1), variant("unscored", None, 2),
+        variant("identity", 0.1, 0), variant("strong", 0.9, 3),
+    ]
+
+    assert [item.method for item in sorted(variants, key=_variant_sort_key)] == [
+        "identity", "strong", "weak", "unscored",
+    ]
 
 
 def test_judgments_are_append_only_and_joinable(tmp_path) -> None:

@@ -56,7 +56,9 @@ against an embedded subtitle timing anchor. Audio and VAD are absent from this
 matrix, and no method clips cue boundaries to detected speech.
 
 The cohort is selected once from identity-score deciles before any retimed
-result is observed. All methods see the same staged bytes. The run used
+result is observed. Within each decile, the deterministic draw prefers an
+AniList series not already represented before taking another episode from a
+selected series. All methods see the same staged bytes. The run used
 #summary.at("workers") worker processes and completed in
 #seconds(summary.at("elapsed_seconds")).
 
@@ -65,6 +67,14 @@ result is observed. All methods see the same staged bytes. The run used
 The table is compiled directly from `method-definitions.csv`. `Scale` means a
 whole-file clock/framerate correction; `Piecewise` means penalized changes in
 translation between adjacent cue groups.
+
+`Penalty` is a cost per change of offset, not a time cutoff or piece limit.
+With displayed value $C$, ALASS subtracts $min(n_a, n_c) C / 1000$ from its
+interval-pair rating sum per change; $n_a$ and $n_c$ are the normalized nonzero
+interval counts. ffsubsync instead subtracts $C$ seconds of overlap-equivalent
+score per change (internally $100 C$ samples at 100 Hz). Thus 5, 10, and 20
+increasingly resist changes within either tool, but are not equal-strength
+regularizers across tools.
 
 #figure(
   caption: [Restricted executable arms. Arguments are persisted separately in the same generated table.],
@@ -197,7 +207,8 @@ Aggregated by transform class, the same underlying run table yields:
 
 = Artifact contract
 
-The paper is a view over the same durable products consumed by the local UI:
+The paper and local UI consume the same durable products; corpus interpretation
+remains in separately versioned notes:
 
 - `review-queue.parquet`: one row per sampled pair with best method, score gain,
   method spread, decile, and staged input paths;
@@ -206,9 +217,3 @@ The paper is a view over the same durable products consumed by the local UI:
 - `cue-transforms.parquet`: cue-level source/aligned clocks, offsets, scales,
   and block boundaries; and
 - `gate1-matrix.duckdb`: all source, result, summary, and review relations.
-
-An annotator can order work, switch variants, and jump to offset boundaries
-without rerunning ALASS or ffsubsync. Human labels join by `pair_id` and
-`method` and remain append-only. The paper intentionally reports procedure and
-generated tables only; corpus interpretation belongs in separately versioned
-review notes.

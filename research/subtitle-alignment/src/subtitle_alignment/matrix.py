@@ -21,7 +21,7 @@ from subtitle_alignment.matrix_transform import TransformFacts, infer_transform
 from subtitle_alignment.track_io import read_subtitle_cues
 
 
-MATRIX_VERSION = "matrix-v4"
+MATRIX_VERSION = "matrix-v5"
 
 
 @dataclass(frozen=True)

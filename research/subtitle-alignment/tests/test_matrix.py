@@ -8,7 +8,11 @@ from subtitle_alignment.matrix_methods import (
     FULL_EPISODE_OFFSET_LIMIT_S,
     method_specs,
 )
-from subtitle_alignment.matrix_sample import select_pairs
+from subtitle_alignment.matrix_sample import (
+    MatrixPair,
+    _diverse_stratified_sample,
+    select_pairs,
+)
 from subtitle_alignment.matrix_transform import infer_transform
 
 
@@ -67,6 +71,27 @@ def test_matrix_selects_best_identity_pair_per_episode(tmp_path: Path) -> None:
     selected = select_pairs(dataset, identity, sample_size=2)
 
     assert {pair.anchor_id for pair in selected} == {"best-anchor", "other-anchor"}
+
+
+def test_matrix_sample_prefers_unseen_series_across_score_buckets() -> None:
+    def pair(series: int, episode: int, bucket: int) -> MatrixPair:
+        identifier = f"{series}-{episode}"
+        return MatrixPair(
+            pair_id=identifier, anilist_id=series, episode=episode,
+            anchor_id=f"a-{identifier}", candidate_id=f"c-{identifier}",
+            anchor_format="subrip", candidate_format="srt",
+            anchor_source=f"a-{identifier}.srt",
+            candidate_source=f"c-{identifier}.srt",
+            candidate_repo_path=f"series/{identifier}.srt",
+            identity_decile=bucket, identity_score=0.5, identity_goodness=0.5,
+        )
+
+    selected = _diverse_stratified_sample(
+        [pair(1, 1, 1), pair(2, 1, 1), pair(1, 2, 2), pair(3, 1, 2)],
+        sample_size=4, buckets=2,
+    )
+
+    assert [item.anilist_id for item in selected[:3]] == [1, 3, 2]
 
 
 def test_realized_transform_recovers_scale_offsets_and_blocks() -> None:

@@ -74,7 +74,9 @@ report to the repository's `output/pdf/` directory with Pandoc and XeLaTeX.
 ## Run the Gate 1 executable matrix
 
 The matrix first keeps the best identity-scored anchor/candidate pair for each
-episode, then draws 100 pairs evenly across those identity-score deciles. It
+episode, then draws 20 pairs across those identity-score deciles. Within each
+score stratum it prefers a series not yet represented in the cohort, falling
+back to another episode from an already selected series only when needed. It
 executes the restricted ALASS and ffsubsync arms and rescores every output with
 the same repository-owned ALASS-derived scorer:
 
@@ -82,7 +84,7 @@ the same repository-owned ALASS-derived scorer:
 uv run alignment-research matrix \
   .cache/phase0-1345e0a2045b031e \
   --identity-result output/gate1-identity-v3-phase0-1345e0a2045b031e \
-  --sample-size 100 --workers 8
+  --sample-size 20 --workers 8
 ```
 
 Results include normalized DuckDB, CSV, and Parquet tables plus staged input,
