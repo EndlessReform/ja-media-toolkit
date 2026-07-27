@@ -93,7 +93,8 @@ class AlignmentReviewInteractionMixin:
             return
         self.stop_playback()
         self._player = None
-        self._audio_status = "A fetch audio"
+        self._audio_key = None
+        self._audio_status = "A load audio"
         self.episode_index = index
         self.pair_index = 0
         self.variant_index = 0
@@ -167,7 +168,7 @@ class AlignmentReviewInteractionMixin:
     @work(thread=True, exclusive=True, group="audio")
     def fetch_audio(self) -> None:
         key = self.episode_key
-        self.call_from_thread(self._set_audio_status, "fetching + decoding…")
+        self.call_from_thread(self._set_audio_status, key, "fetching + decoding…")
         try:
             loaded = load_review_audio(self.result, *key)
         except Exception as exc:
@@ -175,13 +176,17 @@ class AlignmentReviewInteractionMixin:
         else:
             self.call_from_thread(self._audio_loaded, key, loaded)
 
-    def _set_audio_status(self, status: str) -> None:
+    def _set_audio_status(self, key, status: str) -> None:
+        if key != self.episode_key:
+            return
         self._audio_status = status
         self.refresh_view()
 
     def _audio_failed(self, key, detail: str) -> None:
         if key != self.episode_key:
             return
+        self._player = None
+        self._audio_key = None
         self._audio_status = f"unavailable: {detail}"
         self.notify(self._audio_status, severity="error")
         self.refresh_view()
@@ -190,8 +195,9 @@ class AlignmentReviewInteractionMixin:
         if key != self.episode_key:
             return
         self._player = MaterializedAudioPlayer(loaded.audio)
+        self._audio_key = key
         self._audio_status = loaded.status
-        self.notify("Audio ready — Space plays current cue")
+        self.notify("Audio ready — Space plays the candidate cue")
         self.refresh_view()
 
     def toggle_playback(self) -> None:
@@ -200,11 +206,15 @@ class AlignmentReviewInteractionMixin:
             self._audio_status = "stopped"
             self.refresh_view()
             return
-        if self._player is None:
+        if self._player is None or self._audio_key != self.episode_key:
+            self._player = None
+            self._audio_key = None
+            self._audio_status = "A load audio"
             self.notify(
-                "Press A to fetch and decode this episode's audio",
+                "Press A to load and decode this episode's audio",
                 severity="warning",
             )
+            self.refresh_view()
             return
         cue = self.current_cue
         if cue is None:
@@ -220,6 +230,13 @@ class AlignmentReviewInteractionMixin:
         self.refresh_view()
 
     def _playback_tick(self) -> None:
+        if self._player is None or self._audio_key != self.episode_key:
+            self.stop_playback()
+            self._player = None
+            self._audio_key = None
+            self._audio_status = "A load audio"
+            self.refresh_view()
+            return
         if not self.is_playing():
             self.stop_playback()
             self._audio_status = "ready"
@@ -233,7 +250,11 @@ class AlignmentReviewInteractionMixin:
             self._playback_poll = None
 
     def is_playing(self) -> bool:
-        return self._player is not None and self._player.is_playing()
+        return (
+            self._player is not None
+            and self._audio_key == self.episode_key
+            and self._player.is_playing()
+        )
 
     def save_label(self, key: str) -> None:
         label = {

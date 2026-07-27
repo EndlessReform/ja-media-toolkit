@@ -67,7 +67,8 @@ class AlignmentReviewApp(AlignmentReviewInteractionMixin, App[None]):
         self.window_s = 120.0
         self._anchor = self._candidate = self._output = ()
         self._player = None
-        self._audio_status = "A fetch audio"
+        self._audio_key: EpisodeKey | None = None
+        self._audio_status = "A load audio"
         self._playback_poll = None
         self._pending_g = False
 
@@ -220,7 +221,7 @@ class AlignmentReviewApp(AlignmentReviewInteractionMixin, App[None]):
     def render_active(self) -> Panel:
         cue = self.current_cue
         if cue is None:
-            return Panel("No cues in selected output.", title="Current cue")
+            return Panel("No cues in selected output.", title="Candidate output")
         text = Text()
         text.append(
             f"{self.cue_index + 1}/{len(self._output)}  "
@@ -230,15 +231,19 @@ class AlignmentReviewApp(AlignmentReviewInteractionMixin, App[None]):
         if self.is_playing():
             text.append("  ▶ playing", "bold orange3")
         text.append("\n" + (cue.text or "<empty cue>"))
-        return Panel(text, title="Current cue", expand=True)
+        return Panel(
+            text,
+            title=f"Candidate output · {self.variant.method}",
+            expand=True,
+        )
 
     def render_help(self) -> Text:
         text = Text()
         for label, keys in (
-            ("NAV", "h/l cue  j/k method  [/ ] episode  ,/. pair"),
+            ("NAV", "h/l candidate cue  j/k method  [/ ] episode  ,/. pair"),
             ("WINDOW", "Ctrl-f/b page  Ctrl-d/u half-page  +/- zoom  gg/G ends"),
             ("INSPECT", "v full raw anchor/candidate tracks"),
-            ("AUDIO", "A fetch+decode  Space play/stop current cue"),
+            ("AUDIO", "A load+decode  Space play/stop candidate cue"),
             ("LABEL", "1 usable anchor  2 sparse anchor  3 mismatch  4 needs audio"),
         ):
             if text:

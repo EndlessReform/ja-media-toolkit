@@ -115,15 +115,16 @@ include the rest. A persistent left rail selects and locates `AniList:episode`;
 the main view separates method choices, the shared subsync timeline, current
 cue, and status rather than flattening them into one header.
 
-- `h` / `l`: previous / next cue, keeping it visible
+- `h` / `l`: previous / next cue in the selected candidate method output,
+  keeping it visible
 - `v`: show the complete raw anchor and candidate side by side; `Tab` switches
   the independently scrollable panes and `Esc` closes the modal
 - `j` / `k`: next / previous method output
 - `[` / `]`: previous / next episode; `,` / `.` changes candidate pair
 - `Ctrl-f` / `Ctrl-b`, `Ctrl-d` / `Ctrl-u`: page or half-page the timeline
 - `+` / `-`, `gg` / `G`: zoom or jump to the start/end
-- `A`: lazily fetch and decode indexed derived audio for the selected episode
-- `Space`: play/stop the selected cue through subsync's existing audio player
+- `A`: lazily load and decode indexed derived audio for the selected episode
+- `Space`: play/stop audio at the selected candidate-output cue
 - `1` / `2` / `3` / `4`: append `anchor_usable`, `anchor_sparse`,
   `candidate_mismatch`, or `needs_audio`
 - `q`: quit

@@ -17,6 +17,7 @@ from subtitle_alignment.review_full_tracks import (
     FullTrackComparisonModal,
     format_full_track,
 )
+from subtitle_alignment.review_interaction import AlignmentReviewInteractionMixin
 from subtitle_alignment import cli
 
 
@@ -70,6 +71,25 @@ def test_full_track_modal_mounts_both_independent_panes() -> None:
             assert not isinstance(app.screen, FullTrackComparisonModal)
 
     asyncio.run(run())
+
+
+def test_stale_playback_tick_cannot_claim_missing_audio_is_ready() -> None:
+    class Harness(AlignmentReviewInteractionMixin):
+        episode_key = (2, 1)
+        _player = None
+        _audio_key = (1, 1)
+        _audio_status = "ready"
+        _playback_poll = None
+
+        def refresh_view(self) -> None:
+            pass
+
+    harness = Harness()
+
+    harness._playback_tick()
+
+    assert harness._audio_status == "A load audio"
+    assert harness._audio_key is None
 
 
 def test_judgments_are_append_only_and_joinable(tmp_path) -> None:
