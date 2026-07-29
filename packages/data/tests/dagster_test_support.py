@@ -95,9 +95,7 @@ def changed_documents(source: list[BronzeDocument]) -> list[BronzeDocument]:
     return changed
 
 
-def _document(
-    capture_id: str, modified: str, etag: str, stem: str
-) -> BronzeDocument:
+def _document(capture_id: str, modified: str, etag: str, stem: str) -> BronzeDocument:
     key = f"audio/anime/bronze/15451/metadata/{stem}.json"
     return BronzeDocument(
         marker=BronzeMarker(capture_id, key, etag, 100, modified),
@@ -107,13 +105,22 @@ def _document(
             "series": {"namespace": "anilist", "id": "15451"},
             "source": f"/downloads/Example_Ep03_{stem}.mkv",
             "stem": "Example_Ep03",
-            "audio": {
-                "filename": f"{stem}.ac3",
-                "stream_index": 1,
-                "codec": "ac3",
-                "declared_language": "jpn",
-                "is_default": True,
-            },
+            "audio_tracks": [
+                {
+                    "filename": f"{stem}.english.ac3",
+                    "stream_index": 1,
+                    "codec": "ac3",
+                    "declared_language": "eng",
+                    "is_default": True,
+                },
+                {
+                    "filename": f"{stem}.japanese.ac3",
+                    "stream_index": 2,
+                    "codec": "ac3",
+                    "declared_language": "jpn",
+                    "is_default": False,
+                },
+            ],
             "subtitles": [
                 {
                     "filename": f"{stem}.srt",

@@ -19,6 +19,11 @@ class CanonicalEpisodeInput:
     manifest_key: str
     manifest_etag: str
     manifest_modified_at: datetime
+    audio_object_bucket: str
+    audio_object_key: str
+    audio_stream_index: int
+    audio_codec: str | None
+    audio_declared_language: str | None
     input_fingerprint: str
 
 

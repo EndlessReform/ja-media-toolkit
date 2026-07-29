@@ -6,8 +6,26 @@ import json
 import duckdb
 
 from ja_media_data.products.atomic import AtomicProductStore
-from ja_media_data.products.materialization import MaterializationContext, ProductCommitResult
+from ja_media_data.products.materialization import (
+    MaterializationContext,
+    ProductCommitResult,
+)
 from ja_media_data.products.subtitle_lid.compiler import CompiledSubtitleLid
+
+
+_COLUMNS = (
+    "subtitle_input_id",
+    "namespace",
+    "series_id",
+    "episode",
+    "audio_capture_id",
+    "language",
+    "reason",
+    "script_metrics",
+    "sampled_metrics",
+    "input_fingerprint",
+    "recipe_version",
+)
 
 
 def replace_product(
@@ -28,10 +46,10 @@ def replace_product(
             if raw["sampled_metrics"] is not None
             else None
         )
-        values.append(tuple(raw.values()))
+        values.append(tuple(raw[column] for column in _COLUMNS))
     return AtomicProductStore(connection).replace(
         target="subtitle_lid",
-        tables=(("subtitle_language_results", 11, values),),
+        tables=(("subtitle_language_results", _COLUMNS, values),),
         fingerprint=product.fingerprint,
         rows=len(product.rows),
         context=context,
@@ -56,11 +74,11 @@ def merge_product(
             if raw["sampled_metrics"] is not None
             else None
         )
-        values.append(tuple(raw.values()))
+        values.append(tuple(raw[column] for column in _COLUMNS))
     return AtomicProductStore(connection).merge(
         target="subtitle_lid",
         table="subtitle_language_results",
-        columns=11,
+        columns=_COLUMNS,
         values=values,
         key_columns=("subtitle_input_id", "recipe_version"),
         key_indexes=(0, 10),

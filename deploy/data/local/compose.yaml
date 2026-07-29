@@ -9,7 +9,9 @@ x-app-environment: &app-environment
 x-app-volumes: &app-volumes
   - ../../../packages/data/config.local.toml:/etc/ja-media/data.toml:ro
   - ../../../packages/data/dagster/dagster.yaml:/var/lib/dagster/home/dagster.yaml:ro
-  - ../../../packages/data/src:/opt/ja-media/packages/data/src:ro
+  # Mount the workspace as one unit so package-internal imports and data migrations
+  # cannot drift from the source tree while developing against an older image.
+  - ../../../packages:/opt/ja-media/packages:ro
 
 x-app-depends: &app-depends
   postgres:

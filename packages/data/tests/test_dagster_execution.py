@@ -61,6 +61,16 @@ def test_success_reuse_quarantine_and_competing_candidates(repository) -> None:
     assert repository.connection.execute(
         "SELECT audio_capture_id FROM canonical_episode_inputs"
     ).fetchone() == ("capture-new",)
+    assert repository.connection.execute(
+        """SELECT audio_object_bucket, audio_object_key, audio_stream_index,
+                  audio_declared_language
+             FROM canonical_episode_inputs"""
+    ).fetchone() == (
+        "bronze",
+        "audio/anime/bronze/15451/new.japanese.ac3",
+        2,
+        "jpn",
+    )
     dispositions = {
         event.asset_key.to_user_string(): event.event_specific_data.materialization.metadata[
             "write_disposition"
@@ -69,9 +79,7 @@ def test_success_reuse_quarantine_and_competing_candidates(repository) -> None:
     }
     assert set(dispositions.values()) == {"reused"}
     assert all(
-        event.event_specific_data.materialization.tags.get(
-            "dagster/data_version"
-        )
+        event.event_specific_data.materialization.tags.get("dagster/data_version")
         for event in first.get_asset_materialization_events()
     )
 
@@ -90,12 +98,12 @@ def test_changed_source_version_advances_resolver_outputs(repository) -> None:
 
     changed = changed_documents(source)
     second_defs = _definitions(repository, FakeStore(changed), changed)
-    observed = second_defs.resolve_job_def("observe_campaign_inputs").execute_in_process(
-        instance=instance
-    )
-    second = second_defs.resolve_job_def("canonicalization_campaign").execute_in_process(
-        instance=instance
-    )
+    observed = second_defs.resolve_job_def(
+        "observe_campaign_inputs"
+    ).execute_in_process(instance=instance)
+    second = second_defs.resolve_job_def(
+        "canonicalization_campaign"
+    ).execute_in_process(instance=instance)
 
     assert first.success and observed.success and second.success
     assert _head(repository, "episode_resolution").fingerprint != old_fingerprint
@@ -107,18 +115,20 @@ def test_failed_canonical_keeps_old_head_after_acceptance(repository) -> None:
     store = FakeStore(source)
     instance = dg.DagsterInstance.ephemeral()
     initial_defs = _definitions(repository, store, source)
-    initial = initial_defs.resolve_job_def("canonicalization_campaign").execute_in_process(
-        instance=instance
-    )
+    initial = initial_defs.resolve_job_def(
+        "canonicalization_campaign"
+    ).execute_in_process(instance=instance)
     assert initial.success
     old_canonical = _head(repository, "canonical_inputs").materialization_id
 
     changed = changed_documents(source)
     failing_store = FakeStore(changed)
     failing_store.fail_manifests = True
-    failed = _definitions(repository, failing_store, changed).resolve_job_def(
-        "canonicalization_campaign"
-    ).execute_in_process(instance=instance, raise_on_error=False)
+    failed = (
+        _definitions(repository, failing_store, changed)
+        .resolve_job_def("canonicalization_campaign")
+        .execute_in_process(instance=instance, raise_on_error=False)
+    )
 
     assert not failed.success
     assert _head(repository, "accepted_bindings").run_id.startswith("dagster:")

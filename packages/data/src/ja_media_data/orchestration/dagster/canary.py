@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
+from collections import Counter
 import hashlib
 import json
 
 import dagster as dg
 
 from ja_media_data.orchestration.dagster.runtime import CanaryRuntime
-from ja_media_data.products.episode_resolution.compiler import resolve_batch
+from ja_media_data.products.episode_resolution.compiler import (
+    ResolutionResult,
+    resolve_batch,
+)
+
+
+_QUARANTINE_EXAMPLE_LIMIT = 5
 
 
 @dg.op(
@@ -36,6 +43,9 @@ def evaluate_resolution_canary(context) -> dict[str, object]:
     )
     proposed = sum(item.classification == "proposed" for item in result.results)
     quarantined = len(result.results) - proposed
+    quarantines = [
+        item for item in result.results if item.classification != "proposed"
+    ]
     summary = {
         "scope": "canary",
         "publishes": False,
@@ -44,9 +54,58 @@ def evaluate_resolution_canary(context) -> dict[str, object]:
         "selection_fingerprint": selection_fingerprint,
         "proposed": proposed,
         "quarantined": quarantined,
+        "quarantine_reasons": dict(
+            sorted(Counter(item.reason for item in quarantines).items())
+        ),
+        "quarantine_examples": _bounded_quarantine_examples(quarantines),
     }
     context.add_output_metadata(summary)
     return summary
+
+
+def _quarantine_example(item: ResolutionResult) -> dict[str, object]:
+    """Expose the compared values instead of only naming a failed invariant."""
+
+    evidence = item.evidence
+    return {
+        "capture_id": item.capture_id,
+        "series_id": item.series_id,
+        "stem": item.stem,
+        "reason": item.reason,
+        "issue_kind": item.issue_kind,
+        "manifest_key": evidence.get("manifest_key"),
+        "parsed_filename_title": evidence.get("ptn_title"),
+        "parser_episode": evidence.get("ptn_ordinary_episode"),
+        "explicit_episode_numbers": evidence.get("explicit_episode_tokens"),
+        "episode_ranges": evidence.get("episode_ranges"),
+        "declared_series": evidence.get("series"),
+        "declared_series_metadata": evidence.get("metadata"),
+        "error": evidence.get("error"),
+    }
+
+
+def _bounded_quarantine_examples(
+    quarantines: list[ResolutionResult],
+) -> list[dict[str, object]]:
+    """Prefer reason coverage before filling the bounded diagnostic sample."""
+
+    selected: list[ResolutionResult] = []
+    selected_capture_ids: set[str] = set()
+    represented_reasons: set[str] = set()
+    for item in quarantines:
+        if item.reason in represented_reasons:
+            continue
+        selected.append(item)
+        selected_capture_ids.add(item.capture_id)
+        represented_reasons.add(item.reason)
+        if len(selected) == _QUARANTINE_EXAMPLE_LIMIT:
+            break
+    for item in quarantines:
+        if len(selected) == _QUARANTINE_EXAMPLE_LIMIT:
+            break
+        if item.capture_id not in selected_capture_ids:
+            selected.append(item)
+    return [_quarantine_example(item) for item in selected]
 
 
 @dg.job(

@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import PurePosixPath
+
+from ja_media_core.bronze import (
+    BronzeCaptureManifest,
+    BronzeStream,
+    parse_bronze_manifest,
+)
 
 from ja_media_data.storage.bronze import BronzeStore
 from ja_media_data.lakehouse.repository import DuckLakeRepository
@@ -62,45 +68,62 @@ def build_canonical_rows(
     selected: Sequence[Candidate],
     store: BronzeStore,
     *,
+    policy_version: str,
     fingerprint: Callable[..., str],
     stable_id: Callable[..., str],
 ) -> tuple[list[CanonicalEpisodeInput], list[CanonicalSubtitleInput]]:
-    """Read selected manifests and enumerate their exact subtitle objects."""
+    """Read selected manifests and pin their exact audio/subtitle objects."""
 
     episodes: list[CanonicalEpisodeInput] = []
     subtitles: list[CanonicalSubtitleInput] = []
     for candidate in selected:
-        canonical_fp = fingerprint(asdict(candidate))
+        payload = store.read_manifest(
+            candidate.manifest_key, expected_etag=candidate.manifest_etag
+        )
+        manifest = parse_bronze_manifest(
+            payload,
+            capture_id=candidate.capture_id,
+            manifest_key=candidate.manifest_key,
+        )
+        audio = select_audio_track(manifest)
+        audio_key = audio_object_key(candidate.manifest_key, audio.object_name)
+        canonical_fp = fingerprint(
+            policy_version,
+            asdict(candidate),
+            audio_key,
+            audio.stream_index,
+            audio.codec,
+            audio.declared_language,
+        )
         canonical_id = stable_id("canonical", *candidate.locator, canonical_fp)
         episodes.append(
             CanonicalEpisodeInput(
-                canonical_id,
-                *candidate.locator,
-                candidate.capture_id,
-                candidate.binding_id,
-                candidate.binding_source,
-                candidate.bucket,
-                candidate.manifest_key,
-                candidate.manifest_etag,
-                candidate.manifest_modified_at,
-                canonical_fp,
+                canonical_id=canonical_id,
+                namespace=candidate.namespace,
+                series_id=candidate.series_id,
+                episode=candidate.episode,
+                audio_capture_id=candidate.capture_id,
+                binding_id=candidate.binding_id,
+                binding_source=candidate.binding_source,
+                manifest_bucket=candidate.bucket,
+                manifest_key=candidate.manifest_key,
+                manifest_etag=candidate.manifest_etag,
+                manifest_modified_at=candidate.manifest_modified_at,
+                audio_object_bucket=candidate.bucket,
+                audio_object_key=audio_key,
+                audio_stream_index=audio.stream_index,
+                audio_codec=audio.codec,
+                audio_declared_language=audio.declared_language,
+                input_fingerprint=canonical_fp,
             )
         )
-        manifest = store.read_manifest(
-            candidate.manifest_key, expected_etag=candidate.manifest_etag
-        )
-        raw_subtitles = manifest.get("subtitles", [])
-        if not isinstance(raw_subtitles, list):
-            raise ValueError(
-                f"manifest subtitles are not a list: {candidate.manifest_key}"
-            )
-        for raw in raw_subtitles:
+        for subtitle in manifest.subtitles:
             subtitles.append(
                 _subtitle_row(
                     candidate,
                     canonical_id,
                     canonical_fp,
-                    raw,
+                    subtitle,
                     fingerprint=fingerprint,
                     stable_id=stable_id,
                 )
@@ -153,47 +176,68 @@ def _subtitle_row(
     candidate: Candidate,
     canonical_id: str,
     canonical_fp: str,
-    raw: object,
+    stream: BronzeStream,
     *,
     fingerprint: Callable[..., str],
     stable_id: Callable[..., str],
 ) -> CanonicalSubtitleInput:
-    if not isinstance(raw, Mapping):
-        raise ValueError(f"subtitle stream is not an object: {candidate.manifest_key}")
-    stream_index = raw.get("stream_index")
-    if isinstance(stream_index, bool) or not isinstance(stream_index, int):
-        raise ValueError("subtitle stream_index must be an integer")
-    name = raw.get("key") or raw.get("filename")
-    if not isinstance(name, str) or not name.strip():
-        raise ValueError("subtitle stream has no key or filename")
-    object_key = subtitle_object_key(candidate.manifest_key, name.strip())
-    input_fp = fingerprint(canonical_fp, object_key, stream_index)
+    object_key = subtitle_object_key(candidate.manifest_key, stream.object_name)
+    input_fp = fingerprint(canonical_fp, object_key, stream.stream_index)
     return CanonicalSubtitleInput(
-        stable_id("subtitle", canonical_id, str(stream_index), object_key),
+        stable_id("subtitle", canonical_id, str(stream.stream_index), object_key),
         canonical_id,
         *candidate.locator,
         candidate.capture_id,
         candidate.bucket,
         object_key,
-        stream_index,
-        _text(raw.get("source_codec") or raw.get("codec")),
-        _text(raw.get("declared_language")),
+        stream.stream_index,
+        stream.codec,
+        stream.declared_language,
         input_fp,
     )
+
+
+def select_audio_track(manifest: BronzeCaptureManifest) -> BronzeStream:
+    """Apply the deliberately narrow v2 Japanese-audio policy."""
+
+    if manifest.schema_version == 1:
+        return manifest.audio
+    for track in manifest.audio_tracks:
+        if track.declared_language == "jpn":
+            return track
+    raise ValueError(
+        f"v2 capture {manifest.capture_id} has no audio track declared as jpn"
+    )
+
+
+def audio_object_key(manifest_key: str, name: str) -> str:
+    """Resolve an audio name beneath the configured manifest's series root."""
+
+    return _object_key(manifest_key, name, default_directory=None)
 
 
 def subtitle_object_key(manifest_key: str, name: str) -> str:
     """Resolve v2 explicit keys and the legacy series/subs/stem layout."""
 
     manifest = PurePosixPath(manifest_key)
+    return _object_key(
+        manifest_key, name, default_directory=PurePosixPath("subs") / manifest.stem
+    )
+
+
+def _object_key(
+    manifest_key: str, name: str, *, default_directory: PurePosixPath | None
+) -> str:
+    manifest = PurePosixPath(manifest_key)
+    if manifest.parent.name != "metadata":
+        raise ValueError(f"unexpected bronze manifest layout: {manifest_key}")
     series_root = manifest.parent.parent
     candidate = PurePosixPath(name)
     if str(candidate).startswith(str(series_root) + "/"):
         return str(candidate)
     if len(candidate.parts) > 1:
         return str(series_root / candidate)
-    return str(series_root / "subs" / manifest.stem / candidate.name)
-
-
-def _text(value: object) -> str | None:
-    return value.strip() if isinstance(value, str) and value.strip() else None
+    parent = (
+        series_root if default_directory is None else series_root / default_directory
+    )
+    return str(parent / candidate.name)

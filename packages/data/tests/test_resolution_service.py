@@ -104,7 +104,7 @@ def test_batch_keeps_competing_proposals_and_identical_replay_is_zero_write(
     assert repository.summary()["resolution_issues_auto"] == 0
 
 
-def test_invalid_manifest_is_in_rebuilt_review_product(
+def test_manifest_schema_failure_is_in_rebuilt_review_product(
     repository: DuckLakeRepository,
 ) -> None:
     invalid = document("capture-bad")
@@ -117,7 +117,7 @@ def test_invalid_manifest_is_in_rebuilt_review_product(
         repository=repository,
     )
 
-    assert batch.results[0].reason == "invalid_manifest"
+    assert batch.results[0].reason == "bronze_manifest_failed_schema_validation"
     issue = repository.get_latest_open_issue("capture-bad")
     assert issue is not None
     assert issue.kind == "invalid"

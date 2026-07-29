@@ -165,7 +165,7 @@ def test_combined_lens_accounts_for_quarantined_bronze_input(repository) -> None
                     issue_id="issue-1",
                     capture_id="capture-quarantine",
                     hint_id=None,
-                    kind="no_ordinary_episode",
+                    kind="ambiguous",
                     details={"path": "special"},
                 ),
             ),
@@ -182,7 +182,7 @@ def test_combined_lens_accounts_for_quarantined_bronze_input(repository) -> None
     assert lens.progress.captures == 1
     assert lens.progress.proposals == 0
     assert lens.progress.quarantined == 1
-    assert issue_page.items[0].kind == "no_ordinary_episode"
+    assert issue_page.items[0].kind == "ambiguous"
     assert issue_page.items[0].details_json == '{"path": "special"}'
 
 

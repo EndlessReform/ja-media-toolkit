@@ -23,6 +23,16 @@ The first operator campaign is `canonicalization-gate`. One checked-in
 the workbench lens that explains which captures competed, what was admitted,
 which override is active, and which capture became canonical.
 
+Bronze commit markers have two supported layouts. Legacy v1 markers contain
+one `audio` object. Schema v2 markers contain an ordered `audio_tracks` array;
+the canonicalization recipe deliberately selects the first track whose
+`declared_language` is exactly `jpn`. The canonical episode product records the
+selected bucket, object key, stream index, codec, and declared language so
+later audio consumers never reinterpret the manifest. A v2 marker without a
+declared Japanese track fails canonicalization rather than silently selecting
+English audio. Bronze bucket and prefix are deployment configuration, not
+schema identity or code constants.
+
 ## Technology stack
 
 | Concern | Technology | Why it owns the concern |
@@ -336,6 +346,35 @@ webserver and daemon must not contain application code or require rebuilding
 when a product compiler changes.
 
 ## Failure semantics
+
+### Episode-resolution outcome reasons
+
+The `episode-filename-v2` recipe uses literal reason codes that name the failed
+invariant. A quarantine is a successful, non-publishing classification; its
+`kind` (`ambiguous` or `invalid`) is the broader review category, while its
+reason says exactly what evidence caused that classification.
+
+| Reason | Meaning |
+| --- | --- |
+| `bronze_manifest_failed_schema_validation` | The committed Bronze JSON could not be parsed as a supported manifest. |
+| `filename_contains_multi_episode_range` | The filename explicitly names an episode range such as `Ep03-04`. |
+| `filename_has_no_recognizable_episode_number` | Neither the media filename parser nor an explicit `Ep`/`SxxE` token found an episode. |
+| `filename_contains_multiple_explicit_episode_numbers` | More than one distinct explicit episode token was present. |
+| `filename_parser_missed_explicit_episode_number` | An explicit episode token was found, but the general filename parser returned no ordinary episode. |
+| `filename_parser_episode_has_no_explicit_token` | The general parser found an episode, but no explicit token independently corroborated it. |
+| `filename_parser_episode_differs_from_explicit_token` | The general parser and the explicit token produced different episode numbers. |
+| `declared_anilist_id_not_found_in_metadata` | Exact metadata lookup returned no entry for the manifest's declared AniList ID. |
+| `declared_anilist_entry_has_no_titles` | The declared AniList entry exists but provides no titles for identity checking. |
+| `filename_title_not_equal_to_declared_anilist_titles` | The normalized parsed filename title exactly matched none of the declared entry's romaji, English, native, or synonym titles. |
+| `declared_anilist_entry_has_no_episode_count` | The declared entry has titles but no episode count for the bounds check. |
+| `declared_anilist_entry_is_movie` | The declared AniList entry is a movie and cannot accept an ordinary episode binding. |
+| `filename_episode_exceeds_declared_anilist_episode_count` | The agreed filename episode is greater than the declared entry's episode count. |
+| `filename_episode_and_title_match_declared_anilist_entry` | The parser and explicit token agree, the title exactly matches, and the episode is in bounds; a proposal is emitted. |
+
+Canary examples include the stem, parsed title, parser episode, explicit episode
+tokens, declared series ID, and the exact metadata titles/count/format used in
+the comparison. Aggregate counts alone are not considered sufficient evidence
+for interpreting a quarantine.
 
 - No compatible heavy worker: the Dagster step remains queued; existing heads
   remain available.

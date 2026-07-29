@@ -21,7 +21,11 @@ def _postgres_url() -> str:
 
 def test_ducklake_s3_settings_can_differ_from_bronze() -> None:
     settings = DataSettings(
-        bronze={"endpoint_url": "https://garage.example", "bucket": "media"},
+        bronze={
+            "endpoint_url": "https://garage.example",
+            "bucket": "media",
+            "prefix": "captures/v2",
+        },
         ducklake={
             "postgres_url": _postgres_url(),
             "data_path": "s3://silver/local/",
@@ -41,7 +45,11 @@ def test_ducklake_s3_settings_can_differ_from_bronze() -> None:
 
 def test_catalog_uses_toml_data_path_without_inference() -> None:
     settings = DataSettings(
-        bronze={"endpoint_url": "https://garage.example", "bucket": "media"},
+        bronze={
+            "endpoint_url": "https://garage.example",
+            "bucket": "media",
+            "prefix": "captures/v2",
+        },
         ducklake={
             "postgres_url": _postgres_url(),
             "data_path": "s3://media/audio/anime/lakehouse/",
@@ -76,18 +84,19 @@ def catalog(tmp_path_factory):
     assert apply_schema(connection) == [
         "001_identity.sql",
         "002_identity_views.sql",
-            "003_phase_d_subtitle_lid.sql",
-            "004_operator_runs.sql",
-            "005_human_run_numbers.sql",
-            "006_worker_handoffs.sql",
-        ]
+        "003_phase_d_subtitle_lid.sql",
+        "004_operator_runs.sql",
+        "005_human_run_numbers.sql",
+        "006_worker_handoffs.sql",
+        "007_canonical_audio_track.sql",
+    ]
     yield connection
     connection.close()
 
 
 def test_apply_schema_is_idempotent(catalog) -> None:
     assert apply_schema(catalog) == []
-    assert catalog.execute("SELECT count(*) FROM schema_history").fetchone()[0] == 6
+    assert catalog.execute("SELECT count(*) FROM schema_history").fetchone()[0] == 7
 
 
 def test_apply_schema_rejects_an_edited_applied_file(catalog, tmp_path) -> None:
@@ -119,7 +128,9 @@ def test_resolution_bindings_are_proposals_until_acceptance(catalog) -> None:
            ('binding-1', 'anilist', '100', '1', 'capture-1', 'automatic', '{}',
             'etag-1', 'resolver-v1', '2026-01-01 00:00:00+00', 'test')"""
     )
-    assert catalog.execute("SELECT count(*) FROM accepted_bindings_auto").fetchone() == (0,)
+    assert catalog.execute(
+        "SELECT count(*) FROM accepted_bindings_auto"
+    ).fetchone() == (0,)
 
 
 def test_findings_detect_missing_capture_and_duplicate_auto_output(catalog) -> None:

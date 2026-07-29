@@ -40,7 +40,7 @@ class _Section(BaseModel):
 class BronzeSettings(_Section):
     endpoint_url: str
     bucket: str
-    prefix: str = "audio/anime/bronze"
+    prefix: str
     addressing_style: Literal["path", "virtual"] = "path"
     access_key_id: str | None = None
     secret_access_key: str | None = None
@@ -115,7 +115,9 @@ def config_path() -> Path:
     """Return the explicitly selected config or the package-local default."""
 
     configured = os.environ.get(CONFIG_PATH_ENV)
-    return Path(configured).expanduser().resolve() if configured else DEFAULT_CONFIG_PATH
+    return (
+        Path(configured).expanduser().resolve() if configured else DEFAULT_CONFIG_PATH
+    )
 
 
 def secrets_path() -> Path:

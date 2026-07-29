@@ -17,7 +17,7 @@ from ja_media_data.products.identities import fingerprint, stable_id
 from ja_media_data.storage.bronze import BronzeStore
 
 
-CANONICALIZATION_POLICY_VERSION = "latest-manifest-modified-v1"
+CANONICALIZATION_POLICY_VERSION = "latest-manifest-modified-jpn-audio-v2"
 
 
 @dataclass(frozen=True)
@@ -39,7 +39,11 @@ def compile_product(
         CANONICALIZATION_POLICY_VERSION, [asdict(item) for item in selected]
     )
     episodes, subtitles = build_canonical_rows(
-        selected, store, fingerprint=fingerprint, stable_id=stable_id
+        selected,
+        store,
+        policy_version=CANONICALIZATION_POLICY_VERSION,
+        fingerprint=fingerprint,
+        stable_id=stable_id,
     )
     return CompiledCanonicalInputs(
         tuple(episodes), tuple(subtitles), product_fingerprint

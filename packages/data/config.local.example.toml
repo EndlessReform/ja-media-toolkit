@@ -2,7 +2,9 @@ environment = "local"
 
 [bronze]
 endpoint_url = "http://storage.example.ts.net:3900"
-bucket = "ja-media-prod"
+# Bucket and prefix identify the active bronze generation independently. An
+# empty prefix is valid when a dedicated bucket stores series at its root.
+bucket = "ja-media-bronze-v2"
 prefix = "audio/anime/bronze"
 addressing_style = "path"
 

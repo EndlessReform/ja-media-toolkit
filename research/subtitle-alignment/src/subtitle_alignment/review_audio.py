@@ -13,8 +13,6 @@ from ja_media_frontend.subsync.audio_source import (
     DEFAULT_AUDIO_PROFILE,
     resolve_subsync_audio,
 )
-from ja_media_core.bronze import parse_bronze_manifest
-
 from subtitle_alignment.access import DevReadAccess
 
 
@@ -60,8 +58,7 @@ def _bronze_audio(result: Path, anilist_id: int, episode: int) -> Path:
     connection = duckdb.connect(str(dataset / "evaluation.duckdb"), read_only=True)
     try:
         row = connection.execute(
-            """SELECT audio_capture_id, manifest_key, manifest_etag,
-                      input_fingerprint
+            """SELECT audio_object_bucket, audio_object_key, input_fingerprint
                  FROM episodes
                 WHERE cast(anilist_id AS BIGINT) = ?
                   AND cast(episode AS INTEGER) = ?
@@ -72,26 +69,16 @@ def _bronze_audio(result: Path, anilist_id: int, episode: int) -> Path:
         connection.close()
     if row is None:
         raise ValueError(f"Phase 0 has no audio locator for {anilist_id}:{episode}")
-    capture_id, manifest_key, manifest_etag, fingerprint = row
+    object_bucket, object_key, fingerprint = row
     access = DevReadAccess.from_repository_config()
-    payload = access.bronze.read_manifest(
-        manifest_key, expected_etag=manifest_etag
-    )
-    manifest = parse_bronze_manifest(
-        payload, capture_id=capture_id, manifest_key=manifest_key
-    )
-    suffix = PurePosixPath(manifest.audio.object_name).suffix or ".audio"
+    if object_bucket != access.bronze.bucket:
+        raise ValueError(
+            "snapshot audio bucket does not match the configured bronze bucket: "
+            f"{object_bucket!r} != {access.bronze.bucket!r}"
+        )
+    suffix = PurePosixPath(object_key).suffix or ".audio"
     target = dataset / "objects" / "audio" / f"{fingerprint}{suffix}"
     if target.is_file():
         return target
-    access.bronze.download_file(
-        _audio_object_key(manifest_key, manifest.audio.object_name), target
-    )
+    access.bronze.download_file(object_key, target)
     return target
-
-
-def _audio_object_key(manifest_key: str, filename: str) -> str:
-    path = PurePosixPath(manifest_key)
-    if path.parent.name != "metadata":
-        raise ValueError(f"unexpected bronze manifest layout: {manifest_key}")
-    return str(path.parent.parent / PurePosixPath(filename).name)

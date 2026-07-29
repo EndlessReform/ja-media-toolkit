@@ -23,7 +23,9 @@ cp packages/data/.env.local.example packages/data/.env.local
 Only secrets and framework connection strings belong in `.env.local`.
 `pydantic-settings` loads process environment first, then `.env.local`, then
 `config.local.toml`; nested overrides use names such as
-`JA_MEDIA_BRONZE__BUCKET`. Unknown TOML keys fail startup.
+`JA_MEDIA_BRONZE__BUCKET` and `JA_MEDIA_BRONZE__PREFIX`. Both bronze location
+fields are required, and an empty prefix means the root of a dedicated bucket.
+Unknown TOML keys fail startup.
 
 The former package `.env` is no longer read by `ja-data`. Move its stable values
 into TOML and only the required credentials into `.env.local`; delete it after

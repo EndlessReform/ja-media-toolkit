@@ -55,7 +55,8 @@ class BronzeStore:
         secret_access_key: str | None = None,
     ) -> None:
         self.bucket = bucket
-        self.prefix = prefix.strip("/") + "/"
+        normalized_prefix = prefix.strip("/")
+        self.prefix = f"{normalized_prefix}/" if normalized_prefix else ""
         self._client = boto3.client(
             "s3",
             endpoint_url=endpoint_url,
@@ -104,9 +105,7 @@ class BronzeStore:
     def probe(self) -> None:
         """Confirm bounded list access without reading a bronze object body."""
 
-        self._client.list_objects_v2(
-            Bucket=self.bucket, Prefix=self.prefix, MaxKeys=1
-        )
+        self._client.list_objects_v2(Bucket=self.bucket, Prefix=self.prefix, MaxKeys=1)
 
     def read_manifest(
         self, key: str, *, expected_etag: str | None = None

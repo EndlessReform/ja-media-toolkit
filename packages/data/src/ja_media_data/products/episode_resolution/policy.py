@@ -16,9 +16,21 @@ from ja_media_data.products.episode_resolution.models import (
     ResolutionIssueClaim,
 )
 from ja_media_data.products.episode_resolution.evidence import collect_episode_evidence
+from ja_media_data.products.episode_resolution.reasons import (
+    BRONZE_MANIFEST_FAILED_SCHEMA_VALIDATION,
+    DECLARED_ANILIST_ENTRY_HAS_NO_EPISODE_COUNT,
+    DECLARED_ANILIST_ENTRY_HAS_NO_TITLES,
+    DECLARED_ANILIST_ENTRY_IS_MOVIE,
+    DECLARED_ANILIST_ID_NOT_FOUND_IN_METADATA,
+    FILENAME_AND_DECLARED_ANILIST_ENTRY_AGREE,
+    FILENAME_CONTAINS_MULTI_EPISODE_RANGE,
+    FILENAME_EPISODE_EXCEEDS_DECLARED_ANILIST_COUNT,
+    FILENAME_TITLE_NOT_EQUAL_TO_DECLARED_ANILIST_TITLES,
+    episode_signal_failure_reason,
+)
 
 
-RECIPE_VERSION = "episode-filename-v1"
+RECIPE_VERSION = "episode-filename-v2"
 
 
 @dataclass(frozen=True)
@@ -53,7 +65,7 @@ def plan_episode_resolution(
             manifest,
             input_data_version,
             evidence,
-            reason="multi_episode_range",
+            reason=FILENAME_CONTAINS_MULTI_EPISODE_RANGE,
             kind="ambiguous",
             run_source=run_source,
         )
@@ -69,38 +81,42 @@ def plan_episode_resolution(
         input_data_version=input_data_version,
         run_source=run_source,
     )
-    if not candidates:
-        reason = (
-            "non_episodic_format"
-            if metadata and metadata.media_format == "MOVIE"
-            else "no_ordinary_episode"
-        )
+    signal_failure = episode_signal_failure_reason(ptn_episode, explicit_episodes)
+    if signal_failure is not None:
         return _issue_plan(
             manifest,
             input_data_version,
             evidence,
-            reason=reason,
-            kind="ambiguous",
-            run_source=run_source,
-        )
-    if len(candidates) != 1 or ptn_episode != candidates[0] or explicit_episodes != candidates:
-        return _issue_plan(
-            manifest,
-            input_data_version,
-            evidence,
-            reason="parser_signals_disagree",
+            reason=(
+                DECLARED_ANILIST_ENTRY_IS_MOVIE
+                if metadata
+                and metadata.media_format == "MOVIE"
+                and not candidates
+                else signal_failure
+            ),
             kind="ambiguous",
             hints=hints,
             run_source=run_source,
         )
 
+    assert ptn_episode is not None
     episode = candidates[0]
-    if metadata is None or not metadata.titles:
+    if metadata is None:
         return _issue_plan(
             manifest,
             input_data_version,
             evidence,
-            reason="title_metadata_unavailable",
+            reason=DECLARED_ANILIST_ID_NOT_FOUND_IN_METADATA,
+            kind="ambiguous",
+            hints=hints,
+            run_source=run_source,
+        )
+    if not metadata.titles:
+        return _issue_plan(
+            manifest,
+            input_data_version,
+            evidence,
+            reason=DECLARED_ANILIST_ENTRY_HAS_NO_TITLES,
             kind="ambiguous",
             hints=hints,
             run_source=run_source,
@@ -110,7 +126,7 @@ def plan_episode_resolution(
             manifest,
             input_data_version,
             evidence,
-            reason="filename_title_disagrees_with_anilist",
+            reason=FILENAME_TITLE_NOT_EQUAL_TO_DECLARED_ANILIST_TITLES,
             kind="invalid",
             hints=hints,
             run_source=run_source,
@@ -120,7 +136,7 @@ def plan_episode_resolution(
             manifest,
             input_data_version,
             evidence,
-            reason="episode_count_unavailable",
+            reason=DECLARED_ANILIST_ENTRY_HAS_NO_EPISODE_COUNT,
             kind="ambiguous",
             hints=hints,
             run_source=run_source,
@@ -131,9 +147,9 @@ def plan_episode_resolution(
             input_data_version,
             evidence,
             reason=(
-                "non_episodic_format"
+                DECLARED_ANILIST_ENTRY_IS_MOVIE
                 if metadata.media_format == "MOVIE"
-                else "episode_exceeds_anilist_count"
+                else FILENAME_EPISODE_EXCEEDS_DECLARED_ANILIST_COUNT
             ),
             kind="invalid",
             hints=hints,
@@ -155,7 +171,7 @@ def plan_episode_resolution(
     )
     return EpisodeResolutionPlan(
         classification="proposed",
-        reason="signals_agree_and_episode_is_in_bounds",
+        reason=FILENAME_AND_DECLARED_ANILIST_ENTRY_AGREE,
         hints=hints,
         proposal=proposal,
         issue=None,
@@ -240,34 +256,7 @@ def _issue_plan(
     )
 
 
-def overlap_issue(
-    plan: EpisodeResolutionPlan, *, capture_id: str, input_data_version: str
-) -> ResolutionIssueClaim:
-    """Convert a transactional uniqueness conflict into a durable review item."""
-
-    assert plan.proposal is not None
-    return ResolutionIssueClaim(
-        issue_id=_stable_id(
-            "issue", capture_id, input_data_version, RECIPE_VERSION, "overlap"
-        ),
-        capture_id=capture_id,
-        hint_id=plan.hints[0].hint_id if plan.hints else None,
-        kind="overlap",
-        details={
-            "reason": "locator_or_capture_already_bound",
-            "candidate_locator": {
-                "namespace": plan.proposal.namespace,
-                "series_id": plan.proposal.series_id,
-                "episode": plan.proposal.episode,
-            },
-            "recipe_version": RECIPE_VERSION,
-            **plan.evidence,
-        },
-        run_source=plan.proposal.run_source,
-    )
-
-
-def invalid_manifest_issue(
+def manifest_schema_validation_issue(
     *,
     capture_id: str,
     input_data_version: str,
@@ -275,17 +264,21 @@ def invalid_manifest_issue(
     manifest_key: str,
     run_source: str | None = None,
 ) -> ResolutionIssueClaim:
-    """Create a deterministic DLQ row for an unreadable committed manifest."""
+    """Create a deterministic review row for a manifest that failed validation."""
 
     return ResolutionIssueClaim(
         issue_id=_stable_id(
-            "issue", capture_id, input_data_version, RECIPE_VERSION, "invalid_manifest"
+            "issue",
+            capture_id,
+            input_data_version,
+            RECIPE_VERSION,
+            BRONZE_MANIFEST_FAILED_SCHEMA_VALIDATION,
         ),
         capture_id=capture_id,
         hint_id=None,
         kind="invalid",
         details={
-            "reason": "invalid_manifest",
+            "reason": BRONZE_MANIFEST_FAILED_SCHEMA_VALIDATION,
             "error": error,
             "manifest_key": manifest_key,
             "recipe_version": RECIPE_VERSION,

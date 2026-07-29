@@ -2,7 +2,9 @@ environment = "dev"
 
 [bronze]
 endpoint_url = "http://storage.example.ts.net:3900"
-bucket = "ja-media-prod"
+# Repoint both values together when changing bronze generations. Use an empty
+# prefix when the dedicated bucket stores series directly at its root.
+bucket = "ja-media-bronze-v2"
 prefix = "audio/anime/bronze"
 
 [ducklake]

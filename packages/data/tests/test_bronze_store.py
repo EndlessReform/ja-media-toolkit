@@ -79,9 +79,7 @@ def test_binary_download_is_atomic_and_prefix_scoped(tmp_path) -> None:
     store._client = FakeClient()
     target = tmp_path / "cache" / "show.flac"
 
-    etag = store.download_file(
-        "audio/anime/bronze/1/show.flac", target
-    )
+    etag = store.download_file("audio/anime/bronze/1/show.flac", target)
 
     assert etag == "audio-etag"
     assert target.read_bytes() == b"audio"
@@ -89,7 +87,11 @@ def test_binary_download_is_atomic_and_prefix_scoped(tmp_path) -> None:
 
 def test_bronze_store_uses_typed_settings() -> None:
     settings = DataSettings(
-        bronze={"endpoint_url": "https://garage.example", "bucket": "media"},
+        bronze={
+            "endpoint_url": "https://garage.example",
+            "bucket": "media-v2",
+            "prefix": "captures/v2",
+        },
         ducklake={
             "postgres_url": "postgresql://local/test",
             "data_path": "/tmp/ducklake",
@@ -99,5 +101,22 @@ def test_bronze_store_uses_typed_settings() -> None:
 
     store = bronze_store_from_settings(settings)
 
-    assert store.bucket == "media"
-    assert store.prefix == "audio/anime/bronze/"
+    assert store.bucket == "media-v2"
+    assert store.prefix == "captures/v2/"
+
+
+def test_dedicated_bucket_may_use_its_root_as_the_prefix() -> None:
+    settings = DataSettings(
+        bronze={
+            "endpoint_url": "https://garage.example",
+            "bucket": "media-v2",
+            "prefix": "",
+        },
+        ducklake={
+            "postgres_url": "postgresql://local/test",
+            "data_path": "/tmp/ducklake",
+        },
+        services={"root_url": "http://services"},
+    )
+
+    assert bronze_store_from_settings(settings).prefix == ""

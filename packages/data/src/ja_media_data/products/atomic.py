@@ -25,7 +25,9 @@ class AtomicProductStore:
     def current_fingerprint(self, target: str) -> str | None:
         source = table_ref("materializations")
         row = self.connection.execute(
-            """SELECT fingerprint FROM """ + source + """
+            """SELECT fingerprint FROM """
+            + source
+            + """
                WHERE target = ? AND scope = 'corpus'
                ORDER BY computed_at DESC, materialization_id DESC LIMIT 1""",
             [target],
@@ -36,7 +38,7 @@ class AtomicProductStore:
         self,
         *,
         target: str,
-        tables: Sequence[tuple[str, int, Sequence[tuple[object, ...]]]],
+        tables: Sequence[tuple[str, Sequence[str], Sequence[tuple[object, ...]]]],
         fingerprint: str,
         rows: int,
         context: MaterializationContext,
@@ -50,21 +52,23 @@ class AtomicProductStore:
         self.connection.execute("BEGIN TRANSACTION")
         try:
             self._insert_materialization(
-                materialization_id, target, fingerprint, computed_at, context,
+                materialization_id,
+                target,
+                fingerprint,
+                computed_at,
+                context,
                 scope="corpus",
             )
             for table, columns, values in tables:
                 self.connection.execute(f"DELETE FROM {table}")
                 augmented = [row + (computed_at, context.attempt_id) for row in values]
-                self._insert_many(table, columns + 2, augmented)
+                self._insert_many(table, (*columns, "computed_at", "run_id"), augmented)
             self.connection.execute("COMMIT")
         except Exception:
             self.connection.execute("ROLLBACK")
             raise
         self._attach_snapshot(materialization_id)
-        return ProductCommitResult(
-            target, True, fingerprint, rows, materialization_id
-        )
+        return ProductCommitResult(target, True, fingerprint, rows, materialization_id)
 
     def _validated(
         self,
@@ -76,20 +80,22 @@ class AtomicProductStore:
         computed_at = datetime.now(UTC)
         materialization_id = self._new_materialization_id(target)
         self._insert_materialization(
-            materialization_id, target, fingerprint, computed_at, context,
+            materialization_id,
+            target,
+            fingerprint,
+            computed_at,
+            context,
             scope="corpus",
         )
         self._attach_snapshot(materialization_id)
-        return ProductCommitResult(
-            target, False, fingerprint, rows, materialization_id
-        )
+        return ProductCommitResult(target, False, fingerprint, rows, materialization_id)
 
     def merge(
         self,
         *,
         target: str,
         table: str,
-        columns: int,
+        columns: Sequence[str],
         values: Sequence[tuple[object, ...]],
         key_columns: tuple[str, ...],
         key_indexes: tuple[int, ...],
@@ -107,17 +113,19 @@ class AtomicProductStore:
         self.connection.execute("BEGIN TRANSACTION")
         try:
             self._insert_materialization(
-                materialization_id, target, fingerprint, computed_at, context,
+                materialization_id,
+                target,
+                fingerprint,
+                computed_at,
+                context,
                 scope="items",
             )
             if keys:
                 self.connection.executemany(
                     f"DELETE FROM {table} WHERE {predicate}", keys
                 )
-            augmented = [
-                row + (computed_at, context.attempt_id) for row in values
-            ]
-            self._insert_many(table, columns + 2, augmented)
+            augmented = [row + (computed_at, context.attempt_id) for row in values]
+            self._insert_many(table, (*columns, "computed_at", "run_id"), augmented)
             self.connection.execute("COMMIT")
         except Exception:
             self.connection.execute("ROLLBACK")
@@ -156,7 +164,9 @@ class AtomicProductStore:
         )
 
     def _attach_snapshot(self, materialization_id: str) -> None:
-        catalog = str(self.connection.execute("SELECT current_database()").fetchone()[0])
+        catalog = str(
+            self.connection.execute("SELECT current_database()").fetchone()[0]
+        )
         quoted = '"' + catalog.replace('"', '""') + '"'
         row = self.connection.execute(
             f"SELECT id FROM {quoted}.current_snapshot()"
@@ -171,12 +181,16 @@ class AtomicProductStore:
         return f"materialization-{target}-{uuid.uuid4().hex}"
 
     def _insert_many(
-        self, table: str, columns: int, rows: Sequence[tuple[object, ...]]
+        self,
+        table: str,
+        columns: Sequence[str],
+        rows: Sequence[tuple[object, ...]],
     ) -> None:
         if rows:
+            names = ", ".join(columns)
             self.connection.executemany(
-                f"INSERT INTO {table} VALUES ("
-                + ", ".join("?" for _ in range(columns))
+                f"INSERT INTO {table} ({names}) VALUES ("
+                + ", ".join("?" for _ in columns)
                 + ")",
                 rows,
             )

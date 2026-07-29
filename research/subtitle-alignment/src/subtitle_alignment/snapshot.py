@@ -20,15 +20,8 @@ from subtitle_alignment.objects import cache_embedded
 from subtitle_alignment.sampling import qualify_series
 from subtitle_alignment.silver import (
     SilverSelection,
-    apply_temporary_series_allowlist,
     load_anilist_pool,
     load_selection,
-)
-
-
-# DO NOT MERGE: delete this gate when Bronze v2 replaces the broken v1 corpus.
-_TEMPORARY_SERIES_ALLOWLIST = (
-    Path(__file__).resolve().parents[2] / "DELETETHIS-subs-only-anilist-ids.txt"
 )
 
 
@@ -41,7 +34,6 @@ def build_snapshot(
     connection = access.connect_catalog()
     try:
         pool = load_anilist_pool(connection, seed=seed)
-        pool = apply_temporary_series_allowlist(pool, _TEMPORARY_SERIES_ALLOWLIST)
     finally:
         connection.close()
 
@@ -61,9 +53,7 @@ def build_snapshot(
         )
         connection = access.connect_catalog()
         try:
-            selection = load_selection(
-                connection, pool=pool, series_ids=accepted
-            )
+            selection = load_selection(connection, pool=pool, series_ids=accepted)
         finally:
             connection.close()
         embedded = cache_embedded(temporary, selection, access)
@@ -93,9 +83,7 @@ def build_snapshot(
                     "ok": health.get("ok"),
                     "ingest_phase": health.get("ingest_phase"),
                     "mirror_commit": health.get("mirror_commit"),
-                    "crosswalk_source_commit": health.get(
-                        "crosswalk_source_commit"
-                    ),
+                    "crosswalk_source_commit": health.get("crosswalk_source_commit"),
                 },
                 "stats": stats_after,
             },
@@ -128,8 +116,7 @@ def build_snapshot(
             "series_draws": draws,
         }
         (temporary / "manifest.json").write_text(
-            json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True)
-            + "\n"
+            json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
         )
         temporary.replace(target)
     except Exception:
@@ -150,7 +137,9 @@ def _write_database(
 ) -> None:
     connection = duckdb.connect(str(root / "evaluation.duckdb"))
     try:
-        _create_table(connection, "episodes", [asdict(item) for item in selection.episodes])
+        _create_table(
+            connection, "episodes", [asdict(item) for item in selection.episodes]
+        )
         _create_table(connection, "embedded_subtitles", embedded)
         inventory_rows = [
             {

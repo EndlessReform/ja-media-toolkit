@@ -154,7 +154,9 @@ internal.
 `/etc/ja-media/.env.dev` contains credentials and framework connection strings.
 It is root-owned and mode `0640`, readable only by the deployment operator's
 group. Stable endpoints, buckets, prefixes, schemas, and service URLs belong in
-`config.dev.toml`.
+`config.dev.toml`. `bronze.bucket` and `bronze.prefix` must be repointed
+together when changing bronze generations; an empty prefix selects the root of
+a dedicated bucket.
 
 | Variable | Purpose |
 | --- | --- |

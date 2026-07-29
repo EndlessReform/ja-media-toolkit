@@ -28,22 +28,39 @@ def test_legacy_manifest_uses_object_layout_for_series() -> None:
     assert manifest.series.identifier == "15451"
     assert manifest.stem == "Show_Ep03"
     assert manifest.audio.declared_language == "jpn"
+    assert manifest.audio_tracks == (manifest.audio,)
 
 
-def test_v2_manifest_preserves_explicit_series_and_stream_headers() -> None:
+def test_v2_manifest_preserves_ordered_audio_and_stream_headers() -> None:
     manifest = parse_bronze_manifest(
         {
             "schema_version": 2,
-            "capture_id": "capture-v2",
-            "series": {"namespace": "anilist", "id": 15451},
-            "source_hint": "Show - 03.mkv",
-            "audio": {
-                "key": "Show - 03.flac",
-                "stream_index": 2,
-                "codec": "flac",
-                "declared_language": "jpn",
-                "is_default": True,
-            },
+            "source": "/staging/Show - 03.mkv",
+            "stem": "Show - 03",
+            "audio_tracks": [
+                {
+                    "filename": "Show - 03.stream_1.ac3",
+                    "stream_index": 1,
+                    "codec": "ac3",
+                    "declared_language": "eng",
+                    "is_default": True,
+                    "channels": 6,
+                    "channel_layout": "5.1(side)",
+                    "sample_rate": 48000,
+                    "bit_rate": 448000,
+                },
+                {
+                    "filename": "Show - 03.stream_2.ac3",
+                    "stream_index": 2,
+                    "codec": "ac3",
+                    "declared_language": "jpn",
+                    "is_default": False,
+                    "channels": 2,
+                    "channel_layout": "stereo",
+                    "sample_rate": 48000,
+                    "bit_rate": 192000,
+                },
+            ],
             "subtitles": [
                 {
                     "key": "stream_4.srt",
@@ -60,13 +77,23 @@ def test_v2_manifest_preserves_explicit_series_and_stream_headers() -> None:
 
     assert manifest.series.identifier == "15451"
     assert manifest.stem == "Show - 03"
+    assert [track.declared_language for track in manifest.audio_tracks] == [
+        "eng",
+        "jpn",
+    ]
+    assert manifest.audio_tracks[1].channel_layout == "stereo"
+    assert manifest.audio_tracks[1].bit_rate == 192000
     assert manifest.subtitles[0].codec == "ass"
+
+    with pytest.raises(BronzeManifestError, match="select one explicitly"):
+        _ = manifest.audio
 
 
 @pytest.mark.parametrize(
     "payload, message",
     [
         ({"schema_version": 7}, "unsupported"),
+        ({"schema_version": 2, "source": "Show.mkv", "audio": {}}, "audio_tracks"),
         ({"audio": {}, "subtitles": []}, "source_hint"),
         (
             {
@@ -78,7 +105,9 @@ def test_v2_manifest_preserves_explicit_series_and_stream_headers() -> None:
         ),
     ],
 )
-def test_invalid_manifest_is_explainable(payload: dict[str, object], message: str) -> None:
+def test_invalid_manifest_is_explainable(
+    payload: dict[str, object], message: str
+) -> None:
     with pytest.raises(BronzeManifestError, match=message):
         parse_bronze_manifest(
             payload,

@@ -17,8 +17,11 @@ from ja_media_data.storage.bronze import BronzeDocument, BronzeStore
 from ja_media_data.products.episode_resolution.metadata import EpisodeMetadataProvider
 from ja_media_data.products.episode_resolution.policy import (
     EpisodeResolutionPlan,
-    invalid_manifest_issue,
+    manifest_schema_validation_issue,
     plan_episode_resolution,
+)
+from ja_media_data.products.episode_resolution.reasons import (
+    BRONZE_MANIFEST_FAILED_SCHEMA_VALIDATION,
 )
 from ja_media_data.products.episode_resolution.models import CaptureObservation
 
@@ -118,7 +121,7 @@ def _invalid_plan(
     run_source: str | None,
 ) -> PlannedDocument:
     namespace, series_id = _series_hint(document.marker.key)
-    issue = invalid_manifest_issue(
+    issue = manifest_schema_validation_issue(
         capture_id=document.marker.capture_id,
         input_data_version=document.marker.etag,
         error=str(error),
@@ -128,7 +131,7 @@ def _invalid_plan(
     evidence = {"error": str(error), "manifest_key": document.marker.key}
     plan = EpisodeResolutionPlan(
         classification="quarantined",
-        reason="invalid_manifest",
+        reason=BRONZE_MANIFEST_FAILED_SCHEMA_VALIDATION,
         hints=(),
         proposal=None,
         issue=issue,
@@ -141,7 +144,7 @@ def _invalid_plan(
             series_id=series_id,
             stem=PurePosixPath(document.marker.key).stem,
             classification="quarantined",
-            reason="invalid_manifest",
+            reason=BRONZE_MANIFEST_FAILED_SCHEMA_VALIDATION,
             locator=None,
             issue_kind="invalid",
             evidence=evidence,

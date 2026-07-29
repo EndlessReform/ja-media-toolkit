@@ -13,7 +13,6 @@ from subtitle_alignment.review_data import (
     append_judgment,
     track_stats,
 )
-from subtitle_alignment.review_audio import _audio_object_key
 from subtitle_alignment.review_full_tracks import (
     FullTrackComparisonModal,
     format_full_track,
@@ -96,36 +95,67 @@ def test_stale_playback_tick_cannot_claim_missing_audio_is_ready() -> None:
 def test_variants_pin_identity_then_rank_scored_methods_descending() -> None:
     def variant(method: str, score: float | None, order: int) -> Variant:
         return Variant(
-            pair_id="pair", method=method, method_order=order,
-            output_path=f"{method}.srt", status="scored", score=score, gain=None,
-            scale=None, median_offset_s=None, min_offset_s=None, max_offset_s=None,
-            max_abs_offset_s=None, offset_blocks=None,
-            offset_bound_exceeded=False, block_starts_s=(),
+            pair_id="pair",
+            method=method,
+            method_order=order,
+            output_path=f"{method}.srt",
+            status="scored",
+            score=score,
+            gain=None,
+            scale=None,
+            median_offset_s=None,
+            min_offset_s=None,
+            max_offset_s=None,
+            max_abs_offset_s=None,
+            offset_blocks=None,
+            offset_bound_exceeded=False,
+            block_starts_s=(),
         )
 
     variants = [
-        variant("weak", 0.2, 1), variant("unscored", None, 2),
-        variant("identity", 0.1, 0), variant("strong", 0.9, 3),
+        variant("weak", 0.2, 1),
+        variant("unscored", None, 2),
+        variant("identity", 0.1, 0),
+        variant("strong", 0.9, 3),
     ]
 
     assert [item.method for item in sorted(variants, key=_variant_sort_key)] == [
-        "identity", "strong", "weak", "unscored",
+        "identity",
+        "strong",
+        "weak",
+        "unscored",
     ]
 
 
 def test_judgments_are_append_only_and_joinable(tmp_path) -> None:
     variant = Variant(
-        pair_id="pair", method="alass-global", method_order=1,
-        output_path="out.srt", status="scored", score=0.5, gain=0.2,
-        scale=1.0, median_offset_s=60.0, min_offset_s=60.0,
-        max_offset_s=60.0, max_abs_offset_s=60.0, offset_blocks=1,
-        offset_bound_exceeded=True, block_starts_s=(60.0,),
+        pair_id="pair",
+        method="alass-global",
+        method_order=1,
+        output_path="out.srt",
+        status="scored",
+        score=0.5,
+        gain=0.2,
+        scale=1.0,
+        median_offset_s=60.0,
+        min_offset_s=60.0,
+        max_offset_s=60.0,
+        max_abs_offset_s=60.0,
+        offset_blocks=1,
+        offset_bound_exceeded=True,
+        block_starts_s=(60.0,),
     )
     case = ReviewCase(
-        pair_id="pair", anilist_id=1, episode=2, anchor_path="anchor.srt",
-        anchor_format="subrip", candidate_path="candidate.srt",
-        candidate_format="subrip", candidate_repo_path="series/file.srt",
-        identity_decile=1, variants=(variant,),
+        pair_id="pair",
+        anilist_id=1,
+        episode=2,
+        anchor_path="anchor.srt",
+        anchor_format="subrip",
+        candidate_path="candidate.srt",
+        candidate_format="subrip",
+        candidate_repo_path="series/file.srt",
+        identity_decile=1,
+        variants=(variant,),
     )
     path = tmp_path / "annotations.jsonl"
 
@@ -135,12 +165,6 @@ def test_judgments_are_append_only_and_joinable(tmp_path) -> None:
     rows = [json.loads(line) for line in path.read_text().splitlines()]
     assert [row["label"] for row in rows] == ["anchor_sparse", "needs_audio"]
     assert all(row["pair_id"] == "pair" for row in rows)
-
-
-def test_bronze_audio_key_is_sibling_of_metadata_directory() -> None:
-    assert _audio_object_key(
-        "audio/anime/bronze/186/metadata/show.json", "show.ac3"
-    ) == "audio/anime/bronze/186/show.ac3"
 
 
 def test_result_path_resolves_from_repository_root(tmp_path, monkeypatch) -> None:

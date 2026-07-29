@@ -22,12 +22,6 @@ uv sync
 uv run alignment-research snapshot --series-count 25 --seed 20260726
 ```
 
-> **DO NOT MERGE — temporary Bronze v1 escape hatch:** `snapshot` currently
-> restricts its Silver draw pool to AniList IDs in the gitignored
-> `DELETETHIS-subs-only-anilist-ids.txt`. It fails closed when that file is
-> missing or empty. Delete the gate in `snapshot.py`, its helper/test, and this
-> note when Bronze v2 is ready.
-
 The command automatically uses the repository's existing DEV read credentials
 and the personal `[services].root_url` configuration. It does not require a new
 environment file and does not print secrets or the resolved tailnet URL.

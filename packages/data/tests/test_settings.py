@@ -6,7 +6,12 @@ import pytest
 from pydantic import ValidationError
 
 from ja_media_data.preflight import _safe_error
-from ja_media_data.settings import DataSettings, get_settings, reset_settings_cache
+from ja_media_data.settings import (
+    BronzeSettings,
+    DataSettings,
+    get_settings,
+    reset_settings_cache,
+)
 
 
 def _toml(path: Path) -> None:
@@ -15,6 +20,7 @@ def _toml(path: Path) -> None:
 [bronze]
 endpoint_url = "http://garage:3900"
 bucket = "bronze"
+prefix = "captures/v2"
 [ducklake]
 postgres_url = "postgresql://local/test"
 data_path = "s3://silver/local/"
@@ -44,8 +50,7 @@ def test_adjacent_dotenv_overrides_toml_but_not_process_env(
     config = tmp_path / "config.local.toml"
     _toml(config)
     (tmp_path / ".env.local").write_text(
-        "JA_MEDIA_BRONZE__BUCKET=dotenv\n"
-        "DAGSTER_POSTGRES_URL=postgresql://framework\n",
+        "JA_MEDIA_BRONZE__BUCKET=dotenv\nDAGSTER_POSTGRES_URL=postgresql://framework\n",
         encoding="utf-8",
     )
     monkeypatch.setenv("JA_MEDIA_DATA_CONFIG", str(config))
@@ -69,9 +74,18 @@ def test_unknown_toml_keys_fail_closed(tmp_path, monkeypatch) -> None:
         get_settings()
 
 
+def test_bronze_prefix_is_explicit_even_for_a_dedicated_bucket() -> None:
+    with pytest.raises(ValidationError, match="prefix"):
+        BronzeSettings(endpoint_url="http://garage", bucket="bronze-v2")
+
+
 def test_settings_are_immutable() -> None:
     settings = DataSettings(
-        bronze={"endpoint_url": "http://garage", "bucket": "bronze"},
+        bronze={
+            "endpoint_url": "http://garage",
+            "bucket": "bronze-v2",
+            "prefix": "captures/v2",
+        },
         ducklake={
             "postgres_url": "postgresql://local/test",
             "data_path": "s3://silver/local/",
