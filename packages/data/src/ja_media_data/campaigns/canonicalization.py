@@ -14,7 +14,7 @@ _CONCLUSION_ASSETS = (
 
 CANONICALIZATION_CAMPAIGN = OperatorCampaign.create(
     campaign_id="canonicalization-gate",
-    revision=1,
+    revision=2,
     job_name="canonicalization_campaign",
     selection=dg.AssetSelection.assets(*_CONCLUSION_ASSETS).upstream(
         include_self=True
@@ -22,8 +22,8 @@ CANONICALIZATION_CAMPAIGN = OperatorCampaign.create(
     presentation=CampaignPresentation(
         label="Binding & canonicalization desk",
         description=(
-            "Inspect resolver proposals, automatic admission, overrides, "
-            "and canonical captures."
+            "Inspect resolver proposals, audio eligibility, automatic admission, "
+            "overrides, and canonical captures."
         ),
         scope_kind="corpus",
         lens_kind="canonicalization",

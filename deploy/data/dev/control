@@ -201,6 +201,12 @@ update() {
         code-location server-worker operator-web; then
         die "application replacement failed; previous image was $previous"
     fi
+    # Caddy's upstream is the replaceable operator container. Recreate the
+    # gateway only after that container is healthy so Caddy provisions against
+    # the current Docker endpoint rather than the container just removed.
+    if ! compose up -d --no-deps --force-recreate --wait gateway; then
+        die "gateway replacement failed; previous image was $previous"
+    fi
     if ! preflight; then
         die "preflight failed; inspect the deployment or roll back to $previous"
     fi

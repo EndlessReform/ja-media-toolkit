@@ -26,6 +26,7 @@ EXPECTED_ASSETS = {
     "episode_binding_proposals",
     "resolution_issues_auto",
     "accepted_bindings_auto",
+    "capture_audio_eligibility",
     "canonical_episode_inputs",
     "canonical_subtitle_inputs",
     "subtitle_language_results",
@@ -45,7 +46,12 @@ def test_collection_graph_has_no_capture_or_locator_partitions() -> None:
     assert {
         key.to_user_string()
         for key in graph.get(dg.AssetKey("canonical_episode_inputs")).parent_keys
-    } == {"accepted_bindings_auto", "binding_overrides", "bronze_captures"}
+    } == {
+        "accepted_bindings_auto",
+        "binding_overrides",
+        "bronze_captures",
+        "capture_audio_eligibility",
+    }
 
 
 def test_canary_is_non_publishing(repository) -> None:

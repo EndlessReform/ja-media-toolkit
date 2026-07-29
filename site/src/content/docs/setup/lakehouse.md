@@ -89,6 +89,17 @@ rows while Dagster records the execution. A changed input replaces the product
 atomically; the previous version remains available through DuckLake snapshot
 time travel.
 
+Canonicalization first materializes `capture_audio_eligibility`, one decision
+per committed Bronze capture. Legacy manifests remain eligible through their
+single audio track. For schema v2, the current deliberately narrow policy pins
+the first track whose `declared_language` is exactly `jpn`; captures without one
+are retained as inspectable ineligible decisions instead of failing the corpus
+run. Automatic binding selection chooses the newest eligible capture for an
+episode, while an explicit override to an ineligible capture remains unresolved
+and never silently falls back. The operator workbench exposes the decision,
+reason, selected stream, and complete declared track headers in the existing
+canonicalization stage inspector.
+
 ## Back up the catalog
 
 Run from the deployment environment with its protected PostgreSQL DSN, then

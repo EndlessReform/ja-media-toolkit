@@ -9,6 +9,9 @@ from dataclasses import dataclass
 
 from ja_media_data.products.binding_acceptance.compiler import ACCEPTANCE_POLICY_VERSION
 from ja_media_data.products.canonical_inputs.compiler import CANONICALIZATION_POLICY_VERSION
+from ja_media_data.products.capture_audio_eligibility.compiler import (
+    AUDIO_ELIGIBILITY_POLICY_VERSION,
+)
 from ja_media_data.products.subtitle_lid.compiler import SUBTITLE_LID_RECIPE_VERSION
 
 
@@ -33,6 +36,12 @@ PRESENTATIONS = (
         "bronze_captures", "episode_binding_proposals", "episode_resolution", None,
     ),
     StagePresentation(
+        "capture_audio_eligibility", "audio_eligibility", "Audio eligibility",
+        "bronze_captures", "capture_audio_eligibility",
+        "capture_audio_eligibility", AUDIO_ELIGIBILITY_POLICY_VERSION,
+        ("bronze_captures",),
+    ),
+    StagePresentation(
         "accepted_bindings_auto", "accepted_bindings", "Automatic acceptance",
         "episode_binding_proposals", "accepted_bindings_auto", "accepted_bindings",
         ACCEPTANCE_POLICY_VERSION, ("episode_resolution",),
@@ -41,7 +50,7 @@ PRESENTATIONS = (
         "compile_canonical_inputs", "canonical_inputs", "Canonical inputs",
         "accepted_bindings_auto", "canonical_episode_inputs", "canonical_inputs",
         CANONICALIZATION_POLICY_VERSION,
-        ("accepted_bindings", "bronze_captures"), True,
+        ("accepted_bindings", "bronze_captures", "capture_audio_eligibility"), True,
     ),
     StagePresentation(
         "subtitle_language_results", "subtitle_lid",

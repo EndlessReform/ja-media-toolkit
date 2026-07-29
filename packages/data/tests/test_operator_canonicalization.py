@@ -202,6 +202,10 @@ def test_json_html_htmx_and_static_asset_share_one_snapshot(repository) -> None:
         empty = client.get(lens_url, params={"series_id": "no-match"})
         reset = client.get(lens_url, params={"series_id": "  "})
         accepted = client.get("/operator/campaigns/canonicalization-gate/stages/accepted_bindings", params={"limit": 1})
+        audio = client.get(
+            "/operator/campaigns/canonicalization-gate/stages/audio_eligibility",
+            params={"limit": 10},
+        )
         canonical = client.get("/operator/campaigns/canonicalization-gate/stages/canonical_inputs")
         product = client.get("/operator/campaigns/canonicalization-gate/products", params={"limit": 1})
         product_with_blank_view = client.get(
@@ -213,6 +217,8 @@ def test_json_html_htmx_and_static_asset_share_one_snapshot(repository) -> None:
         )
 
     assert payload.status_code == 200
+    assert audio.status_code == 200
+    assert "selected_first_audio_track_declared_japanese" in audio.text
     assert product_with_blank_view.status_code == 200
     assert payload.json()["lens"]["gates"][0]["selected_capture_id"] == "capture-new"
     assert payload.json()["lens"]["gates"][0]["series_url"] == "https://anilist.co/anime/15451"

@@ -8,11 +8,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import PurePosixPath
 
-from ja_media_core.bronze import (
-    BronzeCaptureManifest,
-    BronzeStream,
-    parse_bronze_manifest,
-)
+from ja_media_core.bronze import BronzeStream, parse_bronze_manifest
 
 from ja_media_data.storage.bronze import BronzeStore
 from ja_media_data.lakehouse.repository import DuckLakeRepository
@@ -36,6 +32,11 @@ class Candidate:
     manifest_key: str
     manifest_etag: str
     manifest_modified_at: datetime
+    audio_object_bucket: str
+    audio_object_key: str
+    audio_stream_index: int
+    audio_codec: str | None
+    audio_declared_language: str | None
 
     @property
     def locator(self) -> tuple[str, str, str]:
@@ -85,15 +86,9 @@ def build_canonical_rows(
             capture_id=candidate.capture_id,
             manifest_key=candidate.manifest_key,
         )
-        audio = select_audio_track(manifest)
-        audio_key = audio_object_key(candidate.manifest_key, audio.object_name)
         canonical_fp = fingerprint(
             policy_version,
             asdict(candidate),
-            audio_key,
-            audio.stream_index,
-            audio.codec,
-            audio.declared_language,
         )
         canonical_id = stable_id("canonical", *candidate.locator, canonical_fp)
         episodes.append(
@@ -109,11 +104,11 @@ def build_canonical_rows(
                 manifest_key=candidate.manifest_key,
                 manifest_etag=candidate.manifest_etag,
                 manifest_modified_at=candidate.manifest_modified_at,
-                audio_object_bucket=candidate.bucket,
-                audio_object_key=audio_key,
-                audio_stream_index=audio.stream_index,
-                audio_codec=audio.codec,
-                audio_declared_language=audio.declared_language,
+                audio_object_bucket=candidate.audio_object_bucket,
+                audio_object_key=candidate.audio_object_key,
+                audio_stream_index=candidate.audio_stream_index,
+                audio_codec=candidate.audio_codec,
+                audio_declared_language=candidate.audio_declared_language,
                 input_fingerprint=canonical_fp,
             )
         )
@@ -124,6 +119,7 @@ def build_canonical_rows(
                     canonical_id,
                     canonical_fp,
                     subtitle,
+                    capture_stem=manifest.stem,
                     fingerprint=fingerprint,
                     stable_id=stable_id,
                 )
@@ -137,10 +133,21 @@ def _effective_candidates(repository: DuckLakeRepository) -> list[Candidate]:
                   accepted.audio_capture_id, accepted.acceptance_id,
                   capture.manifest_bucket, capture.manifest_key,
                   capture.manifest_etag,
-                  coalesce(capture.manifest_modified_at, capture.last_observed_at)
+                  coalesce(capture.manifest_modified_at, capture.last_observed_at),
+                  audio.selected_audio_object_bucket,
+                  audio.selected_audio_object_key,
+                  audio.selected_audio_stream_index,
+                  audio.selected_audio_codec,
+                  audio.selected_audio_declared_language
            FROM accepted_bindings_auto AS accepted
            JOIN bronze_captures AS capture
-             ON capture.capture_id = accepted.audio_capture_id"""
+             ON capture.capture_id = accepted.audio_capture_id
+           JOIN capture_audio_eligibility AS audio
+             ON audio.capture_id = accepted.audio_capture_id
+            AND audio.manifest_bucket = capture.manifest_bucket
+            AND audio.manifest_key = capture.manifest_key
+            AND audio.manifest_etag = capture.manifest_etag
+            AND audio.status = 'eligible'"""
     ).fetchall()
     candidates = [Candidate(*row[:5], "automatic", *row[5:]) for row in rows]
     if repository.override_repository is None:
@@ -152,9 +159,23 @@ def _effective_candidates(repository: DuckLakeRepository) -> list[Candidate]:
         if override.audio_capture_id is None:
             continue
         capture = repository.connection.execute(
-            """SELECT manifest_bucket, manifest_key, manifest_etag,
-                      coalesce(manifest_modified_at, last_observed_at)
-               FROM bronze_captures WHERE capture_id = ? LIMIT 1""",
+            """SELECT capture.manifest_bucket, capture.manifest_key,
+                      capture.manifest_etag,
+                      coalesce(capture.manifest_modified_at,
+                               capture.last_observed_at),
+                      audio.selected_audio_object_bucket,
+                      audio.selected_audio_object_key,
+                      audio.selected_audio_stream_index,
+                      audio.selected_audio_codec,
+                      audio.selected_audio_declared_language
+               FROM bronze_captures AS capture
+               JOIN capture_audio_eligibility AS audio
+                 ON audio.capture_id = capture.capture_id
+                AND audio.manifest_bucket = capture.manifest_bucket
+                AND audio.manifest_key = capture.manifest_key
+                AND audio.manifest_etag = capture.manifest_etag
+                AND audio.status = 'eligible'
+               WHERE capture.capture_id = ? LIMIT 1""",
             [override.audio_capture_id],
         ).fetchone()
         if capture is not None:
@@ -178,10 +199,13 @@ def _subtitle_row(
     canonical_fp: str,
     stream: BronzeStream,
     *,
+    capture_stem: str,
     fingerprint: Callable[..., str],
     stable_id: Callable[..., str],
 ) -> CanonicalSubtitleInput:
-    object_key = subtitle_object_key(candidate.manifest_key, stream.object_name)
+    object_key = subtitle_object_key(
+        candidate.manifest_key, stream.object_name, capture_stem=capture_stem
+    )
     input_fp = fingerprint(canonical_fp, object_key, stream.stream_index)
     return CanonicalSubtitleInput(
         stable_id("subtitle", canonical_id, str(stream.stream_index), object_key),
@@ -197,31 +221,19 @@ def _subtitle_row(
     )
 
 
-def select_audio_track(manifest: BronzeCaptureManifest) -> BronzeStream:
-    """Apply the deliberately narrow v2 Japanese-audio policy."""
-
-    if manifest.schema_version == 1:
-        return manifest.audio
-    for track in manifest.audio_tracks:
-        if track.declared_language == "jpn":
-            return track
-    raise ValueError(
-        f"v2 capture {manifest.capture_id} has no audio track declared as jpn"
-    )
-
-
 def audio_object_key(manifest_key: str, name: str) -> str:
     """Resolve an audio name beneath the configured manifest's series root."""
 
     return _object_key(manifest_key, name, default_directory=None)
 
 
-def subtitle_object_key(manifest_key: str, name: str) -> str:
+def subtitle_object_key(
+    manifest_key: str, name: str, *, capture_stem: str
+) -> str:
     """Resolve v2 explicit keys and the legacy series/subs/stem layout."""
 
-    manifest = PurePosixPath(manifest_key)
     return _object_key(
-        manifest_key, name, default_directory=PurePosixPath("subs") / manifest.stem
+        manifest_key, name, default_directory=PurePosixPath("subs") / capture_stem
     )
 
 

@@ -170,7 +170,12 @@ def accepted_bindings(context) -> dg.MaterializeResult:
 
 @dg.multi_asset(
     name="compile_canonical_inputs",
-    deps=[accepted_bindings, binding_overrides, "bronze_captures"],
+    deps=[
+        accepted_bindings,
+        binding_overrides,
+        "bronze_captures",
+        "capture_audio_eligibility",
+    ],
     outs={
         "canonical_episode_inputs": dg.AssetOut(
             code_version=CANONICALIZATION_POLICY_VERSION
@@ -187,7 +192,12 @@ def canonical_inputs(context):
 
     runtime = _runtime(context)
     repository = runtime.product_repository()
-    heads = input_heads(repository, "accepted_bindings", "bronze_captures")
+    heads = input_heads(
+        repository,
+        "accepted_bindings",
+        "bronze_captures",
+        "capture_audio_eligibility",
+    )
     heads["binding_overrides"] = {
         "revision": binding_override_revision(repository)
     }

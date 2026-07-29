@@ -89,6 +89,7 @@ def catalog(tmp_path_factory):
         "005_human_run_numbers.sql",
         "006_worker_handoffs.sql",
         "007_canonical_audio_track.sql",
+        "008_capture_audio_eligibility.sql",
     ]
     yield connection
     connection.close()
@@ -96,7 +97,7 @@ def catalog(tmp_path_factory):
 
 def test_apply_schema_is_idempotent(catalog) -> None:
     assert apply_schema(catalog) == []
-    assert catalog.execute("SELECT count(*) FROM schema_history").fetchone()[0] == 7
+    assert catalog.execute("SELECT count(*) FROM schema_history").fetchone()[0] == 8
 
 
 def test_apply_schema_rejects_an_edited_applied_file(catalog, tmp_path) -> None:
@@ -116,6 +117,7 @@ def test_only_final_resolution_contracts_exist(catalog) -> None:
     assert "episode_hints_auto" in tables
     assert "episode_binding_proposals" in tables
     assert "accepted_bindings_auto" in tables
+    assert "capture_audio_eligibility" in tables
     assert "resolution_issues_auto" in tables
     assert "episode_hints" not in tables
     assert "episode_bindings" not in tables

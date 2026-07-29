@@ -12,6 +12,7 @@ from ja_media_data.orchestration.dagster.runtime import (
 from ja_media_data.products.lineage import MaterializationCatalog
 
 from dagster_test_support import (
+    _document,
     FakeMetadata,
     FakeOverrides,
     FakeStore,
@@ -82,6 +83,61 @@ def test_success_reuse_quarantine_and_competing_candidates(repository) -> None:
         event.event_specific_data.materialization.tags.get("dagster/data_version")
         for event in first.get_asset_materialization_events()
     )
+
+
+def test_newest_ineligible_capture_falls_back_without_failing_corpus(repository) -> None:
+    source = documents()
+    newest = _document(
+        "capture-no-japanese",
+        "2026-04-01T00:00:00Z",
+        "etag-no-japanese",
+        "no-japanese",
+    )
+    newest.manifest["audio_tracks"] = [newest.manifest["audio_tracks"][0]]
+    source.append(newest)
+    result = _definitions(repository, FakeStore(source), source).resolve_job_def(
+        "canonicalization_campaign"
+    ).execute_in_process(instance=dg.DagsterInstance.ephemeral())
+
+    assert result.success
+    assert repository.connection.execute(
+        "SELECT audio_capture_id FROM canonical_episode_inputs"
+    ).fetchone() == ("capture-new",)
+    assert repository.connection.execute(
+        """SELECT status, reason FROM capture_audio_eligibility
+           WHERE capture_id = 'capture-no-japanese'"""
+    ).fetchone() == ("ineligible", "no_audio_track_declared_japanese")
+
+
+def test_ineligible_override_does_not_silently_fall_back(repository) -> None:
+    source = documents()
+    rejected = _document(
+        "capture-no-japanese",
+        "2026-04-01T00:00:00Z",
+        "etag-no-japanese",
+        "no-japanese",
+    )
+    rejected.manifest["audio_tracks"] = [rejected.manifest["audio_tracks"][0]]
+    source.append(rejected)
+    store = FakeStore(source)
+    overrides = FakeOverrides()
+    repository.override_repository = overrides
+    defs = _definitions(repository, store, source)
+    instance = dg.DagsterInstance.ephemeral()
+    assert defs.resolve_job_def("canonicalization_campaign").execute_in_process(
+        instance=instance
+    ).success
+
+    overrides.revision = 1
+    overrides.capture_id = "capture-no-japanese"
+    result = defs.resolve_job_def("canonicalization_from_acceptance").execute_in_process(
+        instance=instance
+    )
+
+    assert result.success
+    assert repository.connection.execute(
+        "SELECT count(*) FROM canonical_episode_inputs"
+    ).fetchone() == (0,)
 
 
 def test_changed_source_version_advances_resolver_outputs(repository) -> None:

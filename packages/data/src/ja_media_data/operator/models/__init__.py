@@ -3,6 +3,7 @@
 from .campaigns import CampaignCard, CampaignSnapshot
 from .products import (
     AcceptanceObservation,
+    AudioEligibilityObservation,
     CampaignProgress,
     CandidateObservation,
     CanonicalInputObservation,
@@ -15,7 +16,7 @@ from .products import (
 from .runs import RunPage, RunStepSummary, RunSummary
 
 __all__ = [
-    "AcceptanceObservation", "CampaignCard", "CampaignProgress",
+    "AcceptanceObservation", "AudioEligibilityObservation", "CampaignCard", "CampaignProgress",
     "CampaignSnapshot", "CandidateObservation", "CanonicalInputObservation",
     "CanonicalizationGate", "CanonicalizationLens", "ResolutionIssueObservation",
     "RunPage", "RunStepSummary", "RunSummary", "StageObservation",

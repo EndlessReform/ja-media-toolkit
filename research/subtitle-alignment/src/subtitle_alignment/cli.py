@@ -25,6 +25,11 @@ def main() -> None:
         help="local immutable dataset directory",
     )
     snapshot.add_argument("--download-workers", type=int, default=8)
+    snapshot.add_argument(
+        "--data-config",
+        type=Path,
+        help="read Silver from an existing data TOML (default: DEV)",
+    )
 
     inspect = commands.add_parser("inspect", help="summarize a local dataset")
     inspect.add_argument("dataset", type=Path)
@@ -73,6 +78,7 @@ def main() -> None:
             series_count=args.series_count,
             seed=args.seed,
             download_workers=args.download_workers,
+            data_config=args.data_config,
         )
         print(f"dataset={path}")
         return

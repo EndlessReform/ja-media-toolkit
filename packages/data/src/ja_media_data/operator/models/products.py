@@ -128,6 +128,26 @@ class AcceptanceObservation(OperatorModel):
         return _series_url(self.namespace, self.series_id)
 
 
+class AudioEligibilityObservation(OperatorModel):
+    """One capture's independently materialized canonical-audio decision."""
+
+    capture_id: str
+    namespace: str
+    series_id: str
+    status: str
+    reason: str
+    selected_stream_index: int | None = None
+    selected_language: str | None = None
+    manifest_url: str
+    available_tracks_json: str
+    computed_at: datetime
+
+    @computed_field
+    @property
+    def series_url(self) -> str | None:
+        return _series_url(self.namespace, self.series_id)
+
+
 class CanonicalInputObservation(OperatorModel):
     canonical_id: str
     namespace: str
@@ -144,7 +164,12 @@ class CanonicalInputObservation(OperatorModel):
         return _series_url(self.namespace, self.series_id)
 
 
-StageResultItem = ResolutionIssueObservation | AcceptanceObservation | CanonicalInputObservation
+StageResultItem = (
+    ResolutionIssueObservation
+    | AudioEligibilityObservation
+    | AcceptanceObservation
+    | CanonicalInputObservation
+)
 
 
 class StageResultPage(OperatorModel):

@@ -25,12 +25,14 @@ from operator_test_support import NoopOperatorRuntime, compile_campaign
 def test_registered_campaign_resolves_spine_from_asset_graph() -> None:
     campaign = CampaignCatalog(build_definitions()).get("canonicalization-gate")
 
-    assert campaign.spec.revision == 1
+    assert campaign.spec.revision == 2
     assert [item.stage for item in campaign.spine] == [
-        "episode_resolution", "accepted_bindings", "canonical_inputs"
+        "episode_resolution", "accepted_bindings", "audio_eligibility",
+        "canonical_inputs",
     ]
     assert [item.op_name for item in campaign.spine] == [
         "compile_episode_resolution", "accepted_bindings_auto",
+        "capture_audio_eligibility",
         "compile_canonical_inputs",
     ]
 

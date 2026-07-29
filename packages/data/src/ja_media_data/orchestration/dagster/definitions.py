@@ -13,6 +13,9 @@ from ja_media_data.orchestration.dagster.assets import (
     episode_resolution,
 )
 from ja_media_data.orchestration.dagster.lid_asset import subtitle_lid
+from ja_media_data.orchestration.dagster.audio_eligibility_asset import (
+    capture_audio_eligibility,
+)
 from ja_media_data.orchestration.dagster.canary import resolution_canary_job
 from ja_media_data.orchestration.dagster.runtime import (
     canary_runtime_resource,
@@ -24,6 +27,7 @@ ASSETS = (
     bronze_manifests,
     binding_overrides,
     episode_resolution,
+    capture_audio_eligibility,
     accepted_bindings,
     canonical_inputs,
     subtitle_lid,

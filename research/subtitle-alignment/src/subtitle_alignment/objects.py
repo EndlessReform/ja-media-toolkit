@@ -24,7 +24,15 @@ def cache_embedded(
 
     results = []
     for index, locator in enumerate(selection.subtitles, start=1):
-        body = access.bronze.read_text(locator.object_key).encode("utf-8")
+        try:
+            text = access.bronze.read_text(locator.object_key)
+        except Exception as error:
+            raise RuntimeError(
+                "canonical embedded subtitle is not readable: "
+                f"{locator.anilist_id}:{locator.episode} "
+                f"s3://{locator.object_bucket}/{locator.object_key}"
+            ) from error
+        body = text.encode("utf-8")
         digest, relative = _store_object(root, "embedded", body)
         results.append(
             {

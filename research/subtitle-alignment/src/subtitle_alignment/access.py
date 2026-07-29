@@ -26,8 +26,10 @@ class DevReadAccess:
     bronze: BronzeStore
 
     @classmethod
-    def from_repository_config(cls) -> DevReadAccess:
-        """Load existing secret owners without creating a research dotenv."""
+    def from_repository_config(
+        cls, *, data_config: Path | None = None
+    ) -> DevReadAccess:
+        """Load existing secret owners and an optional local data catalog."""
 
         root_env = dotenv_values(REPO_ROOT / ".env")
         bronze_env = dotenv_values(DATA_ROOT / ".env.local")
@@ -35,20 +37,24 @@ class DevReadAccess:
         local_config = tomllib.loads((DATA_ROOT / "config.local.toml").read_text())
         bronze_config = local_config["bronze"]
         endpoint = str(bronze_config["endpoint_url"])
-        catalog = CatalogConfig(
-            postgres_url=_postgres_url(
-                _required(root_env, "JA_MEDIA_DATA_DATABASE_URL")
-            ),
-            metadata_schema="ja_media_ducklake_dev",
-            data_path="s3://ja-media-dev/ducklake/dev/",
-            s3_endpoint_url=endpoint,
-            s3_region="garage",
-            s3_key_id=_required(
-                worker_env, "JA_MEDIA_WORKER_STAGING_ACCESS_KEY_ID"
-            ),
-            s3_secret=_required(
-                worker_env, "JA_MEDIA_WORKER_STAGING_SECRET_ACCESS_KEY"
-            ),
+        catalog = (
+            _configured_catalog(data_config)
+            if data_config is not None
+            else CatalogConfig(
+                postgres_url=_postgres_url(
+                    _required(root_env, "JA_MEDIA_DATA_DATABASE_URL")
+                ),
+                metadata_schema="ja_media_ducklake_dev",
+                data_path="s3://ja-media-dev/ducklake/dev/",
+                s3_endpoint_url=endpoint,
+                s3_region="garage",
+                s3_key_id=_required(
+                    worker_env, "JA_MEDIA_WORKER_STAGING_ACCESS_KEY_ID"
+                ),
+                s3_secret=_required(
+                    worker_env, "JA_MEDIA_WORKER_STAGING_SECRET_ACCESS_KEY"
+                ),
+            )
         )
         bronze = BronzeStore(
             endpoint_url=endpoint,
@@ -75,6 +81,22 @@ def _required(values: dict[str, str | None], name: str) -> str:
     if not value:
         raise RuntimeError(f"{name} is missing from its existing owning env file")
     return value
+
+
+def _configured_catalog(path: Path) -> CatalogConfig:
+    """Build a read-only catalog attachment from an existing data TOML."""
+
+    config = tomllib.loads(path.expanduser().resolve().read_text())
+    values = config["ducklake"]
+    return CatalogConfig(
+        postgres_url=str(values["postgres_url"]),
+        metadata_schema=str(values["catalog_schema"]),
+        data_path=str(values["data_path"]),
+        s3_endpoint_url=str(values["s3_endpoint_url"]),
+        s3_region=str(values.get("s3_region", "us-east-1")),
+        s3_key_id=str(values["s3_access_key_id"]),
+        s3_secret=str(values["s3_secret_access_key"]),
+    )
 
 
 def _postgres_url(value: str) -> str:

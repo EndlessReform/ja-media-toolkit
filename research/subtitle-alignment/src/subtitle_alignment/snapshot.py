@@ -26,11 +26,12 @@ from subtitle_alignment.silver import (
 
 
 def build_snapshot(
-    *, cache_root: Path, series_count: int, seed: int, download_workers: int
+    *, cache_root: Path, series_count: int, seed: int, download_workers: int,
+    data_config: Path | None = None,
 ) -> Path:
     """Freeze Silver locators and matching subtitle objects into local storage."""
 
-    access = DevReadAccess.from_repository_config()
+    access = DevReadAccess.from_repository_config(data_config=data_config)
     connection = access.connect_catalog()
     try:
         pool = load_anilist_pool(connection, seed=seed)

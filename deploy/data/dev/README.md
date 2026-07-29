@@ -97,10 +97,12 @@ If the Compose-owned control plane is not already running, `update`
 automatically performs a full reconcile instead. Initial installation therefore
 does not depend on remembering a special command.
 
-RabbitMQ, Caddy, Dagster webserver, and Dagster daemon are not recreated. If the
-replacement or preflight fails, the helper reports the preceding image. The
-new selection remains visible for diagnosis. The preceding digest is retained
-automatically, so the usual rollback is:
+RabbitMQ, Dagster webserver, and Dagster daemon are not recreated. After the
+replacement operator is healthy, Caddy is recreated so its upstream connection
+cannot remain pinned to the removed operator container. If replacement or
+preflight fails, the helper reports the preceding image. The new selection
+remains visible for diagnosis. The preceding digest is retained automatically,
+so the usual rollback is:
 
 ```sh
 ./control rollback
@@ -111,10 +113,10 @@ values are escape hatches for selecting a known build. `rollback` also accepts
 either form. Full references are accepted only for the configured repository.
 There is no need to find or copy a digest from Zot's UI.
 
-Compose waits for the replacement operator's `/healthz` endpoint before
-preflight. This prevents a normal Uvicorn startup window from being reported as
-a gateway failure. Gateway checks identify Dagster and the operator separately
-so a real routing failure names the affected upstream.
+Compose waits for the replacement operator's `/healthz` endpoint, then
+recreates Caddy and waits for its proxied `/operator` health check before
+preflight. Gateway checks identify Dagster and the operator separately so a
+real routing failure names the affected upstream.
 
 Prefer a quiet control plane for updates. The server worker receives a Celery
 warm shutdown with a five-minute grace period, but this is a small DEV

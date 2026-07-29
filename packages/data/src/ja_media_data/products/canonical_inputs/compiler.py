@@ -17,7 +17,7 @@ from ja_media_data.products.identities import fingerprint, stable_id
 from ja_media_data.storage.bronze import BronzeStore
 
 
-CANONICALIZATION_POLICY_VERSION = "latest-manifest-modified-jpn-audio-v2"
+CANONICALIZATION_POLICY_VERSION = "latest-eligible-manifest-modified-v4"
 
 
 @dataclass(frozen=True)
@@ -32,7 +32,7 @@ class CompiledCanonicalInputs:
 def compile_product(
     repository: DuckLakeRepository, store: BronzeStore
 ) -> CompiledCanonicalInputs:
-    """Select the latest effective capture per locator and enumerate subtitles."""
+    """Select the latest eligible effective capture and enumerate subtitles."""
 
     selected = select_canonical_candidates(repository)
     product_fingerprint = fingerprint(

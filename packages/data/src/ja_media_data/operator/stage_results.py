@@ -6,6 +6,7 @@ from ja_media_data.lakehouse.repository import DuckLakeRepository
 from ja_media_data.lakehouse.time_travel import table_ref
 from ja_media_data.operator.models import (
     AcceptanceObservation,
+    AudioEligibilityObservation,
     CanonicalInputObservation,
     ResolutionIssueObservation,
     StageResultPage,
@@ -31,6 +32,7 @@ class StageResultProjector:
             raise ValueError("stage result pages require offset >= 0 and 1 <= limit <= 100")
         projectors = {
             "episode_resolution": self._resolution,
+            "audio_eligibility": self._audio_eligibility,
             "accepted_bindings": self._acceptances,
             "canonical_inputs": self._canonical,
         }
@@ -90,6 +92,51 @@ class StageResultProjector:
             manifest_url=f"s3://{row[9]}/{row[10]}",
         ) for row in rows)
         return StageResultPage(stage="accepted_bindings", label="Automatic Acceptance · Accepted", items=items, total=int(total), offset=offset, limit=limit)
+
+    def _audio_eligibility(
+        self, *, series_id: str | None, offset: int, limit: int,
+        snapshot_id: int | None,
+    ) -> StageResultPage:
+        where, params = _series_filter(series_id, "capture")
+        decisions = table_ref(
+            "capture_audio_eligibility", snapshot_id=snapshot_id, alias="audio"
+        )
+        captures = table_ref("bronze_captures", snapshot_id=snapshot_id, alias="capture")
+        source = (
+            f" FROM {decisions} JOIN {captures} "
+            "ON capture.capture_id = audio.capture_id"
+        )
+        total = self.repository.connection.execute(
+            "SELECT count(*)" + source + where, params
+        ).fetchone()[0]
+        rows = self.repository.connection.execute(
+            """SELECT audio.capture_id, capture.series_namespace,
+                      capture.series_id, audio.status, audio.reason,
+                      audio.selected_audio_stream_index,
+                      audio.selected_audio_declared_language,
+                      audio.manifest_bucket, audio.manifest_key,
+                      audio.available_audio_tracks, audio.computed_at"""
+            + source
+            + where
+            + " ORDER BY audio.status DESC, capture.series_id, audio.manifest_key"
+              " LIMIT ? OFFSET ?",
+            [*params, limit, offset],
+        ).fetchall()
+        items = tuple(
+            AudioEligibilityObservation(
+                capture_id=str(row[0]), namespace=str(row[1]), series_id=str(row[2]),
+                status=str(row[3]), reason=str(row[4]),
+                selected_stream_index=int(row[5]) if row[5] is not None else None,
+                selected_language=str(row[6]) if row[6] else None,
+                manifest_url=f"s3://{row[7]}/{row[8]}",
+                available_tracks_json=_details_json(row[9]), computed_at=row[10],
+            )
+            for row in rows
+        )
+        return StageResultPage(
+            stage="audio_eligibility", label="Audio Eligibility · Decisions",
+            items=items, total=int(total), offset=offset, limit=limit,
+        )
 
     def _canonical(
         self, *, series_id: str | None, offset: int, limit: int,

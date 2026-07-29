@@ -26,6 +26,15 @@ The command automatically uses the repository's existing DEV read credentials
 and the personal `[services].root_url` configuration. It does not require a new
 environment file and does not print secrets or the resolved tailnet URL.
 
+To smoke-test an unpublished local Silver head while retaining the same Bronze
+and Kitsunekko consumers, point the private research command at the existing
+local data configuration:
+
+```sh
+uv run alignment-research snapshot --series-count 1 --seed 20260728 \
+  --data-config ../../packages/data/config.local.toml
+```
+
 The resulting `.cache/<dataset-id>/` contains:
 
 - `manifest.json`: exact Silver/Kitsunekko revisions and counts;
