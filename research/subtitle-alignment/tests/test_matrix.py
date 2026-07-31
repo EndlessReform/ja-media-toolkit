@@ -30,7 +30,10 @@ def test_constant_only_arms_disable_every_scale_path() -> None:
     assert "--no-fix-framerate" in methods["ffsubsync-global"].args
     assert "--skip-infer-framerate-ratio" in methods["ffsubsync-global"].args
     assert methods["ffsubsync-global"].args[-1] == FULL_EPISODE_OFFSET_LIMIT_S
-    assert len(methods) == 11
+    assert set(methods) == {
+        "identity", "alass-global", "ffsubsync-global",
+        "alass-piecewise-p5", "ffsubsync-piecewise-p5",
+    }
 
 
 def test_matrix_selects_best_identity_pair_per_episode(tmp_path: Path) -> None:
@@ -94,6 +97,27 @@ def test_matrix_sample_prefers_unseen_series_across_score_buckets() -> None:
     assert [item.anilist_id for item in selected[:3]] == [1, 3, 2]
 
 
+def test_matrix_sample_does_not_repeat_while_another_bucket_has_new_series() -> None:
+    def pair(series: int, episode: int, bucket: int) -> MatrixPair:
+        identifier = f"{series}-{episode}"
+        return MatrixPair(
+            pair_id=identifier, anilist_id=series, episode=episode,
+            anchor_id=f"a-{identifier}", candidate_id=f"c-{identifier}",
+            anchor_format="subrip", candidate_format="srt",
+            anchor_source=f"a-{identifier}.srt",
+            candidate_source=f"c-{identifier}.srt",
+            candidate_repo_path=f"series/{identifier}.srt",
+            identity_decile=bucket, identity_score=0.5, identity_goodness=0.5,
+        )
+
+    selected = _diverse_stratified_sample(
+        [pair(1, 1, 1), pair(1, 2, 1), pair(2, 1, 2), pair(3, 1, 2)],
+        sample_size=3, buckets=2,
+    )
+
+    assert {item.anilist_id for item in selected} == {1, 2, 3}
+
+
 def test_realized_transform_recovers_scale_offsets_and_blocks() -> None:
     source = (
         _cue(1, 10.0, 12.0),
@@ -123,7 +147,4 @@ def test_piecewise_penalty_arms_are_staged_symmetrically() -> None:
         if method.piecewise_enabled
     }
 
-    assert penalties == {
-        ("alass", 5), ("alass", 10), ("alass", 20),
-        ("ffsubsync", 5), ("ffsubsync", 10), ("ffsubsync", 20),
-    }
+    assert penalties == {("alass", 5), ("ffsubsync", 5)}

@@ -100,7 +100,12 @@ def select_pairs(
 def _diverse_stratified_sample(
     pairs: list[MatrixPair], sample_size: int, buckets: int
 ) -> list[MatrixPair]:
-    """Round-robin score buckets, taking unseen series first within each bucket."""
+    """Maximize series coverage, then fill remaining slots across score buckets.
+
+    The first pass skips a bucket rather than spend a slot on a repeated series
+    while any unseen series remains elsewhere. Both that pass and the fallback
+    retain round-robin traversal of identity-score strata.
+    """
 
     pools = {
         bucket: [pair for pair in pairs if pair.identity_decile == bucket]
@@ -108,18 +113,28 @@ def _diverse_stratified_sample(
     }
     selected: list[MatrixPair] = []
     seen_series: set[int] = set()
-    while len(selected) < sample_size and any(pools.values()):
+    while len(selected) < sample_size:
+        added = False
         for bucket in range(1, buckets + 1):
             pool = pools[bucket]
             if not pool or len(selected) == sample_size:
                 continue
             index = next(
                 (i for i, pair in enumerate(pool) if pair.anilist_id not in seen_series),
-                0,
+                None,
             )
+            if index is None:
+                continue
             pair = pool.pop(index)
             selected.append(pair)
             seen_series.add(pair.anilist_id)
+            added = True
+        if not added:
+            break
+    while len(selected) < sample_size and any(pools.values()):
+        for bucket in range(1, buckets + 1):
+            if pools[bucket] and len(selected) < sample_size:
+                selected.append(pools[bucket].pop(0))
     return selected
 
 

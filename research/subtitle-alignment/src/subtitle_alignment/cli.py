@@ -46,8 +46,8 @@ def main() -> None:
     )
     matrix.add_argument("dataset", type=Path)
     matrix.add_argument("--identity-result", type=Path)
-    matrix.add_argument("--sample-size", type=int, default=20)
-    matrix.add_argument("--workers", type=int, default=8)
+    matrix.add_argument("--sample-size", type=int, default=25)
+    matrix.add_argument("--workers", type=int, default=4)
     matrix.add_argument("--output-root", type=Path, default=Path("output"))
 
     annotate = commands.add_parser(

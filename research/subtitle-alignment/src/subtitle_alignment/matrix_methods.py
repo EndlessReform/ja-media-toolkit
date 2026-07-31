@@ -38,9 +38,14 @@ class Invocation:
 
 
 def method_specs() -> tuple[MethodSpec, ...]:
-    """Return the staged comparison matrix in stable display order."""
+    """Return the deliberately narrow comparison matrix in display order.
 
-    methods = [
+    Gate 1 starts with the least flexible useful retime and one piecewise arm
+    per tool. Wider penalty and clock-scale sweeps are deferred until these
+    materially different transform classes earn further evaluation.
+    """
+
+    return (
         MethodSpec("identity", "custom", "identity", False, False, None, ()),
         MethodSpec(
             "alass-global", "alass", "global", False, False, None,
@@ -52,34 +57,17 @@ def method_specs() -> tuple[MethodSpec, ...]:
              "--max-offset-seconds", FULL_EPISODE_OFFSET_LIMIT_S),
         ),
         MethodSpec(
-            "alass-clock-global", "alass", "clock+global", True, False, None,
-            ("--no-split",),
+            "alass-piecewise-p5", "alass", "piecewise", False, True, 5,
+            ("--disable-fps-guessing", "--split-penalty", "5"),
         ),
         MethodSpec(
-            "ffsubsync-clock-global", "ffsubsync", "clock+global", True,
-            False, None,
-            ("--skip-infer-framerate-ratio", "--max-offset-seconds",
+            "ffsubsync-piecewise-p5", "ffsubsync", "piecewise", False, True,
+            5,
+            ("--no-fix-framerate", "--skip-infer-framerate-ratio",
+             "--split-penalty", "5", "--max-offset-seconds",
              FULL_EPISODE_OFFSET_LIMIT_S),
-        ),
-    ]
-    for penalty in (5, 10, 20):
-        methods.extend(
-            [
-                MethodSpec(
-                    f"alass-piecewise-p{penalty}", "alass", "piecewise",
-                    False, True, penalty,
-                    ("--disable-fps-guessing", "--split-penalty", str(penalty)),
-                ),
-                MethodSpec(
-                    f"ffsubsync-piecewise-p{penalty}", "ffsubsync",
-                    "piecewise", False, True, penalty,
-                    ("--no-fix-framerate", "--skip-infer-framerate-ratio",
-                     "--split-penalty", str(penalty),
-                     "--max-offset-seconds", FULL_EPISODE_OFFSET_LIMIT_S),
-                ),
-            ]
         )
-    return tuple(methods)
+    )
 
 
 def definition_rows(specs: tuple[MethodSpec, ...]) -> list[dict[str, object]]:

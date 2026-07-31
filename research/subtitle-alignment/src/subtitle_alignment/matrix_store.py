@@ -107,10 +107,26 @@ def _derived_tables(connection: duckdb.DuckDBPyConnection) -> None:
                   count(*) FILTER (run.offset_bound_exceeded)
                     AS offset_bound_flags,
                   count(*) FILTER (run.status NOT LIKE 'scored%') AS failed_pairs,
+                  min(run.anchor_fit_score) FILTER (run.status LIKE 'scored%')
+                    AS min_score,
+                  quantile_cont(run.anchor_fit_score, 0.25)
+                    FILTER (run.status LIKE 'scored%') AS p25_score,
                   median(run.anchor_fit_score) FILTER (run.status LIKE 'scored%')
                     AS median_score,
+                  quantile_cont(run.anchor_fit_score, 0.75)
+                    FILTER (run.status LIKE 'scored%') AS p75_score,
+                  max(run.anchor_fit_score) FILTER (run.status LIKE 'scored%')
+                    AS max_score,
+                  min(run.gain_over_identity) FILTER (run.status LIKE 'scored%')
+                    AS min_gain,
+                  quantile_cont(run.gain_over_identity, 0.25)
+                    FILTER (run.status LIKE 'scored%') AS p25_gain,
                   median(run.gain_over_identity) FILTER (run.status LIKE 'scored%')
                     AS median_gain,
+                  quantile_cont(run.gain_over_identity, 0.75)
+                    FILTER (run.status LIKE 'scored%') AS p75_gain,
+                  max(run.gain_over_identity) FILTER (run.status LIKE 'scored%')
+                    AS max_gain,
                   avg((run.gain_over_identity > 0)::INTEGER)
                     FILTER (run.status LIKE 'scored%') AS improved_fraction,
                   avg((abs(run.anchor_fit_score - best.best_score) < 1e-9)::INTEGER)
@@ -177,6 +193,9 @@ def _derived_tables(connection: duckdb.DuckDBPyConnection) -> None:
 
 def _summary(connection, *, manifest, versions, workers, elapsed_s, matrix_version):
     pairs = connection.execute("SELECT count(*) FROM pair_sample").fetchone()[0]
+    series = connection.execute(
+        "SELECT count(DISTINCT anilist_id) FROM pair_sample"
+    ).fetchone()[0]
     methods = connection.execute("SELECT count(*) FROM method_definitions").fetchone()[0]
     scored, transform_errors, offset_flags, failed = connection.execute(
         """SELECT count(*) FILTER (status LIKE 'scored%'),
@@ -195,6 +214,7 @@ def _summary(connection, *, manifest, versions, workers, elapsed_s, matrix_versi
         "dataset_id": manifest["dataset_id"],
         "silver": manifest["silver"],
         "pair_count": pairs,
+        "series_count": series,
         "method_count": methods,
         "run_count": pairs * methods,
         "scored_runs": scored,

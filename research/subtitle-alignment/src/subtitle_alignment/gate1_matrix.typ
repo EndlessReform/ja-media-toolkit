@@ -38,8 +38,9 @@
   keywords: ("subtitle alignment", "retiming", "ALASS", "ffsubsync"),
   abstract: [
     We evaluate #summary.at("method_count") deliberately restricted retiming
-    arms on #summary.at("pair_count") anchor-candidate pairs drawn across the
-    identity-score distribution. Every output is rescored by the repository's
+    arms on #summary.at("pair_count") anchor-candidate pairs spanning
+    #summary.at("series_count") AniList series and the identity-score
+    distribution. Every output is rescored by the repository's
     common ALASS-derived objective. The experiment writes normalized method and
     cue-grain products consumed by the local annotator; it does not define an
     automatic acceptance cutoff.
@@ -50,15 +51,16 @@
 = Question and boundary
 
 The experiment asks which minimum transform class is worth subjective review:
-identity, one global translation, one whole-file clock scale plus translation,
-or penalized piecewise translations. Both external tools run as subprocesses
+identity, one global translation, or a penalty-5 piecewise translation. Both
+external tools run as subprocesses
 against an embedded subtitle timing anchor. Audio and VAD are absent from this
 matrix, and no method clips cue boundaries to detected speech.
 
 The cohort is selected once from identity-score deciles before any retimed
-result is observed. Within each decile, the deterministic draw prefers an
-AniList series not already represented before taking another episode from a
-selected series. All methods see the same staged bytes. The run used
+result is observed. The deterministic draw traverses deciles round-robin while
+skipping represented series whenever any unseen series remains; only then does
+it fill remaining slots with repeat series. All methods see the same staged
+bytes. The run used
 #summary.at("workers") worker processes and completed in
 #seconds(summary.at("elapsed_seconds")).
 
@@ -69,12 +71,11 @@ whole-file clock/framerate correction; `Piecewise` means penalized changes in
 translation between adjacent cue groups.
 
 `Penalty` is a cost per change of offset, not a time cutoff or piece limit.
-With displayed value $C$, ALASS subtracts $min(n_a, n_c) C / 1000$ from its
+With value $C = 5$, ALASS subtracts $min(n_a, n_c) C / 1000$ from its
 interval-pair rating sum per change; $n_a$ and $n_c$ are the normalized nonzero
 interval counts. ffsubsync instead subtracts $C$ seconds of overlap-equivalent
-score per change (internally $100 C$ samples at 100 Hz). Thus 5, 10, and 20
-increasingly resist changes within either tool, but are not equal-strength
-regularizers across tools.
+score per change (internally $100 C$ samples at 100 Hz). The nominal penalty is
+therefore not an equal-strength regularizer across tools.
 
 #figure(
   caption: [Restricted executable arms. Arguments are persisted separately in the same generated table.],
@@ -103,29 +104,56 @@ regularizers across tools.
 Every successfully parsed output is evaluated with
 `subtitle_goodness_of_fit` and the normalized `subtitle_anchor_fit_score`.
 Gain is relative to that pair's unchanged candidate. A win includes ties at the
-maximum score for the pair; it is not a human preference.
+maximum score for the pair; it is not a human preference. We report quartiles
+and extremes rather than an arithmetic mean because a few catastrophic or easy
+pairs can otherwise obscure the cohort's shape.
 
 #figure(
-  caption: [Custom ALASS-derived scorer results, generated from `method_summary` in DuckDB.],
-  table(
-    columns: (2.3fr, 0.7fr, 0.85fr, 0.85fr, 0.75fr, 0.75fr),
-    align: (left, right, right, right, right, right),
-    stroke: none,
-    inset: (x: 3pt, y: 2.5pt),
-    toprule,
-    table.header([Method], [Scored], [Median score], [Median gain], [Improved], [Wins]),
-    midrule,
-    ..methods.map(row => (
-      cell(row.at("method")),
-      cell(integer(row.at("scored_pairs"))),
-      cell(decimal(row.at("median_score"))),
-      cell(decimal(row.at("median_gain"))),
-      cell(percent(row.at("improved_fraction"))),
-      cell(percent(row.at("win_fraction"))),
-    )).flatten(),
-    botrule,
-  ),
+  caption: [Score distributions from `method_summary`. Identity is retained as the unchanged-timing reference.],
+  text(size: 7.5pt)[#table(
+      columns: (2.0fr, 0.45fr, 0.65fr, 0.65fr, 0.65fr, 0.65fr, 0.65fr),
+      align: (left, right, right, right, right, right, right),
+      stroke: none,
+      inset: (x: 2pt, y: 2.5pt),
+      toprule,
+      table.header([Method], [$n$], [Min], [$q_25$], [Median], [$q_75$], [Max]),
+      midrule,
+      ..methods.map(row => (
+        cell(row.at("method")),
+        cell(integer(row.at("scored_pairs"))),
+        cell(decimal(row.at("min_score"))),
+        cell(decimal(row.at("p25_score"))),
+        cell(decimal(row.at("median_score"))),
+        cell(decimal(row.at("p75_score"))),
+        cell(decimal(row.at("max_score"))),
+      )).flatten(),
+      botrule,
+    )],
 ) <score-table>
+
+#figure(
+  caption: [Gain over identity distributions and pair-level outcome fractions.],
+  text(size: 7.5pt)[#table(
+      columns: (2.0fr, 0.65fr, 0.65fr, 0.65fr, 0.65fr, 0.65fr, 0.75fr, 0.65fr),
+      align: (left, right, right, right, right, right, right, right),
+      stroke: none,
+      inset: (x: 2pt, y: 2.5pt),
+      toprule,
+      table.header([Method], [Min], [$q_25$], [Median], [$q_75$], [Max], [Improved], [Wins]),
+      midrule,
+      ..methods.map(row => (
+        cell(row.at("method")),
+        cell(decimal(row.at("min_gain"))),
+        cell(decimal(row.at("p25_gain"))),
+        cell(decimal(row.at("median_gain"))),
+        cell(decimal(row.at("p75_gain"))),
+        cell(decimal(row.at("max_gain"))),
+        cell(percent(row.at("improved_fraction"))),
+        cell(percent(row.at("win_fraction"))),
+      )).flatten(),
+      botrule,
+    )],
+) <gain-table>
 
 = Runtime and realized transforms
 
@@ -184,7 +212,7 @@ translation appear as several realized offset blocks.
 Aggregated by transform class, the same underlying run table yields:
 
 #figure(
-  caption: [Transform-class rollup. Multiple penalty arms contribute to the piecewise row.],
+  caption: [Transform-class rollup. Both tools contribute to each non-identity row.],
   table(
     columns: (1.5fr, 0.7fr, 0.8fr, 0.9fr, 0.9fr, 0.8fr),
     align: (left, right, right, right, right, right),

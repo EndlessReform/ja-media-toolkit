@@ -77,17 +77,18 @@ report to the repository's `output/pdf/` directory with Pandoc and XeLaTeX.
 ## Run the Gate 1 executable matrix
 
 The matrix first keeps the best identity-scored anchor/candidate pair for each
-episode, then draws 20 pairs across those identity-score deciles. Within each
-score stratum it prefers a series not yet represented in the cohort, falling
-back to another episode from an already selected series only when needed. It
-executes the restricted ALASS and ffsubsync arms and rescores every output with
-the same repository-owned ALASS-derived scorer:
+episode, then draws 25 pairs across those identity-score deciles. Its first
+sampling pass maximizes distinct AniList series globally while traversing score
+strata round-robin; only after exhausting unseen series does it draw another
+episode from a represented series. It executes identity plus the global and
+penalty-5 piecewise ALASS/ffsubsync arms, then rescores every output with the
+same repository-owned ALASS-derived scorer:
 
 ```sh
 uv run alignment-research matrix \
   .cache/phase0-1345e0a2045b031e \
   --identity-result output/gate1-identity-v3-phase0-1345e0a2045b031e \
-  --sample-size 20 --workers 8
+  --sample-size 25 --workers 4
 ```
 
 Results include normalized DuckDB, CSV, and Parquet tables plus staged input,
@@ -97,6 +98,10 @@ annotator UI. The generated `gate1-matrix-paper.typ` reads its tables directly
 from the CSV/JSON products and compiles with
 `@preview/bloated-neurips:0.8.0`; rerun `typst compile` in the result directory
 after changing the paper source or generated tables.
+
+The paper reports minimum, quartiles, median, and maximum score and gain for
+every arm, including identity. Arithmetic means are intentionally omitted from
+the headline tables because a few extreme episodes can hide the distribution.
 
 The `>30 s cue shift` column is a diagnostic count, not drift and not a failed
 run. It means that reconstructing the output clocks found at least one

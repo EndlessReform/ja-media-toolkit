@@ -247,16 +247,18 @@ whether the anchored English track is a better timing signal than audio VAD.
 
 ### Restricted tuning matrix
 
-Do not take a Cartesian product of every CLI flag. Run a fixed 100-pair
-microbenchmark/review stratum in this order:
+Do not take a Cartesian product of every CLI flag. The original 100-pair wide
+matrix was useful diagnostically, but it launched 1,000 external aligner
+processes and is too expensive for routine iteration. Matrix-v6 instead starts
+with 25 episode-best pairs: one from every selected series where coverage
+allows, distributed round-robin across identity-score deciles. It runs:
 
 1. identity, already computed;
 2. global translation only from each aligner;
-3. each aligner's common-framerate scale plus global translation;
-4. piecewise translation with scale disabled at split penalties `5`, `10`, and
-   `20`; and
-5. only if scaling and splitting each help independently, one joint
-   scale-plus-piecewise arm at the best reviewed penalty.
+3. piecewise translation with scale disabled at split penalty `5` from each
+   aligner; and
+4. wider penalty or clock-scale arms only after reviewed evidence justifies
+   them.
 
 The first diagnostic run showed source offsets beyond the original 30-second
 ffsubsync search bound. Gate 1 now gives ffsubsync a 3600-second whole-episode
@@ -284,12 +286,13 @@ to clamp early negative timestamps to zero. Consequently a nominal
 start. This is output serialization behavior, not evidence that ALASS secretly
 selected a piecewise transform.
 
-The immediate gate is therefore anchor eligibility. The annotator shows cue
-count, active duration, episode span, and anchor/candidate timelines and records
-`anchor_usable` or `anchor_sparse` without rerunning methods. Do not choose an
-aligner or automatic cutoff from matrix-v2. After review, define the smallest
-measured eligibility rule and rerun the fixed sample with unusable anchors
-excluded or categorized separately.
+The immediate matrix-v2 gate was therefore anchor eligibility. The annotator
+shows cue count, active duration, episode span, and anchor/candidate timelines
+and records `anchor_usable` or `anchor_sparse` without rerunning methods.
+Matrix-v6's diverse 25-series cohort no longer reproduces that defect: sampled
+anchors contain 212–495 cues (median 358) and span essentially complete
+episodes. Large-shift outputs still require audio review, but sparse timing
+evidence is not their explanation in this cohort.
 
 Hold ALASS `--interval=1` and `--speed-optimization=1`, and ffsubsync
 `--split-length-penalty=0.25` and `--split-subsample=1`, during the transform
@@ -320,9 +323,10 @@ For each anchor/candidate pair record:
 cue-to-cue truth: embedded and candidate tracks can be different languages.
 Manual audio review calibrates it in Gate 2.
 
-Run cold and warm microbenchmarks on a fixed 100-pair stratum. Report
-pairs/second and memory on the actual machine. Do not invent a performance
-threshold before measuring it.
+Run cold and warm performance measurements only after subjective review narrows
+the credible methods. Report pairs/second and memory on the actual machine. Do
+not repeat the wide 100-pair sweep or invent a performance threshold before the
+method set earns it.
 
 The next Gate 1 report gives the percentage of eligible pairs and episodes that
 are acceptable unchanged, after global translation, after whole-file clock
@@ -532,9 +536,9 @@ Completed:
 3. cached 996 Kitsunekko candidates for 501 canonical episodes; and
 4. evaluated and reported all 1,436 naive identity pairs with the existing
    ALASS-derived scorer, including parse failures and episode/series grains;
-5. ran 11 restricted identity/ALASS/ffsubsync arms on 100 pairs evenly sampled
-   across identity-score deciles and rescored every output with the same
-   repository-owned objective; and
+5. ran an initial wide diagnostic matrix, then narrowed matrix-v6 to identity
+   plus global and penalty-5 piecewise ALASS/ffsubsync arms on one episode from
+   each of 25 diverse series; and
 6. compiled a data-driven Typst paper and wrote pair-, method-, and cue-grain
    Parquet/DuckDB products for the annotator; and
 7. corrected the 30-second condition from a rejection status to a per-cue
@@ -544,15 +548,15 @@ This already proves the central machinery claim: a Silver intermediate produced
 by Dagster can feed a useful local experiment without a Gold layer or a second
 orchestration system.
 
-The next bounded slice is review and rerun:
+The next bounded slice is language verification and audio-backed review:
 
 1. LID all cached Kitsunekko candidates and retain every exclusion/failure in
    the denominator;
-2. inspect the >30-second cue-shift cases first, label sparse/unusable anchors,
-   and formulate an anchor-eligibility rule from those observations;
-3. rerun the fixed method matrix with ineligible anchors separated from the
-   aligner comparison; and
-4. add audio-backed blinded labels only after the input cohort is credible.
+2. inspect the >30-second cue-shift cases first against the now-correct Japanese
+   audio, retaining anchor usability as a categorical label;
+3. blind method names and collect subjective alignment verdicts, prioritizing
+   ALASS piecewise-p5 versus the global baseline; and
+4. derive any automatic cutoff only from those labels.
 
 Do not add audio/VAD, cue-edge clipping, group transfer, or another transform
 arm before this review. The current matrix is already wide enough to decide

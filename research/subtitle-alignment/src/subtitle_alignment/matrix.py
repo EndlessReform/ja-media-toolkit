@@ -17,11 +17,11 @@ from ja_media_core.subsync import subtitle_anchor_fit_score, subtitle_goodness_o
 from subtitle_alignment.matrix_methods import MethodSpec, invoke, method_specs
 from subtitle_alignment.matrix_sample import MatrixPair, select_pairs, stage_pair
 from subtitle_alignment.matrix_store import write_matrix_results
-from subtitle_alignment.matrix_transform import TransformFacts, infer_transform
+from subtitle_alignment.matrix_transform import infer_transform
 from subtitle_alignment.track_io import read_subtitle_cues
 
 
-MATRIX_VERSION = "matrix-v5"
+MATRIX_VERSION = "matrix-v6"
 
 
 @dataclass(frozen=True)
