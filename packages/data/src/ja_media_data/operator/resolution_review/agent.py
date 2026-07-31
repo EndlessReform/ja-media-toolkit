@@ -69,11 +69,12 @@ def _finish_after_approved_proposal(
     * https://openai.github.io/openai-agents-python/human_in_the_loop/
     * https://openai.github.io/openai-agents-python/agents/#tool-use-behavior
 
-    The exact pinned contracts used here are mirrored under ``docs/repo-symlinks``:
-    ``openai-agents-python/src/agents/run_state.py`` records approval,
-    ``agent.py`` defines ``ToolsToFinalOutputFunction``, and
+    The same contracts can be inspected in the review-only checkout under
+    ``docs/repo-symlinks``: ``openai-agents-python/src/agents/run_state.py``
+    records approval, ``agent.py`` defines ``ToolsToFinalOutputFunction``, and
     ``run_internal/turn_resolution.py`` checks its result before asking the
-    model for another turn.
+    model for another turn. Runtime installation comes from the released PyPI
+    wheel, not that checkout.
 
     ``StopAtTools`` is deliberately not used. The SDK represents a rejected
     function call as a string tool result too, so stopping solely by tool name

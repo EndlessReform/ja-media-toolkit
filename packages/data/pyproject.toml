@@ -41,7 +41,6 @@ packages = ["src/ja_media_data"]
 
 [tool.uv.sources]
 ja-media-core = { workspace = true }
-openai-agents = { git = "https://github.com/openai/openai-agents-python", rev = "c3f1781d56e8f1249a01674f18ba1f3e44a16dce" }
 
 [dependency-groups]
 dev = [

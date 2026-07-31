@@ -206,10 +206,12 @@ Repository facts:
 - PostgreSQL `binding_overrides` already preserves human mapping history,
   retired heads, uniqueness, and a monotonic revision.
 - It cannot represent a deliberate unbound extra.
-- The linked Agents SDK is `main` at `c3f1781d` (23 commits past the `0.19.1`
-  tag). The data package pins that exact commit. Its current public surfaces
-  include function tools, request-scoped providers, resumable `RunState`, HITL
-  interruptions, and semantic streaming events.
+- The data package installs the released `openai-agents==0.19.1` wheel from
+  PyPI. The `docs/repo-symlinks/openai-agents-python` checkout is review-only;
+  it is not an install source. The `v0.19.1` tag already contains the public
+  surfaces used here: function tools, request-scoped providers, resumable
+  `RunState`, HITL interruptions, semantic streaming events, and custom
+  `tool_use_behavior`.
 
 ## Agent-facing draft
 
