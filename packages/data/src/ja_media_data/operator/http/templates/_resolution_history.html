@@ -1,0 +1,19 @@
+<section id="resolution-history" class="forum-panel resolution-history">
+  <h2>Decision History</h2>
+  {% if history_message %}<div class="notice"><strong>{{ history_message }}</strong></div>{% endif %}
+  {% if history_error %}<div class="notice error"><strong>REVERSAL FAILED:</strong> {{ history_error }}</div>{% endif %}
+  {% if decision_history %}
+  <div class="table-scroll"><table class="data-table"><thead><tr><th>When</th><th>Batch</th><th>Action</th><th>Series</th><th>Summary</th><th>Changes</th><th>Control revisions</th><th>Undo</th></tr></thead><tbody>
+    {% for batch in decision_history %}<tr>
+      <td class="nowrap">{{ batch.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+      <td><code>{{ batch.batch_id }}</code>{% if batch.reverses_batch_id %}<br>reverses <code>{{ batch.reverses_batch_id }}</code>{% endif %}</td>
+      <td><span class="status {% if batch.action == 'accept' %}succeeded{% else %}quarantined{% endif %}">{{ batch.action|upper }}</span></td>
+      <td><a href="https://anilist.co/anime/{{ batch.current_anilist_id }}" target="_blank" rel="noopener noreferrer">AL {{ batch.current_anilist_id }} ↗</a></td>
+      <td>{{ batch.summary }}{% if batch.reason %}<br><small>{{ batch.reason }}</small>{% endif %}<details><summary>Exact crosswalk</summary><ul>{% for item in batch.items %}<li><code>{{ item.capture_id }}</code> · {{ item.decision }}{% if item.destination_anilist_id %} → <a href="https://anilist.co/anime/{{ item.destination_anilist_id }}" target="_blank" rel="noopener noreferrer">AL {{ item.destination_anilist_id }} ↗</a> ep {{ item.destination_episode }}{% endif %}<br>{{ item.rationale }}</li>{% endfor %}</ul></details></td>
+      <td>{{ batch.item_count }}</td>
+      <td><code>binding {{ batch.binding_revision }}<br>disposition {{ batch.disposition_revision }}</code></td>
+      <td>{% if batch.action == 'accept' and not batch.reversed_by and review_mode != 'local' %}<form hx-post="/operator/resolution-review/history/{{ batch.batch_id }}/reverse" hx-target="#resolution-history" hx-swap="outerHTML" hx-confirm="Reverse this accepted decision batch?"><input type="hidden" name="series_view" value="{{ series_view }}"><input name="reason" required placeholder="why reverse"><button type="submit">REVERSE</button></form>{% elif batch.reversed_by %}<span>Reversed by<br><code>{{ batch.reversed_by }}</code></span>{% else %}—{% endif %}</td>
+    </tr>{% endfor %}
+  </tbody></table></div>
+  {% else %}<div class="empty-state">No durable resolution decisions yet.</div>{% endif %}
+</section>

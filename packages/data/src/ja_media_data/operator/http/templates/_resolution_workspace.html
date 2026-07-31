@@ -1,0 +1,42 @@
+<div id="resolution-workspace" class="resolution-workspace">
+  <section class="forum-panel resolution-issues" aria-labelledby="issues-heading">
+    <h2 id="issues-heading">Rejected Captures · {% if selected_anilist_id %}AniList {{ selected_anilist_id }}{% else %}none{% endif %}</h2>
+    {% if issues %}
+    <ol>
+      {% for issue in issues %}
+      <li>
+        <strong>{{ issue.source_hint }}</strong>
+        <code>{{ issue.capture_id }}</code>
+        <span class="status quarantined">{{ issue.kind }}</span>
+        <p>{{ issue.reason or 'unspecified resolver failure' }}</p>
+      </li>
+      {% endfor %}
+    </ol>
+    <div class="pager">
+      {% if issue_offset > 0 %}<a hx-get="/operator/resolution-review/series/{{ selected_anilist_id }}?issue_offset={{ [0, issue_offset - 50]|max }}" hx-target="#resolution-workspace" hx-swap="outerHTML">« PREV</a>{% endif %}
+      <span>{{ issue_offset + 1 }}–{{ issue_offset + issues|length }}</span>
+      {% if issues|length == 50 %}<a hx-get="/operator/resolution-review/series/{{ selected_anilist_id }}?issue_offset={{ issue_offset + 50 }}" hx-target="#resolution-workspace" hx-swap="outerHTML">NEXT »</a>{% endif %}
+    </div>
+    {% else %}<div class="empty-state">Select a series with open issues.</div>{% endif %}
+  </section>
+
+  <section class="forum-panel resolution-agent" aria-labelledby="agent-heading">
+    <h2 id="agent-heading">Agent Session</h2>
+    {% if selected_anilist_id %}
+    <form class="agent-settings"
+          hx-post="/operator/resolution-review/series/{{ selected_anilist_id }}/run"
+          hx-target="#agent-events" hx-swap="beforeend"
+          hx-disable="find button, find input">
+      <label>Model <input name="model_id" value="{{ model_id }}" data-local-setting="resolution-model"></label>
+      <label>Base URL <input name="base_url" value="{{ base_url }}" placeholder="required, including for OpenAI" data-local-setting="resolution-base-url"></label>
+      <label>Key <input name="api_key" type="password" value="" autocomplete="off" placeholder="optional / not stored"></label>
+      <label>Max turns <input name="max_turns" type="number" min="1" max="30" value="{{ max_turns }}" data-local-setting="resolution-max-turns"></label>
+      <button type="submit">RUN REVIEW</button>
+    </form>
+    <div class="agent-egress-note">RUN REVIEW sends the listed filenames, issue details, tool inputs/outputs, and subtitle excerpts to the selected Base URL. The key is request-only. OpenAI tracing is off unless the server explicitly opts in.</div>
+    <div id="agent-status" class="agent-status">Ready.</div>
+    <div id="agent-events" class="agent-events" aria-live="polite"></div>
+    <div id="proposal"></div>
+    {% else %}<div class="empty-state">No series selected.</div>{% endif %}
+  </section>
+</div>

@@ -31,6 +31,16 @@ from ja_media_data.products.episode_resolution.models import (
     BindingConflictError,
     CaptureObservation,
     ResolutionBatch,
+    ResolutionIssueClaim,
+)
+from ja_media_data.operator.resolution_review.factory import source_token
+from ja_media_data.operator.resolution_review.catalog import (
+    list_resolved_series,
+    list_review_series,
+)
+from ja_media_data.operator.resolution_review.models import SeriesResolutionDraft
+from ja_media_data.operator.resolution_review.promotion import (
+    ResolutionPromotionService,
 )
 
 
@@ -50,13 +60,12 @@ def repository(tmp_path):
             data_path=str(tmp_path / "ducklake"),
         )
     )
-    control = psycopg.connect(
-        postgres_url_for_psycopg(postgres_url), autocommit=True
-    )
+    control = psycopg.connect(postgres_url_for_psycopg(postgres_url), autocommit=True)
     apply_schema(catalog)
     assert apply_postgres_schema(control, control_schema=control_schema) == [
         "001_binding_overrides.sql",
         "002_override_revisions.sql",
+        "003_resolution_decisions.sql",
     ]
     assert apply_postgres_schema(control, control_schema=control_schema) == []
     yield DuckLakeRepository(
@@ -86,9 +95,7 @@ def index(repository: DuckLakeRepository, *capture_ids: str) -> None:
         )
         for capture_id in capture_ids
     ]
-    repository.replace_bronze_captures(
-        observations, "bronze-" + "-".join(capture_ids)
-    )
+    repository.replace_bronze_captures(observations, "bronze-" + "-".join(capture_ids))
 
 
 def test_override_and_unbind_are_immediately_effective(repository) -> None:
@@ -98,17 +105,19 @@ def test_override_and_unbind_are_immediately_effective(repository) -> None:
         ResolutionBatch(
             hints=(),
             issues=(),
-            proposals=(BindingProposal(
-            proposal_id="automatic-proposal",
-            namespace="anilist",
-            series_id="15451",
-            episode="3",
-            audio_capture_id="capture-1",
-            proposal_method="resolver",
-            proposal_evidence={"source": "test"},
-            input_data_version="etag-1",
-            recipe_version="resolver-v1",
-            ),),
+            proposals=(
+                BindingProposal(
+                    proposal_id="automatic-proposal",
+                    namespace="anilist",
+                    series_id="15451",
+                    episode="3",
+                    audio_capture_id="capture-1",
+                    proposal_method="resolver",
+                    proposal_evidence={"source": "test"},
+                    input_data_version="etag-1",
+                    recipe_version="resolver-v1",
+                ),
+            ),
         ),
         "automatic-v1",
     )
@@ -202,7 +211,8 @@ def test_findings_report_later_auto_collision_with_override(repository) -> None:
         repository.connection,
         product,
         MaterializationContext(
-            attempt_id="test:acceptance", pipeline_run_id="test",
+            attempt_id="test:acceptance",
+            pipeline_run_id="test",
             recipe_revision=ACCEPTANCE_POLICY_VERSION,
             build_key=structural_build_key(
                 "accepted_bindings", ACCEPTANCE_POLICY_VERSION, heads
@@ -214,3 +224,73 @@ def test_findings_report_later_auto_collision_with_override(repository) -> None:
     assert [item.finding_type for item in repository.list_consistency_findings()] == [
         "override_automatic_capture_collision"
     ]
+
+
+def test_review_batch_promotes_and_reverses_binding_and_disposition(repository) -> None:
+    index(repository, "capture-move", "capture-extra")
+    repository.replace_resolution_tables(
+        ResolutionBatch(
+            hints=(),
+            proposals=(),
+            issues=(
+                ResolutionIssueClaim(
+                    "issue-move", "capture-move", None, "invalid", {"reason": "test"}
+                ),
+                ResolutionIssueClaim(
+                    "issue-extra", "capture-extra", None, "invalid", {"reason": "test"}
+                ),
+            ),
+        ),
+        "review-promotion-v1",
+    )
+    reviewed = source_token(repository)
+    draft = SeriesResolutionDraft.model_validate(
+        {
+            "current_anilist_id": 15451,
+            "summary": "Move one episode and exclude one extra.",
+            "decisions": [
+                {
+                    "decision": "move_to_another_series",
+                    "destination_anilist_id": 200,
+                    "files": [{"capture_id": "capture-move", "episode": 3}],
+                    "rationale": "Wrong season.",
+                },
+                {
+                    "decision": "leave_out_of_episode_index",
+                    "capture_ids": ["capture-extra"],
+                    "rationale": "Creditless extra.",
+                },
+            ],
+        }
+    )
+    service = ResolutionPromotionService(repository, environment="dev")
+
+    accepted = service.accept(draft, reviewed)
+
+    assert accepted["durable_writeback"] is True
+    assert (
+        repository.get_current_binding("anilist", "200", "3").audio_capture_id
+        == "capture-move"
+    )
+    assert service.disposed_capture_ids() == {"capture-extra"}
+    assert list_review_series(repository, snapshot_id=reviewed.snapshot_id).total == 0
+    assert list_resolved_series(repository, snapshot_id=reviewed.snapshot_id).total == 1
+    history = service.history()
+    assert history[0].items[0].capture_id == "capture-move"
+    assert history[0].items[1].decision == "leave_out_of_episode_index"
+
+    reversed_result = service.reverse(
+        accepted["batch_id"], reason="Operator correction"
+    )
+
+    assert reversed_result["status"] == "reversed"
+    assert repository.get_current_binding("anilist", "200", "3") is None
+    assert service.disposed_capture_ids() == set()
+    assert (
+        list_review_series(repository, snapshot_id=reviewed.snapshot_id)
+        .items[0]
+        .issue_count
+        == 2
+    )
+    assert list_resolved_series(repository, snapshot_id=reviewed.snapshot_id).total == 0
+    assert service.history()[1].reversed_by == reversed_result["batch_id"]

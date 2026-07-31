@@ -32,8 +32,14 @@ def compile_product(connection: duckdb.DuckDBPyConnection) -> CompiledAcceptance
     rows = tuple(
         AcceptedBinding(
             stable_id("acceptance", row[0], ACCEPTANCE_POLICY_VERSION),
-            row[0], row[1], row[2], row[3], row[4], "automatic",
-            ACCEPTANCE_POLICY_VERSION, fingerprint(*row),
+            row[0],
+            row[1],
+            row[2],
+            row[3],
+            row[4],
+            "automatic",
+            ACCEPTANCE_POLICY_VERSION,
+            fingerprint(*row),
         )
         for row in source
     )

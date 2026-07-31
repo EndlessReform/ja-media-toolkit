@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
 from pydantic_settings import (
     BaseSettings,
     DotEnvSettingsSource,
@@ -15,11 +15,20 @@ from pydantic_settings import (
     SettingsConfigDict,
     TomlConfigSettingsSource,
 )
+from dotenv import load_dotenv
 
 
 CONFIG_PATH_ENV = "JA_MEDIA_DATA_CONFIG"
 DEFAULT_CONFIG_PATH = Path(__file__).parents[2] / "config.local.toml"
-_SETTING_ROOTS = {"environment", "bronze", "ducklake", "control", "dagster", "services"}
+_SETTING_ROOTS = {
+    "environment",
+    "bronze",
+    "ducklake",
+    "control",
+    "dagster",
+    "services",
+    "agent",
+}
 
 
 class _DataDotEnvSource(DotEnvSettingsSource):
@@ -68,6 +77,22 @@ class ServicesSettings(_Section):
     root_url: str
 
 
+class AgentSettings(_Section):
+    """Server defaults for the optional episode-resolution agent.
+
+    A request may override the model, base URL, and key without mutating these
+    process settings. Keys belong in the adjacent dotenv file, never TOML.
+    """
+
+    model_id: str | None = None
+    base_url: str | None = None
+    api_key: SecretStr | None = None
+    openai_tracing_enabled: bool = False
+    max_turns: int = Field(default=12, ge=1, le=30)
+    paused_review_limit: int = Field(default=128, ge=1, le=1024)
+    paused_review_ttl_seconds: int = Field(default=1800, ge=60, le=86400)
+
+
 class DataSettings(BaseSettings):
     """Complete non-framework configuration for one data environment.
 
@@ -89,6 +114,7 @@ class DataSettings(BaseSettings):
     control: ControlSettings = ControlSettings()
     dagster: DagsterSettings = DagsterSettings()
     services: ServicesSettings
+    agent: AgentSettings = AgentSettings()
 
     @classmethod
     def settings_customise_sources(
@@ -126,6 +152,17 @@ def secrets_path() -> Path:
     path = config_path()
     environment = path.name.removeprefix("config.").removesuffix(".toml")
     return path.with_name(f".env.{environment}")
+
+
+def load_process_secrets() -> None:
+    """Load the selected dotenv for framework clients that read ``os.environ``.
+
+    Pydantic reads the same file without mutating the process environment, but
+    Dagster and Celery resolve their connection strings directly from
+    environment variables. Existing process values retain precedence.
+    """
+
+    load_dotenv(secrets_path(), override=False)
 
 
 @lru_cache(maxsize=1)

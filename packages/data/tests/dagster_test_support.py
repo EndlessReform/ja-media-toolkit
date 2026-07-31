@@ -83,6 +83,22 @@ def documents() -> list[BronzeDocument]:
     ]
 
 
+def review_documents() -> list[BronzeDocument]:
+    """Add one valid capture whose title disagrees with its Bronze series."""
+
+    source = documents()
+    source.append(
+        _document(
+            "capture-review",
+            "2026-04-01T00:00:00Z",
+            "etag-review",
+            "review",
+            capture_stem="Other_Show_Ep03",
+        )
+    )
+    return source
+
+
 def changed_documents(source: list[BronzeDocument]) -> list[BronzeDocument]:
     """Advance one marker version while retaining the same capture identity."""
 
@@ -95,7 +111,14 @@ def changed_documents(source: list[BronzeDocument]) -> list[BronzeDocument]:
     return changed
 
 
-def _document(capture_id: str, modified: str, etag: str, stem: str) -> BronzeDocument:
+def _document(
+    capture_id: str,
+    modified: str,
+    etag: str,
+    stem: str,
+    *,
+    capture_stem: str = "Example_Ep03",
+) -> BronzeDocument:
     key = f"audio/anime/bronze/15451/metadata/{stem}.json"
     return BronzeDocument(
         marker=BronzeMarker(capture_id, key, etag, 100, modified),
@@ -103,8 +126,8 @@ def _document(capture_id: str, modified: str, etag: str, stem: str) -> BronzeDoc
             "schema_version": 2,
             "capture_id": capture_id,
             "series": {"namespace": "anilist", "id": "15451"},
-            "source": f"/downloads/Example_Ep03_{stem}.mkv",
-            "stem": "Example_Ep03",
+            "source": f"/downloads/{capture_stem}_{stem}.mkv",
+            "stem": capture_stem,
             "audio_tracks": [
                 {
                     "filename": f"{stem}.english.ac3",

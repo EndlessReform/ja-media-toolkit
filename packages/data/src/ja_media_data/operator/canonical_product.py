@@ -18,8 +18,14 @@ class CanonicalProductProjector:
         self.repository = repository
 
     def page(
-        self, *, series_id: str | None, offset: int, limit: int,
-        currency: str, stale_reason: str | None, snapshot_id: int | None,
+        self,
+        *,
+        series_id: str | None,
+        offset: int,
+        limit: int,
+        currency: str,
+        stale_reason: str | None,
+        snapshot_id: int | None,
         override_revision: int | None,
     ) -> tuple[tuple[CanonicalizationGate, ...], int]:
         """Load only locator keys and aggregates for the requested product page."""
@@ -32,15 +38,22 @@ class CanonicalProductProjector:
         canonical = self._canonical(page_keys, snapshot_id)
         gates = tuple(
             self._gate(
-                key, canonical.get(key), overrides.get(key), counts.get(key, (0, 0)),
-                currency, stale_reason,
+                key,
+                canonical.get(key),
+                overrides.get(key),
+                counts.get(key, (0, 0)),
+                currency,
+                stale_reason,
             )
             for key in page_keys
         )
         return gates, len(ordered)
 
     def candidates(
-        self, locator: tuple[str, str, str], *, snapshot_id: int | None,
+        self,
+        locator: tuple[str, str, str],
+        *,
+        snapshot_id: int | None,
         override_revision: int | None,
     ) -> tuple[CandidateObservation, ...]:
         """Load full evidence only after an operator expands one locator."""
@@ -48,7 +61,9 @@ class CanonicalProductProjector:
         proposals = table_ref(
             "episode_binding_proposals", snapshot_id=snapshot_id, alias="proposal"
         )
-        captures = table_ref("bronze_captures", snapshot_id=snapshot_id, alias="capture")
+        captures = table_ref(
+            "bronze_captures", snapshot_id=snapshot_id, alias="capture"
+        )
         accepted = table_ref(
             "accepted_bindings_auto", snapshot_id=snapshot_id, alias="accepted"
         )
@@ -68,13 +83,20 @@ class CanonicalProductProjector:
         ).fetchall()
         selected = self._canonical([locator], snapshot_id).get(locator)
         selected_capture = selected[0] if selected else None
-        items = [CandidateObservation(
-            proposal_id=str(row[0]), capture_id=str(row[1]),
-            acceptance_id=str(row[2]) if row[2] else None,
-            manifest_key=str(row[3]), manifest_bucket=str(row[4]),
-            manifest_modified_at=row[5], admitted=row[2] is not None,
-            selected=str(row[1]) == selected_capture, source="proposal",
-        ) for row in rows]
+        items = [
+            CandidateObservation(
+                proposal_id=str(row[0]),
+                capture_id=str(row[1]),
+                acceptance_id=str(row[2]) if row[2] else None,
+                manifest_key=str(row[3]),
+                manifest_bucket=str(row[4]),
+                manifest_modified_at=row[5],
+                admitted=row[2] is not None,
+                selected=str(row[1]) == selected_capture,
+                source="proposal",
+            )
+            for row in rows
+        ]
         override = self._overrides(locator[1], override_revision).get(locator)
         visible = getattr(override, "audio_capture_id", None) or selected_capture
         if visible and all(item.capture_id != visible for item in items):
@@ -86,16 +108,31 @@ class CanonicalProductProjector:
         return tuple(items)
 
     def progress(
-        self, *, series_id: str | None, total_locators: int, currency: str,
-        snapshot_id: int | None, override_revision: int | None,
+        self,
+        *,
+        series_id: str | None,
+        total_locators: int,
+        currency: str,
+        snapshot_id: int | None,
+        override_revision: int | None,
     ) -> CampaignProgress:
         """Compute campaign counters with scalar aggregates, never product rows."""
 
-        captures = table_ref("bronze_captures", snapshot_id=snapshot_id, alias="capture")
-        proposals = table_ref("episode_binding_proposals", snapshot_id=snapshot_id, alias="proposal")
-        accepted = table_ref("accepted_bindings_auto", snapshot_id=snapshot_id, alias="accepted")
-        canonical = table_ref("canonical_episode_inputs", snapshot_id=snapshot_id, alias="canonical")
-        issues = table_ref("resolution_issues_auto", snapshot_id=snapshot_id, alias="issue")
+        captures = table_ref(
+            "bronze_captures", snapshot_id=snapshot_id, alias="capture"
+        )
+        proposals = table_ref(
+            "episode_binding_proposals", snapshot_id=snapshot_id, alias="proposal"
+        )
+        accepted = table_ref(
+            "accepted_bindings_auto", snapshot_id=snapshot_id, alias="accepted"
+        )
+        canonical = table_ref(
+            "canonical_episode_inputs", snapshot_id=snapshot_id, alias="canonical"
+        )
+        issues = table_ref(
+            "resolution_issues_auto", snapshot_id=snapshot_id, alias="issue"
+        )
         filters = " WHERE series_id = ?" if series_id else ""
         capture_filter = " WHERE capture.series_id = ?" if series_id else ""
         parameters = [series_id] if series_id else []
@@ -112,14 +149,19 @@ class CanonicalProductProjector:
         ).fetchone()
         canonical_count = int(row[4])
         overrides = self._overrides(series_id, override_revision)
-        unbound = sum(getattr(item, "audio_capture_id", None) is None
-                      for item in overrides.values())
+        unbound = sum(
+            getattr(item, "audio_capture_id", None) is None
+            for item in overrides.values()
+        )
         admitted_locators = int(row[3])
         stale = canonical_count if currency.startswith("stale") else 0
         return CampaignProgress(
-            captures=int(row[0]), proposals=int(row[1]), quarantined=int(row[2]),
+            captures=int(row[0]),
+            proposals=int(row[1]),
+            quarantined=int(row[2]),
             locators=total_locators,
-            canonicalized=0 if stale else canonical_count, stale=stale,
+            canonicalized=0 if stale else canonical_count,
+            stale=stale,
             unbound=unbound,
             awaiting_acceptance=max(0, total_locators - admitted_locators - unbound),
             awaiting_canonicalization=max(0, admitted_locators - canonical_count),
@@ -182,9 +224,12 @@ class CanonicalProductProjector:
         ).fetchall()
         return {
             (str(row[0]), str(row[1]), str(row[2])): (
-                str(row[3]), str(row[4]), str(row[5]) if row[5] else None,
+                str(row[3]),
+                str(row[4]),
+                str(row[5]) if row[5] else None,
                 f"s3://{row[6]}/{row[7]}",
-            ) for row in rows
+            )
+            for row in rows
         }
 
     def _overrides(
@@ -199,7 +244,8 @@ class CanonicalProductProjector:
             else source.iter_current_overrides()
         )
         return {
-            (item.namespace, item.series_id, item.episode): item for item in iterator
+            (item.namespace, item.series_id, item.episode): item
+            for item in iterator
             if series_id is None or item.series_id == series_id
         }
 
@@ -210,49 +256,85 @@ class CanonicalProductProjector:
         row = self.repository.connection.execute(
             """SELECT manifest_key, manifest_bucket,
                       coalesce(manifest_modified_at, last_observed_at) FROM """
-            + source + " WHERE capture_id = ? LIMIT 1", [capture_id],
+            + source
+            + " WHERE capture_id = ? LIMIT 1",
+            [capture_id],
         ).fetchone()
-        return CandidateObservation(
-            capture_id=capture_id, manifest_key=str(row[0]), manifest_bucket=str(row[1]),
-            manifest_modified_at=row[2], admitted=True, selected=selected,
-            source="override",
-        ) if row else None
+        return (
+            CandidateObservation(
+                capture_id=capture_id,
+                manifest_key=str(row[0]),
+                manifest_bucket=str(row[1]),
+                manifest_modified_at=row[2],
+                admitted=True,
+                selected=selected,
+                source="override",
+            )
+            if row
+            else None
+        )
 
     @staticmethod
     def _gate(
         locator: tuple[str, str, str],
         canonical: tuple[str, str, str | None, str] | None,
-        override: object | None, counts: tuple[int, int], currency: str,
+        override: object | None,
+        counts: tuple[int, int],
+        currency: str,
         stale_reason: str | None,
     ) -> CanonicalizationGate:
         selected = canonical[0] if canonical else None
         override_capture = getattr(override, "audio_capture_id", None)
         if selected and currency.startswith("stale"):
-            status, reason = "stale", "Committed canonical output is stale: " + (
-                stale_reason or currency
+            status, reason = (
+                "stale",
+                "Committed canonical output is stale: " + (stale_reason or currency),
             )
         elif override is not None and override_capture != selected:
-            action = "unbind" if override_capture is None else f"select {override_capture}"
-            status, reason = "awaiting_canonicalization", (
-                f"Active override says to {action}; the product has not incorporated it."
+            action = (
+                "unbind" if override_capture is None else f"select {override_capture}"
+            )
+            status, reason = (
+                "awaiting_canonicalization",
+                (
+                    f"Active override says to {action}; the product has not incorporated it."
+                ),
             )
         elif selected:
-            status, reason = "canonicalized", (
-                "Latest admitted manifest_modified_at wins; manifest key and capture ID break ties."
+            status, reason = (
+                "canonicalized",
+                (
+                    "Latest admitted manifest_modified_at wins; manifest key and capture ID break ties."
+                ),
             )
         elif counts[1]:
-            status, reason = "awaiting_canonicalization", "Admitted candidates await compilation."
+            status, reason = (
+                "awaiting_canonicalization",
+                "Admitted candidates await compilation.",
+            )
         else:
-            status, reason = "awaiting_acceptance", "Resolver proposals await admission."
+            status, reason = (
+                "awaiting_acceptance",
+                "Resolver proposals await admission.",
+            )
         return CanonicalizationGate(
-            locator=":".join(locator), namespace=locator[0], series_id=locator[1],
-            episode=locator[2], status=status, selected_capture_id=selected,
+            locator=":".join(locator),
+            namespace=locator[0],
+            series_id=locator[1],
+            episode=locator[2],
+            status=status,
+            selected_capture_id=selected,
             selected_manifest_url=canonical[3] if canonical else None,
             binding_source=canonical[1] if canonical else None,
             canonical_attempt_id=canonical[2] if canonical else None,
-            active_override=("unbind" if override is not None and override_capture is None
-                             else override_capture),
-            selection_reason=reason, candidate_count=counts[0], admitted_count=counts[1],
+            active_override=(
+                "unbind"
+                if override is not None and override_capture is None
+                else override_capture
+            ),
+            selection_reason=reason,
+            candidate_count=counts[0],
+            admitted_count=counts[1],
             candidates=(),
         )
 

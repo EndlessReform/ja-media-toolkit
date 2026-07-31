@@ -80,6 +80,14 @@ uv run ja-data bind anilist 10087 14 --unbind
 Schema installation is the Compose deployment's idempotent `data-schema-init`
 one-shot, not a normal operator command.
 
+Episode resolution review now owns grouped agent/human decisions. Local
+`environment = "local"` accepts are previews. DEV/PROD accepts write an atomic
+batch of binding overrides and capture dispositions; history and stale-safe
+reverse controls are on the same page. Re-materialize canonical inputs after a
+write or reversal. Agent traces are off and Responses use `store=false` by
+default; the configured model endpoint still receives the review context when
+the operator explicitly starts a run.
+
 ## Shared DEV
 
 Local PostgreSQL, MinIO, RabbitMQ, and Dagster state are disposable. Persistent
@@ -90,6 +98,20 @@ locations, workers, and the WebUI independently. Its
 [`README.md`](../../deploy/data/dev/README.md) defines the required protected
 environment variables, where each credential comes from, and the first-start
 RabbitMQ bootstrap behavior.
+
+For read-only inspection from a development checkout, use the standard ignored
+developer profile rather than reconstructing access from local or worker files:
+
+```sh
+cp packages/data/config.dev.example.toml packages/data/config.dev.toml
+cp packages/data/.env.dev.example packages/data/.env.dev
+```
+
+Put stable DEV endpoints and paths in `config.dev.toml`, and put the existing
+DEV PostgreSQL/Garage credentials in `.env.dev`. Select the profile with
+`JA_MEDIA_DATA_CONFIG=packages/data/config.dev.toml` when using package tools.
+The repository's `inspect-ducklake` skill provides a self-contained read-only
+asset exporter that discovers this profile automatically.
 
 ## Tests
 

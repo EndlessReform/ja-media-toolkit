@@ -5,7 +5,11 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 import json
 
-from ja_media_core.bronze import BronzeManifestError, BronzeStream, parse_bronze_manifest
+from ja_media_core.bronze import (
+    BronzeManifestError,
+    BronzeStream,
+    parse_bronze_manifest,
+)
 
 from ja_media_data.products.canonical_inputs.selection import audio_object_key
 from ja_media_data.products.capture_audio_eligibility.models import (
@@ -51,9 +55,7 @@ def compile_product(
     )
 
 
-def _evaluate(
-    document: BronzeDocument, store: BronzeStore
-) -> CaptureAudioEligibility:
+def _evaluate(document: BronzeDocument, store: BronzeStore) -> CaptureAudioEligibility:
     marker = document.marker
     try:
         manifest = parse_bronze_manifest(

@@ -40,17 +40,22 @@ class MaterializationCatalog:
         row = self.connection.execute(
             """SELECT materialization_id, target, fingerprint, recipe_revision,
                       build_key, run_id, computed_at, snapshot_id, input_heads
-               FROM """ + source + """ WHERE target = ? AND scope = 'corpus'
+               FROM """
+            + source
+            + """ WHERE target = ? AND scope = 'corpus'
                ORDER BY computed_at DESC, materialization_id DESC LIMIT 1""",
             [target],
         ).fetchone()
         if row is None:
             return None
         return ProductHead(
-            materialization_id=str(row[0]), target=str(row[1]),
-            fingerprint=str(row[2]), recipe_revision=str(row[3]) if row[3] else None,
+            materialization_id=str(row[0]),
+            target=str(row[1]),
+            fingerprint=str(row[2]),
+            recipe_revision=str(row[3]) if row[3] else None,
             build_key=str(row[4]) if row[4] else None,
-            run_id=str(row[5]) if row[5] else None, computed_at=row[6],
+            run_id=str(row[5]) if row[5] else None,
+            computed_at=row[6],
             snapshot_id=int(row[7]) if row[7] is not None else None,
             input_heads=decode_heads(row[8]),
         )
@@ -64,16 +69,21 @@ class MaterializationCatalog:
         for target in targets:
             head = self.current_head(target, snapshot_id=snapshot_id)
             heads[target] = (
-                {"materialization_id": head.materialization_id,
-                 "fingerprint": head.fingerprint}
-                if head else {"materialization_id": None, "fingerprint": None}
+                {
+                    "materialization_id": head.materialization_id,
+                    "fingerprint": head.fingerprint,
+                }
+                if head
+                else {"materialization_id": None, "fingerprint": None}
             )
         return heads
 
     def current_snapshot_id(self) -> int | None:
         """Return DuckLake's current snapshot for exact projection cache keys."""
 
-        catalog = str(self.connection.execute("SELECT current_database()").fetchone()[0])
+        catalog = str(
+            self.connection.execute("SELECT current_database()").fetchone()[0]
+        )
         quoted = '"' + catalog.replace('"', '""') + '"'
         row = self.connection.execute(
             f"SELECT id FROM {quoted}.current_snapshot()"
@@ -87,9 +97,14 @@ def structural_build_key(
     """Hash declared dependency heads and recipe identity, not output content."""
 
     payload = json.dumps(
-        {"target": target, "recipe_revision": recipe_revision,
-         "input_heads": input_heads},
-        ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+        {
+            "target": target,
+            "recipe_revision": recipe_revision,
+            "input_heads": input_heads,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
     )
     return hashlib.sha256(payload.encode()).hexdigest()
 

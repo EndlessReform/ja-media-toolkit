@@ -22,3 +22,13 @@ ui_url = "http://data-dev.example.ts.net:8080/dagster"
 
 [services]
 root_url = "http://services.example.ts.net"
+
+[agent]
+# Optional server defaults. The browser can provide model/base per run. Both
+# values must be explicit before a run may send data.
+# model_id = "gpt-5.6-terra"
+# base_url = "https://api.openai.com/v1"
+max_turns = 12
+# Traces go to OpenAI's tracing service, even when the model uses a custom
+# base_url. Leave this false unless that export is explicitly wanted.
+openai_tracing_enabled = false

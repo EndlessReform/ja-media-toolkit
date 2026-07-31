@@ -66,6 +66,47 @@ because it is embedded in the Celery broker URL. Set the HTTP and AMQP bind
 variables to the VM's tailnet address, or leave them on `127.0.0.1` for
 host-only access.
 
+The operator reads `environment = "dev"` from `config.dev.toml`; that is the
+writeback switch. Local config remains preview-only. In DEV, accepting a
+resolution proposal writes one atomic decision batch to the configured
+`[control].schema`. The `schema-init` service applies the additive decision
+tables before Compose is allowed to start `operator-web`, so an image cannot
+reach the approval screen with its required control schema missing.
+
+The model and base URL have no server default. Enter them in the WebUI for the
+initial workflow; the browser retains those two non-secret fields locally. A
+run without either value returns HTTP 422 naming the missing fields. First-party
+OpenAI must use the explicit `https://api.openai.com/v1` base URL; a self-hosted
+provider must use its complete OpenAI-compatible `/v1` URL.
+Put `JA_MEDIA_AGENT__API_KEY` in `/etc/ja-media/.env.dev` only when the provider
+needs a server-side key. The model/base/key fields in the WebUI override these
+defaults for one run; the browser stores model and base locally, but never the
+key.
+
+Clicking **Run review** sends filenames, resolver issue details, prompts, tool
+inputs/outputs, AniList metadata, and any displayed subtitle excerpts to the
+selected model endpoint. OpenAI Agents SDK tracing is disabled by default and
+Responses are created with `store=false`. Tracing can be explicitly enabled
+with `openai_tracing_enabled = true` or
+`JA_MEDIA_AGENT__OPENAI_TRACING_ENABLED=true`; it uses OpenAI's standard trace
+service, contains no model/tool inputs or outputs in this application, and has
+no custom endpoint setting. See the SDK's [tracing](https://openai.github.io/openai-agents-python/tracing/)
+and [configuration](https://openai.github.io/openai-agents-python/config/)
+references. Do not enable tracing merely to use a custom model base URL.
+SDK debug logs are also content-redacted by default through
+`OPENAI_AGENTS_DONT_LOG_MODEL_DATA=1` and
+`OPENAI_AGENTS_DONT_LOG_TOOL_DATA=1`; an explicit process environment override
+is required to change either safeguard.
+
+Accept is deterministic and does not call the model. It rechecks the exact
+resolution materialization, DuckLake snapshot, and binding revision reviewed
+by the agent, then writes all binding overrides and capture dispositions in one
+PostgreSQL transaction. A stale review fails closed. The **Decision History**
+table shows every exact crosswalk. **Reverse** restores the prior control heads
+without a model call; it refuses if a later decision touched any affected head.
+Re-materialize canonical inputs after accept or reverse so downstream readers
+consume the new control revision.
+
 Set `JA_MEDIA_REGISTRY` in `/etc/ja-media/.env.dev` to the same registry
 authority used by the publisher (without `https://` or a repository path).
 Authenticate Docker once, then perform the first full reconcile:
@@ -168,5 +209,8 @@ a dedicated bucket.
 | `JA_MEDIA_DUCKLAKE__POSTGRES_URL` | External DuckLake catalog and control database. |
 | `JA_MEDIA_BRONZE__ACCESS_KEY_ID` / `SECRET_ACCESS_KEY` | Existing read-only bronze credential. |
 | `JA_MEDIA_DUCKLAKE__S3_ACCESS_KEY_ID` / `SECRET_ACCESS_KEY` | Existing DEV DuckLake read/write credential. |
+| `JA_MEDIA_AGENT__API_KEY` | Optional server-side key for the configured model provider. |
+| `JA_MEDIA_AGENT__MODEL_ID` / `BASE_URL` | Optional environment overrides for the stable `[agent]` TOML values. Prefer TOML for these non-secrets. |
+| `JA_MEDIA_AGENT__OPENAI_TRACING_ENABLED` | Optional explicit opt-in to redacted OpenAI SDK tracing; default is false. |
 | `JA_MEDIA_DEV_HTTP_BIND` | Tailnet or loopback address for Caddy port 8080. |
 | `JA_MEDIA_DEV_AMQP_BIND` | Required DEV host tailnet address for native-worker AMQP. |

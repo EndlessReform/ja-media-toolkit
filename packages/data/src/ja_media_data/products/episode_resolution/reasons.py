@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 
-BRONZE_MANIFEST_FAILED_SCHEMA_VALIDATION = (
-    "bronze_manifest_failed_schema_validation"
-)
+BRONZE_MANIFEST_FAILED_SCHEMA_VALIDATION = "bronze_manifest_failed_schema_validation"
 FILENAME_CONTAINS_MULTI_EPISODE_RANGE = "filename_contains_multi_episode_range"
 FILENAME_HAS_NO_RECOGNIZABLE_EPISODE_NUMBER = (
     "filename_has_no_recognizable_episode_number"
@@ -22,9 +20,7 @@ FILENAME_PARSER_EPISODE_HAS_NO_EXPLICIT_TOKEN = (
 FILENAME_PARSER_EPISODE_DIFFERS_FROM_EXPLICIT_TOKEN = (
     "filename_parser_episode_differs_from_explicit_token"
 )
-DECLARED_ANILIST_ID_NOT_FOUND_IN_METADATA = (
-    "declared_anilist_id_not_found_in_metadata"
-)
+DECLARED_ANILIST_ID_NOT_FOUND_IN_METADATA = "declared_anilist_id_not_found_in_metadata"
 DECLARED_ANILIST_ENTRY_HAS_NO_TITLES = "declared_anilist_entry_has_no_titles"
 FILENAME_TITLE_NOT_EQUAL_TO_DECLARED_ANILIST_TITLES = (
     "filename_title_not_equal_to_declared_anilist_titles"
@@ -39,6 +35,8 @@ FILENAME_EPISODE_EXCEEDS_DECLARED_ANILIST_COUNT = (
 FILENAME_AND_DECLARED_ANILIST_ENTRY_AGREE = (
     "filename_episode_and_title_match_declared_anilist_entry"
 )
+
+
 def episode_signal_failure_reason(
     parser_episode: int | None, explicit_episodes: tuple[int, ...]
 ) -> str | None:

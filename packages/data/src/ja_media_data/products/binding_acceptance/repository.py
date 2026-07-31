@@ -32,7 +32,9 @@ def replace_product(
 ) -> ProductCommitResult:
     """Atomically replace all automatic acceptances."""
 
-    values = [tuple(asdict(item)[column] for column in _COLUMNS) for item in product.rows]
+    values = [
+        tuple(asdict(item)[column] for column in _COLUMNS) for item in product.rows
+    ]
     return AtomicProductStore(connection).replace(
         target="accepted_bindings",
         tables=(("accepted_bindings_auto", _COLUMNS, values),),

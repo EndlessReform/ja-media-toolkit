@@ -44,15 +44,21 @@ class CampaignKeys:
                 self.repository.connection
             ).current_snapshot_id()
             self._current_token = (
-                "snapshot", snapshot,
-                "override", binding_override_revision(self.repository),
+                "snapshot",
+                snapshot,
+                "override",
+                binding_override_revision(self.repository),
             )
         return self._current_token
 
     def campaign_state(self) -> tuple[object, ...]:
         """Add Dagster's latest run cursor only where the spine is rendered."""
 
-        return (*self.domain_state(), "dagster", self.gateway.cursor(job_name=self.job_name))
+        return (
+            *self.domain_state(),
+            "dagster",
+            self.gateway.cursor(job_name=self.job_name),
+        )
 
 
 def _override_revision(heads: object) -> int:

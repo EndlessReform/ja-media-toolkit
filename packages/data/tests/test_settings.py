@@ -1,5 +1,6 @@
 """Tests for the pydantic-settings TOML and environment contract."""
 
+import os
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,7 @@ from ja_media_data.settings import (
     BronzeSettings,
     DataSettings,
     get_settings,
+    load_process_secrets,
     reset_settings_cache,
 )
 
@@ -63,6 +65,23 @@ def test_adjacent_dotenv_overrides_toml_but_not_process_env(
     assert settings.bronze.endpoint_url == "http://process"
 
 
+def test_process_secrets_are_available_to_framework_clients(
+    tmp_path, monkeypatch
+) -> None:
+    config = tmp_path / "config.local.toml"
+    _toml(config)
+    (tmp_path / ".env.local").write_text(
+        "DAGSTER_POSTGRES_URL=postgresql://from-dotenv\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("JA_MEDIA_DATA_CONFIG", str(config))
+    monkeypatch.delenv("DAGSTER_POSTGRES_URL", raising=False)
+
+    load_process_secrets()
+
+    assert os.environ["DAGSTER_POSTGRES_URL"] == "postgresql://from-dotenv"
+
+
 def test_unknown_toml_keys_fail_closed(tmp_path, monkeypatch) -> None:
     config = tmp_path / "data.toml"
     _toml(config)
@@ -95,6 +114,24 @@ def test_settings_are_immutable() -> None:
 
     with pytest.raises(ValidationError):
         settings.bronze.bucket = "changed"
+
+
+def test_agent_defaults_and_secret_environment_override(tmp_path, monkeypatch) -> None:
+    config = tmp_path / "config.local.toml"
+    _toml(config)
+    monkeypatch.setenv("JA_MEDIA_DATA_CONFIG", str(config))
+    monkeypatch.setenv("JA_MEDIA_AGENT__API_KEY", "test-only-secret")
+    reset_settings_cache()
+
+    settings = get_settings()
+
+    assert settings.agent.model_id is None
+    assert settings.agent.base_url is None
+    assert settings.agent.openai_tracing_enabled is False
+    assert settings.agent.max_turns == 12
+    assert settings.agent.api_key is not None
+    assert settings.agent.api_key.get_secret_value() == "test-only-secret"
+    assert "test-only-secret" not in repr(settings)
 
 
 def test_preflight_errors_redact_url_credentials() -> None:

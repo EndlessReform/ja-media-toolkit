@@ -59,7 +59,9 @@ def capture_audio_eligibility(context) -> dg.MaterializeResult:
                 "eligible": statuses[ELIGIBLE],
                 "ineligible": committed.rows - statuses[ELIGIBLE],
                 "ineligible_reasons": dict(sorted(reasons.items())),
-                "ineligible_declared_language_sets": dict(sorted(language_sets.items())),
+                "ineligible_declared_language_sets": dict(
+                    sorted(language_sets.items())
+                ),
             },
         ),
     )
@@ -71,5 +73,7 @@ def _language_set(serialized_tracks: str) -> str:
     import json
 
     tracks = json.loads(serialized_tracks)
-    languages = sorted({track.get("declared_language") or "<missing>" for track in tracks})
+    languages = sorted(
+        {track.get("declared_language") or "<missing>" for track in tracks}
+    )
     return ",".join(languages) if languages else "<no-parseable-tracks>"

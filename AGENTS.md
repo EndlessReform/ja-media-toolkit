@@ -94,6 +94,12 @@ framework jargon.
 
 The system uses a medallion architecture (Bronze $\rightarrow$ Silver $\rightarrow$ Gold) for data processing and management. Most transformations and data compilation should occur within this layer. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for technical details on the storage stack and orchestration.
 
+When asked to inspect, export, or analyze a DEV Dagster/DuckLake asset or
+materialization, use the
+[inspect-ducklake skill](.agents/skills/inspect-ducklake/SKILL.md). Resolve the
+exact or latest durable DuckLake snapshot with its bundled read-only exporter.
+Never scrape or paginate the operator UI as a data-export fallback.
+
 ## Git workflow
 
 - Never create or rename a branch to a name containing `/`. Use flat,

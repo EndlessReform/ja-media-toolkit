@@ -16,9 +16,9 @@ CANONICALIZATION_CAMPAIGN = OperatorCampaign.create(
     campaign_id="canonicalization-gate",
     revision=2,
     job_name="canonicalization_campaign",
-    selection=dg.AssetSelection.assets(*_CONCLUSION_ASSETS).upstream(
-        include_self=True
-    ).required_multi_asset_neighbors(),
+    selection=dg.AssetSelection.assets(*_CONCLUSION_ASSETS)
+    .upstream(include_self=True)
+    .required_multi_asset_neighbors(),
     presentation=CampaignPresentation(
         label="Binding & canonicalization desk",
         description=(

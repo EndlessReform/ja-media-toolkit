@@ -1,0 +1,28 @@
+<aside id="resolution-series-rail" class="forum-panel resolution-series" aria-label="Resolution series">
+  <nav class="resolution-series-tabs" aria-label="Resolution status">
+    <a class="{% if series_view == 'pending' %}active{% endif %}" href="/operator/resolution-review?view=pending">Pending · {{ pending_total }}</a>
+    <a class="{% if series_view == 'resolved' %}active{% endif %}" href="/operator/resolution-review?view=resolved">Resolved · {{ resolved_total }}</a>
+  </nav>
+  <h2>{% if series_view == 'pending' %}Pending Series{% else %}Resolved Series{% endif %} · {{ series_page.total }}</h2>
+  {% if series_page.items %}
+  <ol>
+    {% for series in series_page.items %}
+    <li class="{% if series.anilist_id == selected_anilist_id %}selected{% endif %}">
+      <a href="/operator/resolution-review?view={{ series_view }}&amp;offset={{ series_page.offset }}&amp;anilist_id={{ series.anilist_id }}"
+         hx-get="/operator/resolution-review/{% if series_view == 'resolved' %}resolved{% else %}series{% endif %}/{{ series.anilist_id }}"
+         hx-target="#resolution-workspace" hx-swap="outerHTML"
+         hx-push-url="/operator/resolution-review?view={{ series_view }}&amp;offset={{ series_page.offset }}&amp;anilist_id={{ series.anilist_id }}"
+         data-resolution-series="{{ series.anilist_id }}">
+        <strong>{{ series.title }}</strong><br>
+        <code>{{ series.anilist_id }}</code> · {{ series.issue_count }} {% if series_view == 'pending' %}issue{% else %}decision{% endif %}{% if series.issue_count != 1 %}s{% endif %}
+      </a>
+    </li>
+    {% endfor %}
+  </ol>
+  <div class="pager">
+    {% if series_page.offset > 0 %}<a href="?view={{ series_view }}&amp;offset={{ [0, series_page.offset - series_page.limit]|max }}">« PREV</a>{% endif %}
+    <span>{{ series_page.offset + 1 }}–{{ [series_page.offset + series_page.limit, series_page.total]|min }} / {{ series_page.total }}</span>
+    {% if series_page.offset + series_page.limit < series_page.total %}<a href="?view={{ series_view }}&amp;offset={{ series_page.offset + series_page.limit }}">NEXT »</a>{% endif %}
+  </div>
+  {% else %}<div class="empty-state">No {{ series_view }} series.</div>{% endif %}
+</aside>

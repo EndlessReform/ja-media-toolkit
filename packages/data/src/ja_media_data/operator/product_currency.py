@@ -29,12 +29,11 @@ def evaluate_currency(
     if head.recipe_revision != presentation.recipe_revision:
         return "stale_recipe", "committed recipe differs from the asset recipe"
     catalog = MaterializationCatalog(repository.connection)
-    inputs = catalog.input_heads(
-        *presentation.input_targets, snapshot_id=snapshot_id
-    )
+    inputs = catalog.input_heads(*presentation.input_targets, snapshot_id=snapshot_id)
     if presentation.uses_overrides:
         revision = (
-            override_revision if override_revision is not None
+            override_revision
+            if override_revision is not None
             else binding_override_revision(repository)
         )
         inputs["binding_overrides"] = {"revision": revision}

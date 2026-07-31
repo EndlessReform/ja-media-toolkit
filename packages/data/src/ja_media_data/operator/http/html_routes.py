@@ -103,11 +103,16 @@ def campaign_products(
     normalized = series_id.strip() or None if series_id is not None else None
     try:
         snapshot = application.get_product_snapshot(
-            campaign_id, series_id=normalized, offset=offset, limit=limit,
+            campaign_id,
+            series_id=normalized,
+            offset=offset,
+            limit=limit,
             run_id=run_id,
         )
     except KeyError as error:
-        raise HTTPException(status_code=404, detail="campaign or run not found") from error
+        raise HTTPException(
+            status_code=404, detail="campaign or run not found"
+        ) from error
     return templates.TemplateResponse(
         request=request,
         name="_canonical_product.html",
@@ -131,7 +136,11 @@ def stage_results(
     normalized = series_id.strip() or None if series_id is not None else None
     try:
         page = application.get_stage_results(
-            campaign_id, stage, series_id=normalized, offset=offset, limit=limit,
+            campaign_id,
+            stage,
+            series_id=normalized,
+            offset=offset,
+            limit=limit,
             run_id=run_id,
         )
     except KeyError as error:
@@ -148,18 +157,21 @@ def stage_results(
     response_class=HTMLResponse,
 )
 def binding_candidates(
-    request: Request, campaign_id: str, namespace: str, series_id: str,
-    episode: str, run_id: str | None = Query(default=None),
+    request: Request,
+    campaign_id: str,
+    namespace: str,
+    series_id: str,
+    episode: str,
+    run_id: str | None = Query(default=None),
     application: OperatorApplication = Depends(get_application),
 ) -> HTMLResponse:
     """Lazily render the evidence rows for exactly one binding locator."""
 
     locator = namespace, series_id, episode
-    candidates = application.get_candidates(
-        campaign_id, locator, run_id=run_id
-    )
+    candidates = application.get_candidates(campaign_id, locator, run_id=run_id)
     return templates.TemplateResponse(
-        request=request, name="_candidate_rows.html",
+        request=request,
+        name="_candidate_rows.html",
         context={"candidates": candidates, "locator_dom_id": "-".join(locator)},
     )
 
@@ -172,11 +184,17 @@ def _campaign_context(
 ) -> dict[str, object]:
     normalized = series_id.strip() or None if series_id is not None else None
     snapshot = _snapshot(
-        application, campaign_id, series_id=normalized, gate_limit=3,
+        application,
+        campaign_id,
+        series_id=normalized,
+        gate_limit=3,
         run_id=run_id,
     )
     initial_stage = application.get_stage_results(
-        campaign_id, "episode_resolution", series_id=normalized, limit=50,
+        campaign_id,
+        "episode_resolution",
+        series_id=normalized,
+        limit=50,
         run_id=run_id,
     )
     return {

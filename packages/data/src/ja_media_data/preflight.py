@@ -31,9 +31,7 @@ def main() -> None:
         ("bronze_read", lambda: bronze_store_from_settings(settings).probe()),
         (
             "anilist_gateway",
-            lambda: _http(
-                settings.services.root_url + "/api/v1/anilist/healthz"
-            ),
+            lambda: _http(settings.services.root_url + "/api/v1/anilist/healthz"),
         ),
         ("dagster_gateway", lambda: _gateway_path("/dagster/server_info")),
         ("operator_gateway", lambda: _gateway_path("/healthz")),
@@ -56,13 +54,15 @@ def main() -> None:
 
 
 def _application_postgres(config: CatalogConfig) -> None:
-    control_schema = control_schema_from_settings(
-        catalog_schema=config.metadata_schema
-    )
+    control_schema = control_schema_from_settings(catalog_schema=config.metadata_schema)
     with psycopg.connect(postgres_url_for_psycopg(config.postgres_url)) as connection:
         for schema, relation in (
             (config.metadata_schema, "ducklake_metadata"),
             (control_schema, "schema_history"),
+            (control_schema, "binding_overrides"),
+            (control_schema, "capture_dispositions"),
+            (control_schema, "resolution_decision_batches"),
+            (control_schema, "resolution_decision_items"),
         ):
             present = connection.execute(
                 """SELECT EXISTS (

@@ -1,4 +1,4 @@
-"""Construction of the loopback-only operator HTTP adapter."""
+"""Construction of the localhost-only operator HTTP adapter."""
 
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from ja_media_data.operator.runtime import OperatorRuntime
 from ja_media_data.operator.http.api_routes import router as api_router
 from ja_media_data.operator.http.html_routes import router as html_router
+from ja_media_data.operator.http.resolution_routes import router as resolution_router
 
 
 PACKAGE_DIR = Path(__file__).parent
@@ -48,6 +49,7 @@ def create_operator_app(
     )
     app.include_router(api_router)
     app.include_router(html_router)
+    app.include_router(resolution_router)
 
     @app.get("/healthz", include_in_schema=False)
     def healthz() -> JSONResponse:

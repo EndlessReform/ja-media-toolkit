@@ -32,7 +32,10 @@ def observe_stages(
     for item in spine:
         head = catalog.current_head(item.domain_target, snapshot_id=snapshot_id)
         currency, stale_reason = evaluate_currency(
-            repository, item, head, snapshot_id=snapshot_id,
+            repository,
+            item,
+            head,
+            snapshot_id=snapshot_id,
             override_revision=override_revision,
         )
         producer = _producer(gateway, head.run_id if head else None)
@@ -43,26 +46,32 @@ def observe_stages(
             duration = max(
                 0, round((step.finished_at - step.started_at).total_seconds() * 1000)
             )
-        observations.append(StageObservation(
-            stage=item.stage, step_key=item.op_name, label=item.label,
-            status="materialized" if head else "not_materialized",
-            input_rows=counts[item.input_table], output_rows=counts[item.output_table],
-            fingerprint=head.fingerprint if head else None,
-            materialization_id=head.materialization_id if head else None,
-            snapshot_id=head.snapshot_id if head else None,
-            materialized_at=head.computed_at if head else None,
-            output_run_id=producer.run_id if producer else None,
-            output_run_number=producer.run_number if producer else None,
-            output_attempt_id=head.run_id if head else None,
-            currency=currency, stale_reason=stale_reason,
-            latest_run_id=run.run_id if run else None,
-            latest_run_number=run.run_number if run else None,
-            latest_run_status=step.status if step else None,
-            latest_run_started_at=step.started_at if step else None,
-            latest_run_duration_ms=duration,
-            latest_run_error=step.error if step else None,
-            dagster_url=run.url if run else None,
-        ))
+        observations.append(
+            StageObservation(
+                stage=item.stage,
+                step_key=item.op_name,
+                label=item.label,
+                status="materialized" if head else "not_materialized",
+                input_rows=counts[item.input_table],
+                output_rows=counts[item.output_table],
+                fingerprint=head.fingerprint if head else None,
+                materialization_id=head.materialization_id if head else None,
+                snapshot_id=head.snapshot_id if head else None,
+                materialized_at=head.computed_at if head else None,
+                output_run_id=producer.run_id if producer else None,
+                output_run_number=producer.run_number if producer else None,
+                output_attempt_id=head.run_id if head else None,
+                currency=currency,
+                stale_reason=stale_reason,
+                latest_run_id=run.run_id if run else None,
+                latest_run_number=run.run_number if run else None,
+                latest_run_status=step.status if step else None,
+                latest_run_started_at=step.started_at if step else None,
+                latest_run_duration_ms=duration,
+                latest_run_error=step.error if step else None,
+                dagster_url=run.url if run else None,
+            )
+        )
     return tuple(observations)
 
 
@@ -90,11 +99,14 @@ def _producer(gateway: DagsterGateway, attempt_id: str | None):
 def _counts(
     repository: DuckLakeRepository,
     spine: tuple[StagePresentation, ...],
-    *, snapshot_id: int | None,
+    *,
+    snapshot_id: int | None,
 ) -> dict[str, int]:
-    tables = tuple(dict.fromkeys(
-        name for item in spine for name in (item.input_table, item.output_table)
-    ))
+    tables = tuple(
+        dict.fromkeys(
+            name for item in spine for name in (item.input_table, item.output_table)
+        )
+    )
     select = ", ".join(
         f"(SELECT count(*) FROM {table_ref(name, snapshot_id=snapshot_id)}) AS {name}"
         for name in tables

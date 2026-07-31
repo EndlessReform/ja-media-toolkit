@@ -62,17 +62,30 @@ class OperatorApplication:
         projector, keys = self._services(definition)
         view = keys.run_view(run_id)
         state = ("historical", *view) if view else keys.campaign_state()
-        key = ("campaign", campaign_id, definition.spec.revision, state,
-               series_id, gate_offset, gate_limit)
-        return self.cache.get_or_create(key, lambda: CampaignSnapshot(
-            campaign=campaign_card(definition), generated_at=datetime.now(UTC),
-            lens=projector.project(
-                series_id=series_id, gate_offset=gate_offset, gate_limit=gate_limit,
-                snapshot_id=view[0] if view else None,
-                override_revision=view[1] if view else None,
-                view_run_id=run_id,
+        key = (
+            "campaign",
+            campaign_id,
+            definition.spec.revision,
+            state,
+            series_id,
+            gate_offset,
+            gate_limit,
+        )
+        return self.cache.get_or_create(
+            key,
+            lambda: CampaignSnapshot(
+                campaign=campaign_card(definition),
+                generated_at=datetime.now(UTC),
+                lens=projector.project(
+                    series_id=series_id,
+                    gate_offset=gate_offset,
+                    gate_limit=gate_limit,
+                    snapshot_id=view[0] if view else None,
+                    override_revision=view[1] if view else None,
+                    view_run_id=run_id,
+                ),
             ),
-        ))
+        )
 
     def get_stage_results(
         self,
@@ -94,13 +107,22 @@ class OperatorApplication:
         view = keys.run_view(run_id)
         head = ("historical", *view) if view else keys.product_head(stage)
         key = ("stage-page", stage, head, series_id, offset, limit)
-        return self.cache.get_or_create(key, lambda: self._stage_results.page(
-            stage, series_id=series_id, offset=offset, limit=limit,
-            snapshot_id=view[0] if view else None,
-        ))
+        return self.cache.get_or_create(
+            key,
+            lambda: self._stage_results.page(
+                stage,
+                series_id=series_id,
+                offset=offset,
+                limit=limit,
+                snapshot_id=view[0] if view else None,
+            ),
+        )
 
     def get_candidates(
-        self, campaign_id: str, locator: tuple[str, str, str], *,
+        self,
+        campaign_id: str,
+        locator: tuple[str, str, str],
+        *,
         run_id: str | None = None,
     ):
         run_id = _optional(run_id)
@@ -109,14 +131,23 @@ class OperatorApplication:
         view = keys.run_view(run_id)
         token = ("historical", *view) if view else keys.domain_state()
         key = ("candidates", locator, token)
-        return self.cache.get_or_create(key, lambda: projector.candidates(
-            locator, snapshot_id=view[0] if view else None,
-            override_revision=view[1] if view else None,
-        ))
+        return self.cache.get_or_create(
+            key,
+            lambda: projector.candidates(
+                locator,
+                snapshot_id=view[0] if view else None,
+                override_revision=view[1] if view else None,
+            ),
+        )
 
     def get_product_snapshot(
-        self, campaign_id: str, *, series_id: str | None, offset: int,
-        limit: int, run_id: str | None = None,
+        self,
+        campaign_id: str,
+        *,
+        series_id: str | None,
+        offset: int,
+        limit: int,
+        run_id: str | None = None,
     ) -> CampaignSnapshot:
         """Page the product with no Dagster history query or spine reconstruction."""
 
@@ -126,14 +157,21 @@ class OperatorApplication:
         view = keys.run_view(run_id)
         token = ("historical", *view) if view else keys.domain_state()
         key = ("product-page", campaign_id, token, series_id, offset, limit)
-        return self.cache.get_or_create(key, lambda: CampaignSnapshot(
-            campaign=campaign_card(definition), generated_at=datetime.now(UTC),
-            lens=projector.project_product(
-                series_id=series_id, gate_offset=offset, gate_limit=limit,
-                snapshot_id=view[0] if view else None,
-                override_revision=view[1] if view else None, view_run_id=run_id,
+        return self.cache.get_or_create(
+            key,
+            lambda: CampaignSnapshot(
+                campaign=campaign_card(definition),
+                generated_at=datetime.now(UTC),
+                lens=projector.project_product(
+                    series_id=series_id,
+                    gate_offset=offset,
+                    gate_limit=limit,
+                    snapshot_id=view[0] if view else None,
+                    override_revision=view[1] if view else None,
+                    view_run_id=run_id,
+                ),
             ),
-        ))
+        )
 
     def list_runs(self, *, offset: int = 0, limit: int = 50) -> RunPage:
         _validate_page(offset, limit)
@@ -153,7 +191,9 @@ class OperatorApplication:
             self.repository, self.gateway, job_name=definition.spec.job_name
         )
         projector = CanonicalizationLensProjector(
-            self.repository, self.gateway, spine=definition.spine,
+            self.repository,
+            self.gateway,
+            spine=definition.spine,
             job_name=definition.spec.job_name,
         )
         return projector, keys

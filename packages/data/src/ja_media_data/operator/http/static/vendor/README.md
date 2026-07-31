@@ -1,8 +1,16 @@
 # Vendored browser runtime
 
-`htmx.min.js` is the unmodified htmx 2.0.8 distribution from the
-[`htmx.org` npm package](https://www.npmjs.com/package/htmx.org), SHA-256
-`22283ef68cb7545914f0a88a1bdedc7256a703d1d580c1d255217d0a50d31313`.
+`htmx.min.js` and `hx-sse.min.js` are the unmodified htmx 4.0.0-beta6
+distribution and native SSE extension from the
+[`htmx.org` npm package](https://www.npmjs.com/package/htmx.org). They are
+exact-pinned because htmx 4 is still beta.
+
+SHA-256:
+
+```text
+28fae7bbe8e8142b702debb9d5234a9a436d9435a4b5165b195aa1a7ed840d25  htmx.min.js
+d3aeb71073552b253eaee99badebd60607003b1c25ac567ab88187d6887ab522  hx-sse.min.js
+```
 
 It is vendored so the local operator workbench does not require a public CDN.
 htmx is distributed under the Zero-Clause BSD license:

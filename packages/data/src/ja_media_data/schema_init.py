@@ -16,12 +16,13 @@ from ja_media_data.storage.binding_schema import (
 
 def main() -> None:
     config = CatalogConfig.from_settings()
-    control_schema = control_schema_from_settings(
-        catalog_schema=config.metadata_schema
-    )
-    with connect_catalog(config) as connection, psycopg.connect(
-        postgres_url_for_psycopg(config.postgres_url), autocommit=True
-    ) as control_connection:
+    control_schema = control_schema_from_settings(catalog_schema=config.metadata_schema)
+    with (
+        connect_catalog(config) as connection,
+        psycopg.connect(
+            postgres_url_for_psycopg(config.postgres_url), autocommit=True
+        ) as control_connection,
+    ):
         lakehouse = apply_schema(connection)
         postgres = apply_postgres_schema(
             control_connection, control_schema=control_schema

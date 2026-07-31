@@ -7,4 +7,9 @@ from ja_media_data.products.episode_resolution.compiler import (
 )
 from ja_media_data.products.episode_resolution.planning import ResolutionResult
 
-__all__ = ["ResolutionBatchResult", "ResolutionResult", "resolve_batch", "resolve_document"]
+__all__ = [
+    "ResolutionBatchResult",
+    "ResolutionResult",
+    "resolve_batch",
+    "resolve_document",
+]

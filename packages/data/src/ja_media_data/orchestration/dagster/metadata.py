@@ -32,9 +32,7 @@ def commit_context(
     )
 
 
-def input_heads(
-    repository: DuckLakeRepository, *targets: str
-) -> dict[str, object]:
+def input_heads(repository: DuckLakeRepository, *targets: str) -> dict[str, object]:
     """Read compact identities for declared domain dependencies."""
 
     return MaterializationCatalog(repository.connection).input_heads(*targets)

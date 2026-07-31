@@ -171,11 +171,17 @@ class BindingOverrideRepository:
     def current_revision(self) -> int:
         """Return the exact global head used by canonicalization build keys."""
 
+        return self.control_revision("binding_overrides")
+
+    def control_revision(self, name: str) -> int:
+        """Return one named monotonic human-control head."""
+
         row = self.connection.execute(
             sql.SQL(
                 """SELECT revision FROM {}.control_revisions
-                   WHERE name = 'binding_overrides'"""
-            ).format(self.schema)
+                   WHERE name = %s"""
+            ).format(self.schema),
+            (name,),
         ).fetchone()
         return int(row[0]) if row else 0
 
@@ -244,11 +250,15 @@ class EffectiveBindingOverrideWriter:
                 raise LookupError(f"capture {audio_capture_id!r} is not indexed")
             current = self.get_current_binding_for_capture(audio_capture_id)
             locator = (namespace, series_id, episode)
-            if current is not None and (
-                current.namespace,
-                current.series_id,
-                current.episode,
-            ) != locator:
+            if (
+                current is not None
+                and (
+                    current.namespace,
+                    current.series_id,
+                    current.episode,
+                )
+                != locator
+            ):
                 raise BindingConflictError(
                     "capture is currently bound to another episode; unbind it first"
                 )

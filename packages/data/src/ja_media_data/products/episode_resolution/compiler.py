@@ -85,7 +85,9 @@ def resolve_batch(
     """Compile a deterministic corpus and write each changed product once."""
 
     timestamp = datetime.now(UTC)
-    ordered = sorted(documents, key=lambda item: (item.marker.key, item.marker.capture_id))
+    ordered = sorted(
+        documents, key=lambda item: (item.marker.key, item.marker.capture_id)
+    )
     planned = [
         plan_document(
             document,
@@ -101,7 +103,9 @@ def resolve_batch(
         proposals=tuple(
             item.plan.proposal for item in planned if item.plan.proposal is not None
         ),
-        issues=tuple(item.plan.issue for item in planned if item.plan.issue is not None),
+        issues=tuple(
+            item.plan.issue for item in planned if item.plan.issue is not None
+        ),
     )
     observations = tuple(item.observation for item in planned)
     bronze_write = None

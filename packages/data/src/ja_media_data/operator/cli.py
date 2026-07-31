@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+
 def run_web(*, port: int) -> None:
-    """Serve the read-only workbench on loopback only."""
+    """Serve the read-only workbench on localhost only."""
 
     if port < 1 or port > 65_535:
         raise SystemExit("--port must be between 1 and 65535")

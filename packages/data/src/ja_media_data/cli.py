@@ -8,7 +8,12 @@ import os
 
 from ja_media_data.lakehouse.catalog import CatalogConfig
 from ja_media_data.lakehouse.repository import repository_from_settings
-from ja_media_data.settings import CONFIG_PATH_ENV, config_path, get_settings
+from ja_media_data.settings import (
+    CONFIG_PATH_ENV,
+    config_path,
+    get_settings,
+    load_process_secrets,
+)
 
 
 def main() -> None:
@@ -51,6 +56,7 @@ def main() -> None:
     args = parser.parse_args()
     if args.config:
         os.environ[CONFIG_PATH_ENV] = args.config
+    load_process_secrets()
 
     if args.command == "web":
         from ja_media_data.operator.cli import run_web

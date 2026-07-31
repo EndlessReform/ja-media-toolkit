@@ -27,9 +27,7 @@ def doctor(profile: str, *, write_probe: bool = False) -> None:
 
     _reject_database_environment()
     settings = load_worker_settings(profile)
-    checks: dict[str, dict[str, str]] = {
-        "configuration": {"status": "ok"}
-    }
+    checks: dict[str, dict[str, str]] = {"configuration": {"status": "ok"}}
     _check(checks, "broker", lambda: _probe_broker(settings))
     _check(checks, "bronze_read", lambda: _bronze(settings).probe())
     _check(

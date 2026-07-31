@@ -1,0 +1,4 @@
+interface:
+  display_name: "Inspect DuckLake"
+  short_description: "Export exact DEV DuckLake asset snapshots"
+  default_prompt: "Use $inspect-ducklake to export and analyze the latest DEV resolution issues."

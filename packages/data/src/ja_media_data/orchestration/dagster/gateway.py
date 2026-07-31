@@ -61,7 +61,10 @@ class DagsterGateway:
     """FastAPI-lifetime facade over public Dagster instance read methods."""
 
     def __init__(
-        self, instance: dg.DagsterInstance, *, ui_url: str = "http://127.0.0.1:53000",
+        self,
+        instance: dg.DagsterInstance,
+        *,
+        ui_url: str = "http://127.0.0.1:53000",
         owns_instance: bool = False,
     ) -> None:
         self.instance = instance
@@ -79,7 +82,9 @@ class DagsterGateway:
         try:
             instance = dg.DagsterInstance.from_config(config_dir)
         except Exception as error:
-            raise DagsterUnavailable(f"cannot open Dagster instance: {error}") from error
+            raise DagsterUnavailable(
+                f"cannot open Dagster instance: {error}"
+            ) from error
         return cls(
             instance,
             ui_url=configured.dagster.ui_url,
@@ -133,22 +138,34 @@ class DagsterGateway:
         steps = _steps(logs)
         start = record.start_time or record.create_timestamp.timestamp()
         failure = next(
-            (event.message for event in reversed(logs)
-             if event.dagster_event_type == dg.DagsterEventType.RUN_FAILURE),
+            (
+                event.message
+                for event in reversed(logs)
+                if event.dagster_event_type == dg.DagsterEventType.RUN_FAILURE
+            ),
             None,
         )
         snapshots = [
-            value for event in logs
+            value
+            for event in logs
             if event.dagster_event_type == dg.DagsterEventType.ASSET_MATERIALIZATION
-            for value in [_snapshot_value(event)] if value is not None
+            for value in [_snapshot_value(event)]
+            if value is not None
         ]
         return RunFact(
-            run_id=run.run_id, run_number=int(record.storage_id),
-            job_name=run.job_name, status=_run_status(run.status),
+            run_id=run.run_id,
+            run_number=int(record.storage_id),
+            job_name=run.job_name,
+            status=_run_status(run.status),
             started_at=datetime.fromtimestamp(start, UTC),
-            finished_at=(datetime.fromtimestamp(record.end_time, UTC)
-                         if record.end_time else None),
-            tags=dict(run.tags), steps=steps, error=failure,
+            finished_at=(
+                datetime.fromtimestamp(record.end_time, UTC)
+                if record.end_time
+                else None
+            ),
+            tags=dict(run.tags),
+            steps=steps,
+            error=failure,
             snapshot_id=max(snapshots) if snapshots else None,
             url=f"{self.ui_url}/runs/{run.run_id}",
         )
@@ -162,8 +179,12 @@ def _steps(logs: object) -> tuple[StepFact, ...]:
         if not key:
             continue
         if key not in values:
-            values[key] = {"status": "queued", "started": None, "finished": None,
-                           "error": None}
+            values[key] = {
+                "status": "queued",
+                "started": None,
+                "finished": None,
+                "error": None,
+            }
             order.append(key)
         value = values[key]
         kind = event.dagster_event_type
@@ -175,8 +196,13 @@ def _steps(logs: object) -> tuple[StepFact, ...]:
         elif kind == dg.DagsterEventType.STEP_FAILURE:
             value.update(status="failed", finished=when, error=event.message)
     return tuple(
-        StepFact(key, str(values[key]["status"]), values[key]["started"],
-                 values[key]["finished"], values[key]["error"])
+        StepFact(
+            key,
+            str(values[key]["status"]),
+            values[key]["started"],
+            values[key]["finished"],
+            values[key]["error"],
+        )
         for key in order
     )
 

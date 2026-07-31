@@ -123,7 +123,9 @@ class ResolutionProductStore:
         return materialization_id
 
     def _attach_snapshot(self, materialization_id: str) -> None:
-        catalog = str(self.connection.execute("SELECT current_database()").fetchone()[0])
+        catalog = str(
+            self.connection.execute("SELECT current_database()").fetchone()[0]
+        )
         quoted = '"' + catalog.replace('"', '""') + '"'
         snapshot = self.connection.execute(
             f"SELECT id FROM {quoted}.current_snapshot()"
@@ -207,7 +209,9 @@ def _validate_resolution_batch(batch: ResolutionBatch) -> None:
     _require_unique("hint IDs", [item.hint_id for item in batch.hints])
     _require_unique("proposal IDs", [item.proposal_id for item in batch.proposals])
     _require_unique("issue IDs", [item.issue_id for item in batch.issues])
-    _require_unique("proposed captures", [item.audio_capture_id for item in batch.proposals])
+    _require_unique(
+        "proposed captures", [item.audio_capture_id for item in batch.proposals]
+    )
 
 
 def _require_unique(label: str, values: Sequence[object]) -> None:

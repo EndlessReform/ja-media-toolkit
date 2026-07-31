@@ -112,9 +112,7 @@ class CeleryLidHandoff:
                     failed.append(request_id)
                 else:
                     rows.append(_product_row(source, result))
-                    self._record_succeeded(
-                        connection, envelope, result, marker_key
-                    )
+                    self._record_succeeded(connection, envelope, result, marker_key)
                 del pending[request_id]
             if pending:
                 time.sleep(self.poll_seconds)
@@ -149,9 +147,7 @@ class CeleryLidHandoff:
             requested_at=datetime.now(UTC),
             payload=SubtitleLidRequest(
                 subtitle_input_id=source.subtitle_input_id,
-                source=ObjectRef(
-                    bucket=source.object_bucket, key=source.object_key
-                ),
+                source=ObjectRef(bucket=source.object_bucket, key=source.object_key),
                 codec=source.codec,
                 input_fingerprint=source.input_fingerprint,
                 recipe_revision=SUBTITLE_LID_RECIPE_VERSION,
@@ -283,9 +279,7 @@ def _product_row(
         reason=result.reason,
         script_metrics=asdict(result.script_metrics),
         sampled_metrics=(
-            asdict(result.sampled_metrics)
-            if result.sampled_metrics
-            else None
+            asdict(result.sampled_metrics) if result.sampled_metrics else None
         ),
         input_fingerprint=result.input_fingerprint,
         recipe_version=result.recipe_revision,

@@ -1,0 +1,3 @@
+{% if reset %}<hx-partial hx-target="#agent-events" hx-swap="innerHTML"><div class="agent-event"><strong>Review started.</strong></div></hx-partial>
+<hx-partial hx-target="#proposal" hx-swap="innerHTML"></hx-partial>{% endif %}
+<hx-partial hx-target="#agent-status" hx-swap="innerHTML"><span class="status running">RUNNING</span> {{ status_message }}</hx-partial>

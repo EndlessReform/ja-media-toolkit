@@ -8,7 +8,9 @@ and which bounded domain tables provide its row counts.
 from dataclasses import dataclass
 
 from ja_media_data.products.binding_acceptance.compiler import ACCEPTANCE_POLICY_VERSION
-from ja_media_data.products.canonical_inputs.compiler import CANONICALIZATION_POLICY_VERSION
+from ja_media_data.products.canonical_inputs.compiler import (
+    CANONICALIZATION_POLICY_VERSION,
+)
 from ja_media_data.products.capture_audio_eligibility.compiler import (
     AUDIO_ELIGIBILITY_POLICY_VERSION,
 )
@@ -32,30 +34,53 @@ class StagePresentation:
 
 PRESENTATIONS = (
     StagePresentation(
-        "compile_episode_resolution", "episode_resolution", "Resolver proposals",
-        "bronze_captures", "episode_binding_proposals", "episode_resolution", None,
+        "compile_episode_resolution",
+        "episode_resolution",
+        "Resolver proposals",
+        "bronze_captures",
+        "episode_binding_proposals",
+        "episode_resolution",
+        None,
     ),
     StagePresentation(
-        "capture_audio_eligibility", "audio_eligibility", "Audio eligibility",
-        "bronze_captures", "capture_audio_eligibility",
-        "capture_audio_eligibility", AUDIO_ELIGIBILITY_POLICY_VERSION,
+        "capture_audio_eligibility",
+        "audio_eligibility",
+        "Audio eligibility",
+        "bronze_captures",
+        "capture_audio_eligibility",
+        "capture_audio_eligibility",
+        AUDIO_ELIGIBILITY_POLICY_VERSION,
         ("bronze_captures",),
     ),
     StagePresentation(
-        "accepted_bindings_auto", "accepted_bindings", "Automatic acceptance",
-        "episode_binding_proposals", "accepted_bindings_auto", "accepted_bindings",
-        ACCEPTANCE_POLICY_VERSION, ("episode_resolution",),
+        "accepted_bindings_auto",
+        "accepted_bindings",
+        "Automatic acceptance",
+        "episode_binding_proposals",
+        "accepted_bindings_auto",
+        "accepted_bindings",
+        ACCEPTANCE_POLICY_VERSION,
+        ("episode_resolution",),
     ),
     StagePresentation(
-        "compile_canonical_inputs", "canonical_inputs", "Canonical inputs",
-        "accepted_bindings_auto", "canonical_episode_inputs", "canonical_inputs",
+        "compile_canonical_inputs",
+        "canonical_inputs",
+        "Canonical inputs",
+        "accepted_bindings_auto",
+        "canonical_episode_inputs",
+        "canonical_inputs",
         CANONICALIZATION_POLICY_VERSION,
-        ("accepted_bindings", "bronze_captures", "capture_audio_eligibility"), True,
+        ("accepted_bindings", "bronze_captures", "capture_audio_eligibility"),
+        True,
     ),
     StagePresentation(
-        "subtitle_language_results", "subtitle_lid",
-        "Subtitle language identification", "canonical_subtitle_inputs",
-        "subtitle_language_results", "subtitle_lid", SUBTITLE_LID_RECIPE_VERSION,
+        "subtitle_language_results",
+        "subtitle_lid",
+        "Subtitle language identification",
+        "canonical_subtitle_inputs",
+        "subtitle_language_results",
+        "subtitle_lid",
+        SUBTITLE_LID_RECIPE_VERSION,
         ("canonical_inputs",),
     ),
 )

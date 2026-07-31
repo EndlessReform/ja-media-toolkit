@@ -13,6 +13,7 @@ from ja_media_data.orchestration.dagster.runtime import (
     ProductRuntime,
     hardcoded_runtime_resource,
 )
+from ja_media_data.storage.bronze import BronzeDocument
 
 from dagster_test_support import FakeMetadata, FakeOverrides, FakeStore, documents
 
@@ -43,10 +44,14 @@ class CompiledCampaign:
         )
 
 
-def compile_campaign(repository: DuckLakeRepository) -> CompiledCampaign:
+def compile_campaign(
+    repository: DuckLakeRepository,
+    *,
+    source: list[BronzeDocument] | None = None,
+) -> CompiledCampaign:
     """Compile competing captures through the real Dagster asset campaign."""
 
-    source = documents()
+    source = documents() if source is None else source
     store = FakeStore(source)
     overrides = FakeOverrides()
     repository.override_repository = overrides

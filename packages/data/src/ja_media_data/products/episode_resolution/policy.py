@@ -89,9 +89,7 @@ def plan_episode_resolution(
             evidence,
             reason=(
                 DECLARED_ANILIST_ENTRY_IS_MOVIE
-                if metadata
-                and metadata.media_format == "MOVIE"
-                and not candidates
+                if metadata and metadata.media_format == "MOVIE" and not candidates
                 else signal_failure
             ),
             kind="ambiguous",

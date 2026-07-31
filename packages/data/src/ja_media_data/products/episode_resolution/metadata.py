@@ -24,8 +24,7 @@ class SeriesEpisodeMetadata:
 class EpisodeMetadataProvider(Protocol):
     """Look up independent series facts without coupling policy to HTTP."""
 
-    def get(self, namespace: str, series_id: str) -> SeriesEpisodeMetadata | None:
-        ...
+    def get(self, namespace: str, series_id: str) -> SeriesEpisodeMetadata | None: ...
 
 
 class AniListEpisodeMetadataProvider:

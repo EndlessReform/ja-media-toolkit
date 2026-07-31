@@ -16,9 +16,19 @@ from .products import (
 from .runs import RunPage, RunStepSummary, RunSummary
 
 __all__ = [
-    "AcceptanceObservation", "AudioEligibilityObservation", "CampaignCard", "CampaignProgress",
-    "CampaignSnapshot", "CandidateObservation", "CanonicalInputObservation",
-    "CanonicalizationGate", "CanonicalizationLens", "ResolutionIssueObservation",
-    "RunPage", "RunStepSummary", "RunSummary", "StageObservation",
+    "AcceptanceObservation",
+    "AudioEligibilityObservation",
+    "CampaignCard",
+    "CampaignProgress",
+    "CampaignSnapshot",
+    "CandidateObservation",
+    "CanonicalInputObservation",
+    "CanonicalizationGate",
+    "CanonicalizationLens",
+    "ResolutionIssueObservation",
+    "RunPage",
+    "RunStepSummary",
+    "RunSummary",
+    "StageObservation",
     "StageResultPage",
 ]

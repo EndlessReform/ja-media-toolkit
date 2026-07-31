@@ -90,9 +90,7 @@ def subtitle_lid(context) -> dg.MaterializeResult:
         },
     )
     if failed:
-        context.log.error(
-            "subtitle LID failed requests: %s", ", ".join(failed[:10])
-        )
+        context.log.error("subtitle LID failed requests: %s", ", ".join(failed[:10]))
         raise dg.Failure(
             description=(
                 f"{len(failed)} of {selected} subtitle LID items failed; "

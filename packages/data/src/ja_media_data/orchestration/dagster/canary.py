@@ -43,9 +43,7 @@ def evaluate_resolution_canary(context) -> dict[str, object]:
     )
     proposed = sum(item.classification == "proposed" for item in result.results)
     quarantined = len(result.results) - proposed
-    quarantines = [
-        item for item in result.results if item.classification != "proposed"
-    ]
+    quarantines = [item for item in result.results if item.classification != "proposed"]
     summary = {
         "scope": "canary",
         "publishes": False,

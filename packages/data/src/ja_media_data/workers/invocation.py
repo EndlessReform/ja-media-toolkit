@@ -50,11 +50,17 @@ def invoke_environment(
         process_env.update(supplied)
         process_env["JA_MEDIA_WORK_REQUEST"] = str(request_path)
         completed = subprocess.run(
-            list(command), check=True, text=True, capture_output=True,
-            env=process_env, timeout=timeout_seconds,
+            list(command),
+            check=True,
+            text=True,
+            capture_output=True,
+            env=process_env,
+            timeout=timeout_seconds,
         )
     try:
         payload = json.loads(completed.stdout)
     except json.JSONDecodeError as error:
-        raise RuntimeError("environment command did not return one JSON result") from error
+        raise RuntimeError(
+            "environment command did not return one JSON result"
+        ) from error
     return ResultEnvelope.model_validate(payload)

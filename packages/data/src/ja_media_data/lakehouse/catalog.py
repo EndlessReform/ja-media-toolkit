@@ -28,6 +28,8 @@ SCHEMA_DIR = (
     else Path(__file__).parents[3] / "migrations" / "ducklake"
 )
 _IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
 @dataclass(frozen=True)
 class CatalogConfig:
     """Connection settings for one DuckLake catalog and its data files."""

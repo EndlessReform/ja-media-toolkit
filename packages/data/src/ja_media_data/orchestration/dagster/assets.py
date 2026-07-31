@@ -75,9 +75,7 @@ def binding_overrides(context) -> dg.ObserveResult:
     outs={
         "bronze_captures": dg.AssetOut(code_version=RECIPE_VERSION),
         "episode_hints_auto": dg.AssetOut(code_version=RECIPE_VERSION),
-        "episode_binding_proposals": dg.AssetOut(
-            code_version=RECIPE_VERSION
-        ),
+        "episode_binding_proposals": dg.AssetOut(code_version=RECIPE_VERSION),
         "resolution_issues_auto": dg.AssetOut(code_version=RECIPE_VERSION),
     },
     group_name="silver",
@@ -198,9 +196,7 @@ def canonical_inputs(context):
         "bronze_captures",
         "capture_audio_eligibility",
     )
-    heads["binding_overrides"] = {
-        "revision": binding_override_revision(repository)
-    }
+    heads["binding_overrides"] = {"revision": binding_override_revision(repository)}
     product = compile_canonical_product(repository, runtime.store)
     committed = replace_canonical_product(
         repository.connection,

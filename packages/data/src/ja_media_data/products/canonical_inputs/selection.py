@@ -227,9 +227,7 @@ def audio_object_key(manifest_key: str, name: str) -> str:
     return _object_key(manifest_key, name, default_directory=None)
 
 
-def subtitle_object_key(
-    manifest_key: str, name: str, *, capture_stem: str
-) -> str:
+def subtitle_object_key(manifest_key: str, name: str, *, capture_stem: str) -> str:
     """Resolve v2 explicit keys and the legacy series/subs/stem layout."""
 
     return _object_key(
