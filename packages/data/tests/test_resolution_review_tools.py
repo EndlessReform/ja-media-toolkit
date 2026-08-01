@@ -15,6 +15,11 @@ from ja_media_core.anilist_search import (
     SearchResult,
 )
 from ja_media_core.kitsunekko import KitsunekkoFileListResponse
+from ja_media_data.operator.resolution_review.agent import INSTRUCTIONS
+from ja_media_data.operator.resolution_review.anilist_metadata import (
+    MAX_SYNOPSIS_CHARS,
+    synopsis_text,
+)
 from ja_media_data.operator.resolution_review.factory import make_review_context
 from ja_media_data.operator.resolution_review.models import SeriesResolutionDraft
 from ja_media_data.operator.resolution_review.toolbox import ReviewContext
@@ -47,9 +52,15 @@ class FakeAniList:
 
     def anime(self, anilist_id: int, *, fields=None):
         assert fields is not None
+        assert "description" in fields
         rows = {
             15451: {"title_romaji": "Example", "episodes": 12, "format": "TV"},
-            200: {"title_romaji": "Other Show", "episodes": 12, "format": "TV"},
+            200: {
+                "title_romaji": "Other Show",
+                "episodes": 12,
+                "format": "TV",
+                "description": "A different <b>show</b>.<br>With context &amp; clues.",
+            },
         }
         if anilist_id not in rows:
             raise KeyError(anilist_id)
@@ -117,6 +128,8 @@ async def test_registry_tools_against_a_real_compiled_campaign(repository) -> No
     assert search[0]["anilist_id"] == 200
     metadata = await _invoke("get_anilist", context, {"anilist_id": 200})
     assert metadata["episodes"] == 12
+    assert metadata["description_text"] == "A different show.\nWith context & clues."
+    assert "description" not in metadata
 
     subtitles = await _invoke(
         "list_capture_subtitles", context, {"capture_id": "capture-review"}
@@ -230,3 +243,20 @@ async def _invoke(name: str, context: ReviewContext, arguments: dict):
 
 def _tool(name: str):
     return next(tool for tool in CORE_TOOLS if tool.name == name)
+
+
+def test_agent_instructions_define_every_draft_variant_and_locator_policy() -> None:
+    assert '"decision":"keep_in_current_series"' in INSTRUCTIONS
+    assert '"capture_ids":["capture-3"]' in INSTRUCTIONS
+    assert "exactly one capture" in INSTRUCTIONS
+    assert "do not infer a preferred" in INSTRUCTIONS
+
+
+def test_synopsis_text_is_plain_and_bounded() -> None:
+    assert synopsis_text("<p>First &amp; second</p><p>Third</p>") == (
+        "First & second\n\nThird"
+    )
+    bounded = synopsis_text("x" * (MAX_SYNOPSIS_CHARS + 20))
+    assert bounded is not None
+    assert len(bounded) == MAX_SYNOPSIS_CHARS
+    assert bounded.endswith("…")

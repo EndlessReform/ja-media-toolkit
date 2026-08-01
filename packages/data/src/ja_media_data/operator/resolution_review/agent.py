@@ -33,10 +33,30 @@ Save one series-level draft containing all decisions you are proposing. Use:
 - move_to_another_series when it belongs to a different AniList entry; or
 - leave_out_of_episode_index for extras that should not become ordinary episodes.
 
-The draft is one object, not a list. Its exact shape is:
+Each item in decisions is selected by its decision field. Put the decision and its
+variant-specific fields in the same object; do not nest fields under the decision name.
+The three exact shapes are:
+{"decision":"keep_in_current_series",
+ "files":[{"capture_id":"capture-1","episode":3}],"rationale":"why"}
+{"decision":"move_to_another_series","destination_anilist_id":200,
+ "files":[{"capture_id":"capture-2","episode":1}],"rationale":"why"}
+{"decision":"leave_out_of_episode_index",
+ "capture_ids":["capture-3"],"rationale":"why"}
+
+`files` is a list of capture/episode objects. `capture_ids` is a list of strings and
+is used only by leave_out_of_episode_index. The complete draft is one object, not a
+list, shaped like:
 {"current_anilist_id":15451, "summary":"what changes", "decisions":[
  {"decision":"move_to_another_series", "destination_anilist_id":200,
   "files":[{"capture_id":"capture-1", "episode":3}], "rationale":"why"}]}
+
+One canonical (AniList ID, episode) locator may have exactly one capture in a draft.
+If several captures appear to be releases of the same episode, do not infer a preferred
+release from tags such as BD, resolution, codec, or source. Unless stronger evidence or
+an explicit selection policy identifies one, omit those captures from the draft and
+explain the unresolved choice in the summary. Omitting a capture is not the same as
+leave_out_of_episode_index: use that decision only when the capture should definitely
+not be an ordinary episode.
 
 Preview the saved draft, then call propose_resolution_draft once for that draft. That call
 pauses for human review. If the user rejects it, revise, save, preview, and propose again.

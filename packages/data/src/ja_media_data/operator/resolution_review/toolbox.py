@@ -18,6 +18,7 @@ from ja_media_data.operator.resolution_review.drafts import (
     SourceTokenLike,
 )
 from ja_media_data.operator.resolution_review.models import SeriesResolutionDraft
+from ja_media_data.operator.resolution_review.anilist_metadata import synopsis_text
 from ja_media_data.operator.resolution_review.issue_reader import read_issue_rows
 from ja_media_data.operator.resolution_review.subtitle_comparison import (
     SubtitleComparator,
@@ -37,6 +38,7 @@ ANILIST_FIELDS = (
     "startDate_year",
     "status",
     "relations",
+    "description",
 )
 
 
@@ -123,7 +125,14 @@ class ResolutionToolbox:
         if anilist_id < 1:
             raise ValueError("AniList ID must be positive")
         metadata = self._anilist.anime(anilist_id, fields=ANILIST_FIELDS)
-        return {"anilist_id": metadata.anilist_id, **metadata.fields}
+        fields = {
+            key: value for key, value in metadata.fields.items() if key != "description"
+        }
+        return {
+            "anilist_id": metadata.anilist_id,
+            **fields,
+            "description_text": synopsis_text(metadata.fields.get("description")),
+        }
 
     def list_subtitles(self, current_anilist_id: int, capture_id: str) -> list[dict]:
         """List subtitle streams from the capture's pinned Bronze manifest."""

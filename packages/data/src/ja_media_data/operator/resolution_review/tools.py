@@ -37,7 +37,7 @@ def search_anilist(
 
 @function_tool
 def get_anilist(ctx: RunContextWrapper[ReviewContext], anilist_id: int) -> dict:
-    """Get titles, episode count, format, season, status, and relations for an ID."""
+    """Get titles, synopsis, episode count, format, season, status, and relations."""
 
     return ctx.context.toolbox.get_anilist(anilist_id)
 
@@ -126,9 +126,11 @@ def save_resolution_draft(
 ) -> dict:
     """Replace the current draft and return its validated crosswalk preview.
 
-    The draft is one object, not a list. It contains current_anilist_id,
-    summary, and decisions. Each decision is flat; a move contains decision,
-    destination_anilist_id, files of {capture_id, episode}, and rationale.
+    The draft is one object with current_anilist_id, summary, and decisions.
+    Keep and move decisions use files of {capture_id, episode}; a move also uses
+    destination_anilist_id. A leave_out_of_episode_index decision instead uses
+    capture_ids, a list of strings. The decision field and its fields belong in
+    the same object; do not nest them under the decision name.
     """
 
     return ctx.context.toolbox.save_draft(ctx.context.current_anilist_id, draft)

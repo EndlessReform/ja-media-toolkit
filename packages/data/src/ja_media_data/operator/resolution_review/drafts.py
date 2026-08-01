@@ -80,7 +80,10 @@ class DraftWorkspace:
             locator = destination, episode
             if locator in locators:
                 raise ValueError(
-                    f"draft assigns two captures to anilist:{destination}:{episode}"
+                    "each canonical episode locator accepts exactly one capture; "
+                    f"draft assigns multiple captures to anilist:{destination}:{episode}. "
+                    "Do not choose between releases from filename quality tags alone; "
+                    "omit unresolved captures from the draft and explain them in summary"
                 )
             locators.add(locator)
             self._check_locator(destination, episode, item["capture_id"])
