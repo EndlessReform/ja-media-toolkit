@@ -39,12 +39,13 @@ observe_campaign_inputs = dg.define_asset_job(
     executor_def=dg.in_process_executor,
 )
 
+# Acceptance publishes canonical identity immediately. Subtitle LID is optional
+# enrichment with its own runtime and failure modes, so it stays in the dedicated job.
 canonicalization_from_acceptance = dg.define_asset_job(
     name="canonicalization_from_acceptance",
     selection=dg.AssetSelection.assets(
         "canonical_episode_inputs",
         "canonical_subtitle_inputs",
-        "subtitle_language_results",
     ).required_multi_asset_neighbors(),
     executor_def=dg.in_process_executor,
     tags={

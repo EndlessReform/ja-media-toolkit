@@ -195,7 +195,7 @@ def test_failed_canonical_keeps_old_head_after_acceptance(repository) -> None:
     assert latest[dg.AssetKey("canonical_episode_inputs")].run_id == initial.run_id
 
 
-def test_changed_override_then_failed_lid_keeps_old_lid_head(repository) -> None:
+def test_acceptance_commits_without_waiting_for_lid(repository) -> None:
     source = documents()
     store = FakeStore(source)
     instance = dg.DagsterInstance.ephemeral()
@@ -211,7 +211,7 @@ def test_changed_override_then_failed_lid_keeps_old_lid_head(repository) -> None
     )
     assert initial.success
     initial_lid = defs.resolve_job_def(
-        "canonicalization_from_acceptance"
+        "subtitle_lid_from_canonical"
     ).execute_in_process(instance=instance)
     assert initial_lid.success
     old_lid = _head(repository, "subtitle_lid").materialization_id
@@ -228,15 +228,29 @@ def test_changed_override_then_failed_lid_keeps_old_lid_head(repository) -> None
     current_override_version = instance.get_latest_data_version_record(
         dg.AssetKey("binding_overrides"), is_source=True
     ).event_log_entry.tags["dagster/data_version"]
-    failed = changed_defs.resolve_job_def(
+    accepted = changed_defs.resolve_job_def(
         "canonicalization_from_acceptance"
-    ).execute_in_process(instance=instance, raise_on_error=False)
+    ).execute_in_process(instance=instance)
 
-    assert not failed.success
+    assert accepted.success
     assert prior_override_version != current_override_version
     assert repository.connection.execute(
         "SELECT audio_capture_id FROM canonical_episode_inputs"
     ).fetchone() == ("capture-old",)
+    assert _head(repository, "subtitle_lid").materialization_id == old_lid
+    assert {
+        event.asset_key.to_user_string()
+        for event in accepted.get_asset_materialization_events()
+    } == {
+        "canonical_episode_inputs",
+        "canonical_subtitle_inputs",
+    }
+
+    failed_lid = changed_defs.resolve_job_def(
+        "subtitle_lid_from_canonical"
+    ).execute_in_process(instance=instance, raise_on_error=False)
+
+    assert not failed_lid.success
     assert _head(repository, "subtitle_lid").materialization_id == old_lid
     latest = instance.get_latest_materialization_events(
         [dg.AssetKey("subtitle_language_results")]
@@ -244,15 +258,11 @@ def test_changed_override_then_failed_lid_keeps_old_lid_head(repository) -> None
     assert latest[dg.AssetKey("subtitle_language_results")].run_id == initial_lid.run_id
 
     store.fail_text = False
-    downstream = changed_defs.resolve_job_def(
-        "canonicalization_from_acceptance"
+    downstream_lid = changed_defs.resolve_job_def(
+        "subtitle_lid_from_canonical"
     ).execute_in_process(instance=instance)
-    assert downstream.success
+    assert downstream_lid.success
     assert {
         event.asset_key.to_user_string()
-        for event in downstream.get_asset_materialization_events()
-    } == {
-        "canonical_episode_inputs",
-        "canonical_subtitle_inputs",
-        "subtitle_language_results",
-    }
+        for event in downstream_lid.get_asset_materialization_events()
+    } == {"subtitle_language_results"}
