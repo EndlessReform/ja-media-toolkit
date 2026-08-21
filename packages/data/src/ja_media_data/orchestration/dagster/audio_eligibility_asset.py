@@ -68,7 +68,7 @@ def capture_audio_eligibility(context) -> dg.MaterializeResult:
 
 
 def _language_set(serialized_tracks: str) -> str:
-    """Summarize declared languages without expanding full track evidence."""
+    """Summarize declared languages without retaining every track field."""
 
     import json
 

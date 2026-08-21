@@ -148,7 +148,7 @@ def test_canary_examples_cover_distinct_reasons_before_repeats() -> None:
             reason=reason,
             locator=None,
             issue_kind="invalid",
-            evidence={},
+            resolution_context={},
         )
         for index, reason in enumerate(
             ("common", "common", "rare-a", "common", "rare-b", "rare-c"),

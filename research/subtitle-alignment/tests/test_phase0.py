@@ -25,7 +25,7 @@ def test_episode_number_accepts_only_positive_integers() -> None:
     assert positive_episode_number(True) is None
 
 
-def test_missing_advertised_candidate_is_retained_as_evidence() -> None:
+def test_missing_advertised_candidate_retains_failure_status() -> None:
     class MissingClient:
         def file_content(self, subtitle_id: str) -> bytes:
             raise ServiceHttpError("missing", status_code=404)

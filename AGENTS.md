@@ -79,16 +79,54 @@ a high-level choice as settled, explain:
 5. how later steps query, join, or consume those artifacts;
 6. operational and maintenance costs;
 7. credible alternatives and why the recommendation wins; and
-8. which conclusions come from measured corpus evidence versus assumptions.
+8. which conclusions come from measured corpus results versus assumptions.
 
 Lead with the recommendation and work backward from the problem. Clearly label
 repository facts, existing proposals, new recommendations, and approved
 decisions. Proposed plan documents provide context; they are not automatically
 approved architecture. Do not respond to disagreement by reflexively abandoning
-a recommendation, but also work to understand the user need that prompted the disagreement before replying. Reassess the evidence, then defend it concretely or explain
+a recommendation, but also work to understand the user need that prompted the disagreement before replying. Reassess the measurements, repository facts, and constraints, then defend the recommendation concretely or explain
 why another choice better suits the user's needs. The user is learning parts of this stack, so
 define framework concepts in terms of this media pipeline before relying on
 framework jargon.
+
+### Forbidden umbrella terminology
+
+The word `evidence` is forbidden in this repository. Do not use it in prose,
+documentation, plans, comments, docstrings, prompts, identifiers, filenames,
+schemas, API fields, UI labels, commit messages, or user-facing replies. This
+ban is case-insensitive and includes compounds such as `proposal_evidence` and
+`evidence-bound`. If the strict logical meaning is genuinely intended, use
+`proof` instead and state the premises and conclusion.
+
+Name the actual concept according to its role:
+
+- values read directly from a manifest are **source facts**;
+- versioned records of source facts are **observations**;
+- derived categorical inputs such as parsed episode tokens are **signals**;
+- quantitative outputs such as script ratios or timing errors are **metrics**;
+- hashes, revisions, and source identifiers are **provenance**;
+- failure or warning explanations are **diagnostics**;
+- files, logs, plots, and datasets are **artifacts**;
+- direct computation outputs are **results**;
+- conclusions drawn from measurements or review are **findings**;
+- information shown to a human is **review material**;
+- acceptance rules are **criteria**; and
+- decisions tied to exact fingerprints are **revision-bound** or
+  **input-pinned**.
+
+Do not evade this rule by replacing the banned word with another vague umbrella
+term. For example, parser outputs are not generic "context" when `signals` is
+accurate; a materialization ID is `provenance`, not a diagnostic; an aligned SRT
+is an `artifact`, not a metric; and a UI drill-down should be labelled
+`Details`, `Diagnostics`, `Candidates`, `Comparison`, `Artifacts`, or `Run logs`
+according to what it actually contains.
+
+The only allowed quotations are this policy, the design document that defines
+the migration, and checksum-protected historical migrations that cannot be
+edited. The tracked pre-commit hook enforces the source-code boundary. See
+`docs/terminology-taxonomy-and-enforcement.md` for the full taxonomy and cleanup
+plan.
 
 ## Data Lake
 

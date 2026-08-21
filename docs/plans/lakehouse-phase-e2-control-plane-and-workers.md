@@ -8,11 +8,6 @@ failure semantics live in
 operational contract lives in
 [`packages/data/DAGSTER.md`](../../packages/data/DAGSTER.md).
 
-The historical persistent DEV restart point and remaining infrastructure inputs
-are recorded in
-[`data-dev-deployment-handoff.md`](data-dev-deployment-handoff.md). Its
-checkout-based commands are context, not the target deployment mechanism.
-
 ## Prerequisite — publish and accept checkout-free DEV
 
 The data image now contains its application source and migrations, excludes the
@@ -143,7 +138,7 @@ DuckLake without media in Celery or an application image rebuild.
 
 ## E2.4 — operator mutation and launch
 
-1. Add evidence-bound binding override commands with optimistic concurrency.
+1. Add input-fingerprint-bound binding override commands with optimistic concurrency.
 2. Preview the exact affected domain rows and downstream asset closure before
    committing a decision.
 3. Commit the transactional decision separately from execution.

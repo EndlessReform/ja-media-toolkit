@@ -2,7 +2,7 @@
   <div class="stage-detail-head"><h3>{{ page.label }}</h3><span>rows {{ page.offset + 1 if page.items else 0 }}–{{ page.offset + page.items | length }} / {{ page.total }}</span></div>
   {% if page.items %}
     {% if page.stage == 'episode_resolution' %}
-    <table class="data-table issue-table"><thead><tr><th>Kind</th><th>Series</th><th>Capture</th><th>Manifest</th><th>Evidence</th></tr></thead><tbody>
+    <table class="data-table issue-table"><thead><tr><th>Kind</th><th>Series</th><th>Capture</th><th>Manifest</th><th>Details</th></tr></thead><tbody>
       {% for item in page.items %}<tr><td><span class="status quarantined">{{ item.kind }}</span></td><td><strong>{% if item.series_url %}<a href="{{ item.series_url }}" target="_blank" rel="noreferrer">{{ item.namespace }}:{{ item.series_id }}</a>{% else %}{{ item.namespace }}:{{ item.series_id }}{% endif %}</strong></td><td><code>{{ item.capture_id }}</code></td><td><code>{{ item.manifest_key }}</code></td><td><code>{{ item.details_json }}</code></td></tr>{% endfor %}
     </tbody></table>
     {% elif page.stage == 'audio_eligibility' %}

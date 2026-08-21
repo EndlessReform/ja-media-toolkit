@@ -25,7 +25,7 @@ live in frontend/workflow code.
 | Pick the best existing SRT candidate for one series | Usually no | ranked candidate report, optional constant offset |
 | Generate word-level ASS subtitles for mpv | Sometimes | word-timed subtitle artifact, optional rebuild manifest |
 | Total recaptioning with authoritative timings | Yes | replayable manifest, results, cue projections, retimed subtitles |
-| Evaluate auto-generated SRT timing for future models | Yes | reproducible metrics and backend evidence |
+| Evaluate auto-generated SRT timing for future models | Yes | reproducible metrics and backend timing outputs |
 | Add timing to untimed ASR text | Depends | timed transcript/subtitles, optional manifest |
 
 So the system needs two modes:
@@ -132,8 +132,8 @@ failure handling, backend version tracking, and stable artifact refs. This is
 where manifests, S3, and resumable stores become important.
 
 Timing evaluation is run-first when it compares model versions or finetunes. The
-important output is not only a retimed subtitle but the metric set and evidence
-used to compute it.
+important output is not only a retimed subtitle but the metric set and source
+records used to compute it.
 
 Untimed text alignment can go either way. A one-off ASR transcript can be
 invocation mode; a corpus of ASR outputs should be run mode.

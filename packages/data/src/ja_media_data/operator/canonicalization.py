@@ -95,7 +95,7 @@ class CanonicalizationLensProjector:
         snapshot_id: int | None = None,
         override_revision: int | None = None,
     ):
-        """Load candidate evidence independently from the product page."""
+        """Load candidate records independently from the product page."""
 
         return self.products.candidates(
             locator,

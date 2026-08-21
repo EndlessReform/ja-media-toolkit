@@ -172,8 +172,8 @@ one output row per pair.
 There are {zero_pairs:,} exact-zero pair scores ({zero_pairs / max(1, scored_pairs):.1%}
 of scored pairs). Selecting the best identity pair per episode shifts the
 distribution upward, as expected when episodes often have multiple embedded
-tracks or Kitsunekko candidates. It is an optimistic ranking view, not evidence
-that the selected subtitle is subjectively synchronized.
+tracks or Kitsunekko candidates. It is an optimistic ranking view and does not
+establish that the selected subtitle is subjectively synchronized.
 
 ## Series view
 
@@ -231,8 +231,8 @@ def _at_x_section(count: int, at_x_median: str, other_median: str) -> str:
     if count == 0:
         return (
             "No scored pair in this seeded sample carried an `AT-X` filename or "
-            "path hint. This sample therefore provides no evidence for or "
-            "against the AT-X identity-timing hypothesis. Test it with a "
+            "path hint. This sample therefore cannot support or refute the "
+            "AT-X identity-timing hypothesis. Test it with a "
             "separately declared targeted stratum, not by changing this random "
             "sample after seeing its scores."
         )

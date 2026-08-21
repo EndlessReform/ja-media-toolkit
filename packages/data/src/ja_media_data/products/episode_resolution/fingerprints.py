@@ -14,7 +14,7 @@ from ja_media_data.products.episode_resolution.models import (
 
 
 def fingerprint_observations(items: Sequence[CaptureObservation]) -> str:
-    """Hash normalized capture evidence while excluding observation time."""
+    """Hash normalized capture records while excluding observation time."""
 
     rows = [
         {key: value for key, value in asdict(item).items() if key != "observed_at"}

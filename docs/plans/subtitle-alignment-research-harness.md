@@ -16,7 +16,7 @@ It should answer four questions before alignment becomes a Dagster product:
 1. How many Kitsunekko candidates already fit, need a constant translation,
    show a whole-file clock-rate error, or need local retiming?
 2. Where work is needed, does ALASS or ffsubsync produce better subjective
-   results, and does VAD evidence correlate with that result?
+   results, and do VAD metrics correlate with that result?
 3. Where is the practical cutoff beyond which neither method helps?
 4. Can a subtitle group and transform learned on one episode be reused across a
    series, or is per-episode/intra-episode work necessary?
@@ -257,7 +257,7 @@ allows, distributed round-robin across identity-score deciles. It runs:
 2. global translation only from each aligner;
 3. piecewise translation with scale disabled at split penalty `5` from each
    aligner; and
-4. wider penalty or clock-scale arms only after reviewed evidence justifies
+4. wider penalty or clock-scale arms only after reviewed results justify
    them.
 
 The first diagnostic run showed source offsets beyond the original 30-second
@@ -267,7 +267,7 @@ a post-hoc `offset_bound_exceeded` diagnostic when at least one realized cue
 translation has absolute magnitude greater than 30 seconds. This does **not**
 mean 30 seconds of accumulated drift, and it does not reject or exclude the
 output from scoring. The threshold is a review-priority heuristic until human
-evidence establishes any operational bound.
+review establishes an operational bound.
 
 ### Matrix-v2 diagnostic finding: sparse anchors
 
@@ -275,7 +275,7 @@ The first 100-pair matrix exposed an input-eligibility bug before it established
 an aligner ranking. Every embedded track was allowed to act as a full-episode
 timing anchor. Some are signs, songs, or other sparse tracks: observed flagged
 examples include 3 anchor cues against 344 candidate cues, 40 against 340, and
-35 against 298. With so little full-episode timing evidence, unrestricted ALASS
+35 against 298. With so little full-episode timing coverage, unrestricted ALASS
 can maximize incidental overlap by translating the candidate hundreds of
 seconds. Those values are not plausible measured media drift.
 
@@ -283,7 +283,7 @@ The realized transform is reconstructed cue by cue from the candidate and
 aligned output clocks. A large negative nominal translation also causes ALASS
 to clamp early negative timestamps to zero. Consequently a nominal
 `--no-split` global run can appear as several realized offset blocks near the
-start. This is output serialization behavior, not evidence that ALASS secretly
+start. This output serialization behavior does not show that ALASS secretly
 selected a piecewise transform.
 
 The immediate matrix-v2 gate was therefore anchor eligibility. The annotator
@@ -291,8 +291,8 @@ shows cue count, active duration, episode span, and anchor/candidate timelines
 and records `anchor_usable` or `anchor_sparse` without rerunning methods.
 Matrix-v6's diverse 25-series cohort no longer reproduces that defect: sampled
 anchors contain 212–495 cues (median 358) and span essentially complete
-episodes. Large-shift outputs still require audio review, but sparse timing
-evidence is not their explanation in this cohort.
+episodes. Large-shift outputs still require audio review, but sparse anchor
+coverage is not their explanation in this cohort.
 
 Hold ALASS `--interval=1` and `--speed-optimization=1`, and ffsubsync
 `--split-length-penalty=0.25` and `--split-subsample=1`, during the transform
@@ -352,7 +352,7 @@ Subjective correctness against episode audio is primary:
 - whether errors are constant, drifting, or local/discontinuous; and
 - whether the method damages regions that were already correct.
 
-Metric fit is secondary evidence for review sampling and later cutoff
+Metric fit is a secondary signal for review sampling and later cutoff
 calibration.
 
 For the audio subset, run the existing VAD abstraction once and measure how VAD
@@ -431,7 +431,8 @@ region, leaving an indeterminate middle:
   subtitle-only methods are unacceptable;
 - `retranscribe`: no usable Japanese track exists, or every candidate has a
   major content/coverage mismatch; and
-- `indeterminate`: insufficient language, anchor, audio, or review evidence.
+- `indeterminate`: insufficient language classification, anchor coverage, audio
+  comparison, or human review.
 
 Choose the simplest cutoff whose metric features meet the desired precision for
 `good_auto`. Report its confusion table and make every false accept reopenable
@@ -472,7 +473,7 @@ Fit on the first anchored episode and apply unchanged to held-out episodes:
 Compare with per-episode constant, affine, and piecewise fits. Report pass rate,
 residual error, and runtime saved. Also fit from only the first 5, 10, and 20
 minutes, then evaluate against the complete episode. That directly measures how
-much intra-episode evidence is needed.
+much of an episode must be sampled.
 
 Gate 4 ends when held-out results show whether group choice and transforms
 generalize by coverage stratum. Drop segment-level reuse unless subjective

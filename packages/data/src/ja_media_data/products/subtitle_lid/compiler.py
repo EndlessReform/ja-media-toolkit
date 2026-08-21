@@ -1,4 +1,4 @@
-"""Deterministic compiler for canonical subtitle language evidence."""
+"""Deterministic compiler for canonical subtitle language results."""
 
 from __future__ import annotations
 

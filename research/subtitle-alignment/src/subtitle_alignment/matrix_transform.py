@@ -28,7 +28,7 @@ def infer_transform(
     *,
     block_tolerance_s: float = 0.021,
 ) -> tuple[TransformFacts, list[dict[str, object]]]:
-    """Recover scale and cue translations while preserving cue-grain evidence."""
+    """Recover scale and cue translations while retaining each cue's offset."""
 
     if len(original) != len(aligned):
         raise ValueError(

@@ -165,7 +165,7 @@ def binding_candidates(
     run_id: str | None = Query(default=None),
     application: OperatorApplication = Depends(get_application),
 ) -> HTMLResponse:
-    """Lazily render the evidence rows for exactly one binding locator."""
+    """Lazily render candidate rows for exactly one binding locator."""
 
     locator = namespace, series_id, episode
     candidates = application.get_candidates(campaign_id, locator, run_id=run_id)

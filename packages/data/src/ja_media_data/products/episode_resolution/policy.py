@@ -1,4 +1,4 @@
-"""Versioned, conservative conversion from capture evidence to episode claims."""
+"""Versioned conversion from filename and AniList comparisons to episode claims."""
 
 from __future__ import annotations
 
@@ -15,7 +15,9 @@ from ja_media_data.products.episode_resolution.models import (
     HintClaim,
     ResolutionIssueClaim,
 )
-from ja_media_data.products.episode_resolution.evidence import collect_episode_evidence
+from ja_media_data.products.episode_resolution.resolution_context import (
+    build_resolution_context,
+)
 from ja_media_data.products.episode_resolution.reasons import (
     BRONZE_MANIFEST_FAILED_SCHEMA_VALIDATION,
     DECLARED_ANILIST_ENTRY_HAS_NO_EPISODE_COUNT,
@@ -42,7 +44,7 @@ class EpisodeResolutionPlan:
     hints: tuple[HintClaim, ...]
     proposal: BindingProposal | None
     issue: ResolutionIssueClaim | None
-    evidence: dict[str, Any]
+    resolution_context: dict[str, Any]
 
 
 def plan_episode_resolution(
@@ -54,39 +56,42 @@ def plan_episode_resolution(
 ) -> EpisodeResolutionPlan:
     """Require filename-signal agreement and AniList bounds before acceptance."""
 
-    signals = collect_episode_evidence(manifest, metadata)
-    ptn_episode = signals.ptn_episode
-    explicit_episodes = signals.explicit_episodes
-    matched_title = signals.matched_title
-    evidence = signals.details
+    context = build_resolution_context(manifest, metadata)
+    parser_episode = context.parser_episode
+    explicit_episodes = context.explicit_episodes
+    matched_title = context.matched_title
+    resolution_context = context.to_dict()
 
-    if signals.ranges:
+    if context.ranges:
         return _issue_plan(
             manifest,
             input_data_version,
-            evidence,
+            resolution_context,
             reason=FILENAME_CONTAINS_MULTI_EPISODE_RANGE,
             kind="ambiguous",
             run_source=run_source,
         )
     candidates = tuple(
-        sorted(set(explicit_episodes) | ({ptn_episode} if ptn_episode else set()))
+        sorted(
+            set(explicit_episodes)
+            | ({parser_episode} if parser_episode else set())
+        )
     )
     hints = _candidate_hints(
         manifest,
         candidates,
-        ptn_episode=ptn_episode,
+        parser_episode=parser_episode,
         explicit_episodes=explicit_episodes,
-        evidence=evidence,
+        resolution_context=resolution_context,
         input_data_version=input_data_version,
         run_source=run_source,
     )
-    signal_failure = episode_signal_failure_reason(ptn_episode, explicit_episodes)
+    signal_failure = episode_signal_failure_reason(parser_episode, explicit_episodes)
     if signal_failure is not None:
         return _issue_plan(
             manifest,
             input_data_version,
-            evidence,
+            resolution_context,
             reason=(
                 DECLARED_ANILIST_ENTRY_IS_MOVIE
                 if metadata and metadata.media_format == "MOVIE" and not candidates
@@ -97,13 +102,13 @@ def plan_episode_resolution(
             run_source=run_source,
         )
 
-    assert ptn_episode is not None
+    assert parser_episode is not None
     episode = candidates[0]
     if metadata is None:
         return _issue_plan(
             manifest,
             input_data_version,
-            evidence,
+            resolution_context,
             reason=DECLARED_ANILIST_ID_NOT_FOUND_IN_METADATA,
             kind="ambiguous",
             hints=hints,
@@ -113,7 +118,7 @@ def plan_episode_resolution(
         return _issue_plan(
             manifest,
             input_data_version,
-            evidence,
+            resolution_context,
             reason=DECLARED_ANILIST_ENTRY_HAS_NO_TITLES,
             kind="ambiguous",
             hints=hints,
@@ -123,7 +128,7 @@ def plan_episode_resolution(
         return _issue_plan(
             manifest,
             input_data_version,
-            evidence,
+            resolution_context,
             reason=FILENAME_TITLE_NOT_EQUAL_TO_DECLARED_ANILIST_TITLES,
             kind="invalid",
             hints=hints,
@@ -133,7 +138,7 @@ def plan_episode_resolution(
         return _issue_plan(
             manifest,
             input_data_version,
-            evidence,
+            resolution_context,
             reason=DECLARED_ANILIST_ENTRY_HAS_NO_EPISODE_COUNT,
             kind="ambiguous",
             hints=hints,
@@ -143,7 +148,7 @@ def plan_episode_resolution(
         return _issue_plan(
             manifest,
             input_data_version,
-            evidence,
+            resolution_context,
             reason=(
                 DECLARED_ANILIST_ENTRY_IS_MOVIE
                 if metadata.media_format == "MOVIE"
@@ -162,7 +167,7 @@ def plan_episode_resolution(
         episode=str(episode),
         audio_capture_id=manifest.capture_id,
         proposal_method="automatic-filename-and-anilist-bounds",
-        proposal_evidence={"hint_id": hint.hint_id, **evidence},
+        resolution_context={"hint_id": hint.hint_id, **resolution_context},
         input_data_version=input_data_version,
         recipe_version=RECIPE_VERSION,
         run_source=run_source,
@@ -173,7 +178,7 @@ def plan_episode_resolution(
         hints=hints,
         proposal=proposal,
         issue=None,
-        evidence=evidence,
+        resolution_context=resolution_context,
     )
 
 
@@ -181,24 +186,24 @@ def _candidate_hints(
     manifest: BronzeCaptureManifest,
     candidates: tuple[int, ...],
     *,
-    ptn_episode: int | None,
+    parser_episode: int | None,
     explicit_episodes: tuple[int, ...],
-    evidence: dict[str, Any],
+    resolution_context: dict[str, Any],
     input_data_version: str,
     run_source: str | None,
 ) -> tuple[HintClaim, ...]:
     results = []
     for candidate in candidates:
-        ptn_supports = ptn_episode == candidate
+        parser_supports = parser_episode == candidate
         token_supports = candidate in explicit_episodes
         method = (
             "ptn+explicit-episode-token"
-            if ptn_supports and token_supports
+            if parser_supports and token_supports
             else "ptn"
-            if ptn_supports
+            if parser_supports
             else "explicit-episode-token"
         )
-        confidence = 0.98 if ptn_supports and token_supports else 0.7
+        confidence = 0.98 if parser_supports and token_supports else 0.7
         results.append(
             HintClaim(
                 hint_id=_stable_id(
@@ -215,7 +220,7 @@ def _candidate_hints(
                 candidate_episode=str(candidate),
                 method=method,
                 confidence=confidence,
-                evidence=evidence,
+                resolution_context=resolution_context,
                 input_data_version=input_data_version,
                 recipe_version=RECIPE_VERSION,
                 run_source=run_source,
@@ -227,7 +232,7 @@ def _candidate_hints(
 def _issue_plan(
     manifest: BronzeCaptureManifest,
     input_data_version: str,
-    evidence: dict[str, Any],
+    resolution_context: dict[str, Any],
     *,
     reason: str,
     kind: str,
@@ -241,7 +246,11 @@ def _issue_plan(
         capture_id=manifest.capture_id,
         hint_id=hints[0].hint_id if hints else None,
         kind=kind,
-        details={"reason": reason, "recipe_version": RECIPE_VERSION, **evidence},
+        details={
+            "reason": reason,
+            "recipe_version": RECIPE_VERSION,
+            **resolution_context,
+        },
         run_source=run_source,
     )
     return EpisodeResolutionPlan(
@@ -250,7 +259,7 @@ def _issue_plan(
         hints=hints,
         proposal=None,
         issue=issue,
-        evidence=evidence,
+        resolution_context=resolution_context,
     )
 
 
@@ -286,6 +295,6 @@ def manifest_schema_validation_issue(
 
 
 def _stable_id(prefix: str, *parts: str) -> str:
-    """Derive a deterministic display/idempotency key from immutable evidence."""
+    """Derive a deterministic display/idempotency key from immutable inputs."""
     encoded = json.dumps(parts, ensure_ascii=False, separators=(",", ":"))
     return f"{prefix}-{hashlib.sha256(encoded.encode()).hexdigest()[:40]}"

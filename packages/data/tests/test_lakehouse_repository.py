@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 import os
 import uuid
@@ -16,6 +17,9 @@ from ja_media_data.products.episode_resolution.models import (
     HintClaim,
     ResolutionBatch,
     ResolutionIssueClaim,
+)
+from ja_media_data.products.episode_resolution.fingerprints import (
+    fingerprint_resolution,
 )
 
 
@@ -63,7 +67,7 @@ def batch(capture_id: str, episode: str) -> ResolutionBatch:
         candidate_episode=episode,
         method="test",
         confidence=1.0,
-        evidence={"episode": episode},
+        resolution_context={"episode": episode},
         input_data_version="etag-0",
         recipe_version="resolver-v1",
     )
@@ -74,11 +78,25 @@ def batch(capture_id: str, episode: str) -> ResolutionBatch:
         episode=episode,
         audio_capture_id=capture_id,
         proposal_method="test",
-        proposal_evidence={"hint_id": hint.hint_id},
+        resolution_context={"hint_id": hint.hint_id},
         input_data_version="etag-0",
         recipe_version="resolver-v1",
     )
     return ResolutionBatch(hints=(hint,), proposals=(binding,), issues=())
+
+
+def test_resolution_fingerprint_tracks_context_values_deterministically() -> None:
+    original = batch("capture-1", "3")
+    same = batch("capture-1", "3")
+    changed = replace(
+        original,
+        hints=(
+            replace(original.hints[0], resolution_context={"episode": "renamed"}),
+        ),
+    )
+
+    assert fingerprint_resolution(original) == fingerprint_resolution(same)
+    assert fingerprint_resolution(original) != fingerprint_resolution(changed)
 
 
 def test_bronze_rescan_replaces_and_identical_fingerprint_is_noop(catalog) -> None:

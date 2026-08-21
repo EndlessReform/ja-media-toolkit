@@ -47,7 +47,7 @@ class SubtitleTrack(SubtitleCandidate):
 
     Language analysis is part of candidate preparation rather than either
     presentation layer: both the terminal and browser frontends need the same
-    labels and ordering evidence.
+    language labels and ordering signals.
     """
 
     language_analysis: SubtitleLanguageAnalysis | None = None

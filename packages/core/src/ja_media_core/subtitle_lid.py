@@ -86,7 +86,7 @@ class SubtitleLanguageIdConfig(BaseModel):
 
 @dataclass(frozen=True)
 class SubtitleScriptMetrics:
-    """Unicode script evidence measured across visible subtitle text."""
+    """Unicode script metrics measured across visible subtitle text."""
 
     substantive_lines: int
     visible_characters: int
@@ -118,7 +118,7 @@ class SampledLanguageMetrics:
 
 @dataclass(frozen=True)
 class SubtitleLanguageAnalysis:
-    """Language evidence and the coarse bucket derived from it."""
+    """Language metrics and the coarse bucket derived from them."""
 
     language: SubtitleLanguage
     reason: str

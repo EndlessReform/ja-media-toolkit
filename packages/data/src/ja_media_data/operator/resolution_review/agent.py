@@ -52,9 +52,10 @@ list, shaped like:
 
 One canonical (AniList ID, episode) locator may have exactly one capture in a draft.
 If several captures appear to be releases of the same episode, do not infer a preferred
-release from tags such as BD, resolution, codec, or source. Unless stronger evidence or
-an explicit selection policy identifies one, omit those captures from the draft and
-explain the unresolved choice in the summary. Omitting a capture is not the same as
+release from tags such as BD, resolution, codec, or source. Unless a direct content
+comparison or explicit selection policy identifies one, omit those captures from the
+draft and explain the unresolved choice in the summary. Omitting a capture is not the
+same as
 leave_out_of_episode_index: use that decision only when the capture should definitely
 not be an ordinary episode.
 

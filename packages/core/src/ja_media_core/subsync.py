@@ -68,7 +68,7 @@ def subtitle_goodness_of_fit(
     """Score how well shifted candidate cue intervals overlap a reference.
 
     This is the ALASS-style value function described in
-    ``docs/goodness_of_fit.md``. It deliberately does not infer timing shifts;
+    ``docs/implemented/goodness_of_fit.md``. It deliberately does not infer timing shifts;
     callers pass cues that are already in their proposed positions, or provide
     per-cue ``candidate_shifts`` to evaluate a known shift sequence.
     """

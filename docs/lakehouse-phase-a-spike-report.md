@@ -21,7 +21,7 @@ catalog schemas without the `_phase_a` suffix and object prefixes without a
 
 ## Measured results
 
-| Check | Result | Evidence |
+| Check | Result | Verification |
 | --- | --- | --- |
 | PostgreSQL catalog + Garage data path attach | Pass | Catalog initialized in the guarded schema; Parquet written through the path-style Garage endpoint. |
 | Small append/data inlining | Pass | A three-row append created no table object in Garage. |
@@ -59,7 +59,7 @@ the spike) and supports `JA_MEDIA_PG_BIN_DIR` for an explicit compatible client.
 ## Operational follow-ups
 
 1. Run simultaneous appends from two configured operator machines. The
-   single-host two-process result is strong evidence for transactional catalog
+   single-host two-process result strongly supports transactional catalog
    behavior, but it does not exercise a second host's PostgreSQL and Garage
    network path.
 2. Confirm or add the durable PostgreSQL backup job and its recovery-point

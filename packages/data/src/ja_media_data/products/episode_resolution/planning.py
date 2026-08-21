@@ -37,12 +37,12 @@ class ResolutionResult:
     reason: str
     locator: str | None
     issue_kind: str | None
-    evidence: dict[str, Any]
+    resolution_context: dict[str, Any]
 
 
 @dataclass(frozen=True)
 class PlannedDocument:
-    """One pure plan plus the capture header compiled from the same evidence."""
+    """One pure plan plus the capture header compiled from the same manifest."""
 
     plan: EpisodeResolutionPlan
     result: ResolutionResult
@@ -108,7 +108,7 @@ def result_from_plan(
             else None
         ),
         issue_kind=plan.issue.kind if plan.issue else None,
-        evidence=plan.evidence,
+        resolution_context=plan.resolution_context,
     )
 
 
@@ -128,14 +128,17 @@ def _invalid_plan(
         manifest_key=document.marker.key,
         run_source=run_source,
     )
-    evidence = {"error": str(error), "manifest_key": document.marker.key}
+    resolution_context = {
+        "error": str(error),
+        "manifest_key": document.marker.key,
+    }
     plan = EpisodeResolutionPlan(
         classification="quarantined",
         reason=BRONZE_MANIFEST_FAILED_SCHEMA_VALIDATION,
         hints=(),
         proposal=None,
         issue=issue,
-        evidence=evidence,
+        resolution_context=resolution_context,
     )
     return PlannedDocument(
         plan=plan,
@@ -147,7 +150,7 @@ def _invalid_plan(
             reason=BRONZE_MANIFEST_FAILED_SCHEMA_VALIDATION,
             locator=None,
             issue_kind="invalid",
-            evidence=evidence,
+            resolution_context=resolution_context,
         ),
         observation=CaptureObservation(
             capture_id=document.marker.capture_id,

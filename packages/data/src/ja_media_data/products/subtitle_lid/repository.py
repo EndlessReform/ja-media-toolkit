@@ -1,4 +1,4 @@
-"""Atomic persistence for subtitle language evidence."""
+"""Atomic persistence for subtitle language results."""
 
 from dataclasses import asdict
 import json

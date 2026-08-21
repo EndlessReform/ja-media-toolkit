@@ -19,7 +19,7 @@ remain exact.
 - Prefer Verdana, Tahoma, Arial, and Japanese system sans-serif stacks at
   11–13 px. Headings rarely exceed 20 px.
 - Use a centered, desktop-first shell around 1100–1200 px with narrow gutters.
-  Horizontal scrolling is acceptable for evidence tables on small screens.
+  Horizontal scrolling is acceptable for comparison tables on small screens.
 - Favor tables, fieldsets, striped rows, inset panels, 1 px borders, compact
   tabs, and mild bevels over cards and floating surfaces.
 - Use navy, steel blue, dirty cyan, muted violet, amber, and off-white. Small
@@ -46,10 +46,10 @@ remain exact.
 - Stage cards carry aggregate status only. Their real rows are server-paged with
   a hard display limit and fetched lazily when the operator selects a card.
   High-volume conclusion products use the same bounded-page discipline.
-- "Step in" means inspect the evidence behind a particular cell or decision,
+- "Step in" means inspect the inputs behind a particular cell or decision,
   not trace one record through the entire dependency graph by default.
 - Dense row disclosure arrows belong in the rightmost parent cell. Expanded
-  evidence belongs in one full-width child row per candidate directly beneath
+  candidate details belong in one full-width child row directly beneath
   that parent. Whole successful sections should be collapsible so
   failure/quarantine tables are one action away.
 - Domain identifiers should link to authoritative external records when a
@@ -62,7 +62,7 @@ remain exact.
   per candidate; do not repeat field labels inside every record.
 - Progressive enhancement must remain real: filters and navigation work as
   ordinary links/forms before HTMX replaces a region.
-- Specialized evidence stays specialized. Do not create a generic JSON/EAV
+- Specialized inspection views stay specialized. Do not create a generic JSON/EAV
   renderer merely to reuse markup.
 - Empty states must explain which upstream durable product is absent and show
   the exact command or navigation needed; a polished blank dashboard is a bug.

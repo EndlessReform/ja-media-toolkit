@@ -1,4 +1,4 @@
-"""Paged canonical product rows and separately loaded candidate evidence."""
+"""Paged canonical product rows and separately loaded candidate records."""
 
 from __future__ import annotations
 
@@ -56,7 +56,7 @@ class CanonicalProductProjector:
         snapshot_id: int | None,
         override_revision: int | None,
     ) -> tuple[CandidateObservation, ...]:
-        """Load full evidence only after an operator expands one locator."""
+        """Load candidate records only after an operator expands one locator."""
 
         proposals = table_ref(
             "episode_binding_proposals", snapshot_id=snapshot_id, alias="proposal"

@@ -3,14 +3,14 @@
 ## Problem Frame
 
 The immediate goal is proof of value: take cleaned SRT text, align it against
-episode audio, and produce enough evidence to decide whether forced alignment is
+episode audio, and produce enough comparison results to decide whether forced alignment is
 better than ffsubsync-style anchoring for the messy subtitle candidates we have.
 This is not yet the final subtitle-retiming product.
 
 The stable existing cue contract is `SubtitleCue` in
 `packages/core/src/ja_media_core/transcripts.py`. Keep that small. A cue is
 source-clock text plus source-clock timing. Forced alignment should live beside
-it: consume cues and audio windows, emit timing evidence, then let downstream
+it: consume cues and audio windows, emit word timing anchors, then let downstream
 policy decide how to retime, flag, compare, or discard.
 
 Related notes:

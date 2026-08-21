@@ -352,7 +352,7 @@ when a product compiler changes.
 The `episode-filename-v2` recipe uses literal reason codes that name the failed
 invariant. A quarantine is a successful, non-publishing classification; its
 `kind` (`ambiguous` or `invalid`) is the broader review category, while its
-reason says exactly what evidence caused that classification.
+reason lists the exact conflicting or invalid inputs that caused that classification.
 
 | Reason | Meaning |
 | --- | --- |
@@ -373,7 +373,7 @@ reason says exactly what evidence caused that classification.
 
 Canary examples include the stem, parsed title, parser episode, explicit episode
 tokens, declared series ID, and the exact metadata titles/count/format used in
-the comparison. Aggregate counts alone are not considered sufficient evidence
+the comparison. Aggregate counts alone do not provide enough context
 for interpreting a quarantine.
 
 - No compatible heavy worker: the Dagster step remains queued; existing heads

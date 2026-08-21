@@ -153,8 +153,18 @@ def _effective_candidates(repository: DuckLakeRepository) -> list[Candidate]:
     if repository.override_repository is None:
         return candidates
     overrides = tuple(repository.override_repository.iter_current_overrides())
-    masked = {(item.namespace, item.series_id, item.episode) for item in overrides}
-    candidates = [item for item in candidates if item.locator not in masked]
+    masked_locators = {
+        (item.namespace, item.series_id, item.episode) for item in overrides
+    }
+    overridden_captures = {
+        item.audio_capture_id for item in overrides if item.audio_capture_id is not None
+    }
+    candidates = [
+        item
+        for item in candidates
+        if item.locator not in masked_locators
+        and item.capture_id not in overridden_captures
+    ]
     for override in overrides:
         if override.audio_capture_id is None:
             continue

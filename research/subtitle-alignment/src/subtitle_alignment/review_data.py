@@ -55,7 +55,7 @@ class ReviewCase:
 
 @dataclass(frozen=True)
 class TrackStats:
-    """Simple evidence for whether a track can anchor a whole episode."""
+    """Coverage statistics used to decide whether a track can anchor an episode."""
 
     cues: int
     active_s: float

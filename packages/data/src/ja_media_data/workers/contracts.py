@@ -94,7 +94,7 @@ class VadResult(WorkerModel):
 
 
 class SubtitleLidResult(WorkerModel):
-    """Normalized evidence produced for one canonical subtitle."""
+    """Normalized language result produced for one canonical subtitle."""
 
     operation: Literal["subtitle_language_id"] = "subtitle_language_id"
     subtitle_input_id: str

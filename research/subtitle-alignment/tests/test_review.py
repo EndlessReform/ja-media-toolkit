@@ -21,7 +21,7 @@ from subtitle_alignment.review_interaction import AlignmentReviewInteractionMixi
 from subtitle_alignment import cli
 
 
-def test_track_stats_make_sparse_anchor_evidence_explicit() -> None:
+def test_track_stats_make_sparse_anchor_coverage_explicit() -> None:
     cues = (
         SubtitleCue(None, 1, 10.0, 12.0, "one"),
         SubtitleCue(None, 2, 100.0, 103.0, "two"),

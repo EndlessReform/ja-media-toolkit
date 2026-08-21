@@ -8,7 +8,7 @@ authoritative in
 document preserves the broader product vocabulary and later-stage ideas; its
 O0–O3 sequence is historical and must not be read as a claim that every
 proposed target, fixture campaign, mapped run item, or approval abstraction was
-built. The next approved gate is narrower: reusable evidence-bound operator
+built. The next approved gate is narrower: input-bound operator
 decisions, applied first to competing canonical candidates and bindings.
 
 It describes the surface-neutral operator model and its CLI, HTTP, and
@@ -59,14 +59,14 @@ history. The system must answer:
   branches have completed and which branch is selected downstream?
 - If several targets share an expensive ancestor, will it be reused?
 - Where did the last run spend its time and which mapped item failed?
-- What evidence requires a human decision, and exactly which input revision am
+- Which comparison requires a human decision, and exactly which input revision am
   I approving?
 - Can I stop at a useful intermediate product and continue on another machine?
 
 The answer cannot be “run the next stage.” Many legitimate workloads have no
 single next stage.
 
-## Repository facts and measured evidence
+## Repository facts and measured results
 
 The design starts from existing repository behavior, not a hypothetical DAG:
 
@@ -504,7 +504,7 @@ estimates and show when history is insufficient.
 Selecting a failed aggregate walks this path:
 
 ```text
-campaign → target/stage → run → run item → failure evidence
+campaign → target/stage → run → run item → failure details
 ```
 
 The detail view shows:
@@ -535,10 +535,10 @@ There are two different confirmations:
 1. **Dispatch confirmation** is ephemeral: “run these 143 items here, estimated
    48 minutes.” It prevents accidental work but is not a domain artifact.
 2. **Domain approval** is durable: “this alignment/canonical choice/dataset is
-   acceptable evidence for downstream publication.” It must survive sessions
+   acceptable for downstream publication.” It must survive sessions
    and machines.
 
-Model domain approval as a standard gate with stage-specific evidence:
+Model domain approval as a standard gate with stage-specific comparison inputs:
 
 ```text
 ApprovalRequest
@@ -546,7 +546,7 @@ ApprovalRequest
   exact input fingerprint
   requesting stage/recipe/run
   question, risk/severity, and concise rationale
-  evidence and comparison artifact references
+  comparison inputs and artifact references
   allowed decisions
   downstream impact summary
 
@@ -561,19 +561,19 @@ Machine-produced requests belong with derived lake products. Small concurrent
 human decisions belong in ordinary PostgreSQL, like binding overrides. A
 decision matches only the exact input fingerprint. If an upstream product or
 recipe changes, the old decision remains historical and the new request is
-pending; approval never leaks across changed evidence.
+pending; approval never leaks across changed inputs.
 
 Interactive surfaces render every request through one semantic `ApprovalCard`
 view model:
 
 - what am I deciding;
 - why did the pipeline escalate;
-- what evidence can I inspect;
+- which inputs and comparisons can I inspect;
 - what does each decision do;
 - how many downstream products are blocked; and
 - which exact revision the decision covers.
 
-Gate-specific renderers may enrich the evidence pane, but they do not invent
+Gate-specific renderers may enrich the comparison pane, but they do not invent
 new decision persistence paths. Binding correction, subtitle selection, timing
 quality, publication review, and dataset inclusion can share this protocol.
 
@@ -750,8 +750,8 @@ remote work updates only as its durable records change.
 
 Shows pending/stale decisions ordered by severity and downstream impact.
 Entering a request opens its standardized approval card and any specialized
-evidence viewer. Bulk approval is disabled initially; it requires a separately
-designed gate policy because “same type” does not imply “same evidence.”
+comparison viewer. Bulk approval is disabled initially; it requires a separately
+designed gate policy because “same type” does not imply “same inputs.”
 
 ### 7. Findings and data quality
 
@@ -800,7 +800,7 @@ FastAPI API and operator core remain unchanged. Generated TypeScript types from
 the OpenAPI schema are preferable to manually duplicating DTOs if that phase
 arrives.
 
-### Evidence that would justify Vite + React
+### Conditions that would justify Vite + React
 
 Adopt a SPA when measured use requires several of these, not merely because the
 domain has many entities:
@@ -978,7 +978,7 @@ into the application core.
 
 **Gate:** from the browser, the operator can explain why a canonical capture
 won, inspect subtitle-LID products and timings, page recipes, preview a closure,
-and drill from a failed aggregate to its evidence. The workbench performs no
+and drill from a failed aggregate to its failure details. The workbench performs no
 writes and requires no public CDN or Node build.
 
 ### O2.5 — measured frontend decision
@@ -1027,10 +1027,10 @@ observe workstation results without copying product hashes.
 2. Implement the approval inbox/card and one low-risk gate end to end.
 3. Good first candidates are canonical-choice escalation or eval-dataset
    inclusion; avoid publication/destructive actions in the first mutation.
-4. Add specialized evidence handoff to existing subtitle tools.
+4. Add specialized comparison handoff to existing subtitle tools.
 
 **Gate:** changing an upstream fingerprint invalidates effective approval and
-blocks downstream work until the new evidence is reviewed.
+blocks downstream work until the changed inputs are reviewed.
 
 ### O6 — campaign and recipe mutation
 
@@ -1086,7 +1086,7 @@ reuse and composition without an always-on orchestrator.
 ### Textual as the primary architecture
 
 Textual would provide a quick keyboard-first client, but recipe comparisons,
-timing visualization, evidence links, and browser navigation may outgrow a
+timing visualization, comparison links, and browser navigation may outgrow a
 terminal. More importantly, putting the application model in widgets would
 make a later web surface expensive. Keep Textual optional and thin.
 
@@ -1112,7 +1112,7 @@ mutations only through tested domain services.
 ### Use an external orchestrator UI
 
 Reintroduces the scheduler/service and asset-node worldview already retired.
-The needed surface is campaign-, recipe-, product-, and evidence-oriented.
+The needed surface is campaign-, recipe-, product-, and decision-oriented.
 
 ## Decisions made by this plan
 
@@ -1130,7 +1130,7 @@ The needed surface is campaign-, recipe-, product-, and evidence-oriented.
   HTML/HTMX, and optional Textual/SPA clients are adapters.
 - FastAPI provides a typed JSON boundary before an interactive UI.
 - FastAPI/HTMX is the first read-only workbench; Vite/React requires measured
-  evidence from that workbench.
+  usage results from that workbench.
 - Interactive adapters are read-only first and never become remote executors
   or schedulers.
 - Domain tables remain authoritative; no generic artifact EAV ledger is added.
@@ -1141,7 +1141,7 @@ The needed surface is campaign-, recipe-, product-, and evidence-oriented.
    presets plus local recent-history state are sufficient initially.
 2. The minimum run-item schema that supports partial mapped progress without
    drifting into orchestration metadata sprawl.
-3. Which first approval gate provides the best real evidence for the generic
+3. Which first approval gate provides the best real test case for the generic
    request/decision interface.
 4. Whether recipe duration estimates are useful at current corpus scale and
    granular enough without per-model bespoke code.

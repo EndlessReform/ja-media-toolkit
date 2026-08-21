@@ -181,7 +181,7 @@ def choose_unambiguous_audio_stream(
     *,
     preferred_languages: tuple[str, ...] = ("jpn", "ja"),
 ) -> AudioStreamProbe | None:
-    """Choose one stream only when language/default evidence is decisive."""
+    """Choose one stream only when language and default flags select one."""
 
     language_matches = tuple(
         stream

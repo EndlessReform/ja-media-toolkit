@@ -2,7 +2,7 @@
 
 Legacy manifests predate explicit schema and series fields.  The parser accepts
 their repository key as context so downstream code gets one honest contract
-without rewriting immutable bronze evidence.
+without rewriting immutable bronze records.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ class BronzeSeries:
 
 @dataclass(frozen=True)
 class BronzeStream:
-    """Small stream header retained for resolver evidence and later checks."""
+    """Small stream header retained for resolver comparisons and later checks."""
 
     object_name: str
     stream_index: int
@@ -42,7 +42,7 @@ class BronzeStream:
 
 @dataclass(frozen=True)
 class BronzeCaptureManifest:
-    """Normalized immutable evidence read from one bronze commit marker."""
+    """Normalized immutable capture manifest read from one commit marker."""
 
     schema_version: int
     capture_id: str

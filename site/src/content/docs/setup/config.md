@@ -78,7 +78,7 @@ that need tuning:
 
 ```toml
 [subtitles.language_id]
-# Sample evenly across the complete subtitle when script evidence is ambiguous.
+# Sample evenly across the complete subtitle when script metrics are ambiguous.
 sample_lines = 50
 min_line_characters = 5
 

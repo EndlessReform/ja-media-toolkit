@@ -184,6 +184,12 @@ def test_combined_lens_accounts_for_quarantined_bronze_input(repository) -> None
     assert lens.progress.quarantined == 1
     assert issue_page.items[0].kind == "ambiguous"
     assert issue_page.items[0].details_json == '{"path": "special"}'
+    issue_html = templates.get_template("_stage_results.html").render(
+        page=issue_page,
+        campaign_id="canonicalization-gate",
+        run_id="",
+    )
+    assert "<th>Details</th>" in issue_html
 
 
 def test_json_html_htmx_and_static_asset_share_one_snapshot(repository) -> None:
@@ -235,6 +241,7 @@ def test_json_html_htmx_and_static_asset_share_one_snapshot(repository) -> None:
     assert "SHOW PRODUCT" not in product_html
     assert page.status_code == 200
     assert "Binding &amp; canonicalization desk" in page.text
+    assert "lakehouse compilation &amp; inspection console" in page.text
     assert "capture-new" in page.text
     assert 'hx-get="/operator/campaigns/canonicalization-gate/lens"' in page.text
     assert fragment.status_code == 200 and 'id="target-lens"' in fragment.text

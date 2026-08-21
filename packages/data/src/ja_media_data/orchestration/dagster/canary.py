@@ -64,21 +64,23 @@ def evaluate_resolution_canary(context) -> dict[str, object]:
 def _quarantine_example(item: ResolutionResult) -> dict[str, object]:
     """Expose the compared values instead of only naming a failed invariant."""
 
-    evidence = item.evidence
+    resolution_context = item.resolution_context
     return {
         "capture_id": item.capture_id,
         "series_id": item.series_id,
         "stem": item.stem,
         "reason": item.reason,
         "issue_kind": item.issue_kind,
-        "manifest_key": evidence.get("manifest_key"),
-        "parsed_filename_title": evidence.get("ptn_title"),
-        "parser_episode": evidence.get("ptn_ordinary_episode"),
-        "explicit_episode_numbers": evidence.get("explicit_episode_tokens"),
-        "episode_ranges": evidence.get("episode_ranges"),
-        "declared_series": evidence.get("series"),
-        "declared_series_metadata": evidence.get("metadata"),
-        "error": evidence.get("error"),
+        "manifest_key": resolution_context.get("manifest_key"),
+        "parsed_filename_title": resolution_context.get("ptn_title"),
+        "parser_episode": resolution_context.get("ptn_ordinary_episode"),
+        "explicit_episode_numbers": resolution_context.get(
+            "explicit_episode_tokens"
+        ),
+        "episode_ranges": resolution_context.get("episode_ranges"),
+        "declared_series": resolution_context.get("series"),
+        "declared_series_metadata": resolution_context.get("metadata"),
+        "error": resolution_context.get("error"),
     }
 
 

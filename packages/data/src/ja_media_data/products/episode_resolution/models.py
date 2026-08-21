@@ -28,7 +28,7 @@ class CaptureObservation:
 
 @dataclass(frozen=True)
 class HintClaim:
-    """One immutable resolver claim and its exact provenance."""
+    """One immutable episode candidate produced by the resolver."""
 
     hint_id: str
     capture_id: str
@@ -37,7 +37,7 @@ class HintClaim:
     candidate_episode: str
     method: str
     confidence: float | None
-    evidence: dict[str, Any]
+    resolution_context: dict[str, Any]
     input_data_version: str
     recipe_version: str
     run_source: str | None = None
@@ -53,7 +53,7 @@ class BindingProposal:
     episode: str
     audio_capture_id: str
     proposal_method: str
-    proposal_evidence: dict[str, Any]
+    resolution_context: dict[str, Any]
     input_data_version: str
     recipe_version: str
     run_source: str | None = None

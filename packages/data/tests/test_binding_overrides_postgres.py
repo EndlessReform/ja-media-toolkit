@@ -26,6 +26,9 @@ from ja_media_data.products.binding_acceptance.compiler import (
 from ja_media_data.products.binding_acceptance.repository import replace_product
 from ja_media_data.products.lineage import MaterializationCatalog, structural_build_key
 from ja_media_data.products.materialization import MaterializationContext
+from ja_media_data.products.canonical_inputs.selection import (
+    select_canonical_candidates,
+)
 from ja_media_data.products.episode_resolution.models import (
     BindingProposal,
     BindingConflictError,
@@ -113,7 +116,7 @@ def test_override_and_unbind_are_immediately_effective(repository) -> None:
                     episode="3",
                     audio_capture_id="capture-1",
                     proposal_method="resolver",
-                    proposal_evidence={"source": "test"},
+                    resolution_context={"source": "test"},
                     input_data_version="etag-1",
                     recipe_version="resolver-v1",
                 ),
@@ -195,7 +198,7 @@ def test_findings_report_later_auto_collision_with_override(repository) -> None:
         episode="4",
         audio_capture_id="capture-4",
         proposal_method="resolver",
-        proposal_evidence={"source": "test"},
+        resolution_context={"source": "test"},
         input_data_version="etag-2",
         recipe_version="resolver-v1",
     )
@@ -223,6 +226,25 @@ def test_findings_report_later_auto_collision_with_override(repository) -> None:
 
     assert [item.finding_type for item in repository.list_consistency_findings()] == [
         "override_automatic_capture_collision"
+    ]
+    repository.connection.execute(
+        """INSERT INTO capture_audio_eligibility (
+               capture_id, manifest_bucket, manifest_key, manifest_etag,
+               manifest_schema_version, status, reason,
+               selected_audio_object_bucket, selected_audio_object_key,
+               selected_audio_stream_index, selected_audio_codec,
+               selected_audio_declared_language, available_audio_tracks,
+               input_fingerprint, computed_at, run_id)
+           VALUES ('capture-4', 'bronze', 'metadata/capture-4.json', 'etag-1',
+                   1, 'eligible', 'legacy_schema_v1_single_audio',
+                   'bronze', 'capture-4.mka', 0, 'aac', 'jpn', '[]',
+                   'audio-fingerprint', now(), 'test')"""
+    )
+
+    selected = select_canonical_candidates(repository)
+
+    assert [(item.locator, item.binding_source) for item in selected] == [
+        (("anilist", "15451", "3"), "override")
     ]
 
 

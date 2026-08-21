@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class SubtitleLanguageResult:
-    """Versioned language evidence for one canonical subtitle object."""
+    """Versioned language result for one canonical subtitle object."""
 
     subtitle_input_id: str
     namespace: str
