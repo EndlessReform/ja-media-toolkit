@@ -28,7 +28,7 @@ from ja_media_core.subtitle_lid import (
 )
 from ja_media_core.subsync import subtitle_anchor_fit_score
 from ja_media_core.transcripts import SubtitleCue
-from ja_media_frontend.subsync.candidates import render_candidate_table
+from ja_media_frontend.subsync.candidates import format_duration, render_candidate_table
 from ja_media_frontend.subsync.service import (
     SubtitleTrack,
     build_subtitle_track,
@@ -37,6 +37,7 @@ from ja_media_frontend.subsync.service import (
 )
 from ja_media_frontend.subsync.startup import resolve_srt_inputs, run_subsync_tui  # noqa: F401
 from ja_media_frontend.subsync.remote import SubsyncRemoteMixin
+from ja_media_frontend.subsync.alass import SubsyncAlassMixin
 from ja_media_frontend.subsync.interaction import (
     SubsyncInteractionMixin,
     playback_range,  # noqa: F401
@@ -65,7 +66,12 @@ def subtitle_track_with_language(
     )
 
 
-class SubsyncTuiApp(SubsyncInteractionMixin, SubsyncRemoteMixin, App[None]):
+class SubsyncTuiApp(
+    SubsyncAlassMixin,
+    SubsyncInteractionMixin,
+    SubsyncRemoteMixin,
+    App[None],
+):
     """A first-pass Textual shell for inspecting subtitle timing activity."""
 
     BINDINGS = [
@@ -330,7 +336,7 @@ class SubsyncTuiApp(SubsyncInteractionMixin, SubsyncRemoteMixin, App[None]):
         promote = "p promote" if self.promotion_target is not None else "promotion disabled"
         return (
             "Ctrl-f/b page  Ctrl-d/u half-page  +/- zoom  Ctrl-c copy  "
-            f"{promote}{pending}"
+            f"{promote}{self.alass_help_label()}{pending}"
         )
 
     def copy_current_subtitle(self) -> None:
@@ -421,11 +427,3 @@ class SubsyncTuiApp(SubsyncInteractionMixin, SubsyncRemoteMixin, App[None]):
             self.notify(f"Failed to write {dest.name}: {exc}", severity="error")
         else:
             self.notify(f"Promoted to {dest.name}")
-
-def format_duration(seconds: float) -> str:
-    if seconds >= 3600:
-        return format_clock(seconds)
-    if seconds >= 60:
-        minutes, remainder = divmod(seconds, 60)
-        return f"{int(minutes)}m{remainder:04.1f}s"
-    return f"{seconds:.1f}s"

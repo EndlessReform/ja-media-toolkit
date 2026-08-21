@@ -1,17 +1,23 @@
 # Scrappy subtitle-alignment research harness
 
-Status: active experiment, not a product pipeline or campaign. The frozen Phase
-0 sample, naive Gate 1 identity survey, and restricted executable matrix are
-complete; LID and blinded manual review remain pending.
+Status: concluded experiment, not a product pipeline or campaign. The final
+cohort, findings, retained artifacts, and narrow subsync fallback are recorded
+in `research/subtitle-alignment/README.md`. Fine speech-boundary labels move to
+the separately scoped subtitle-cleaning and forced-alignment work.
 
-## Recommendation
+Gate 1 was sufficient to make that decision. Gates 2–4 below are retained as
+the original proposed research sequence, not as pending roadmap work. They were
+intentionally not executed once review showed that subtitle-only retiming could
+not produce trustworthy fine speech boundaries.
 
-Continue using the disposable `research/subtitle-alignment/` environment to
-consume one frozen Silver canonicalization snapshot, cache the relevant
-subtitle bytes, run timing experiments locally, and record manual review
-labels.
+## Final decision
 
-It should answer four questions before alignment becomes a Dagster product:
+Retain the disposable `research/subtitle-alignment/` environment and final
+input-pinned cohort as an inspectable record. Do not promote its scorer,
+transform outputs, annotator, or remaining gates into a production pipeline.
+
+The original proposal asked four questions before alignment could become a
+Dagster product:
 
 1. How many Kitsunekko candidates already fit, need a constant translation,
    show a whole-file clock-rate error, or need local retiming?
@@ -21,10 +27,12 @@ It should answer four questions before alignment becomes a Dagster product:
 4. Can a subtitle group and transform learned on one episode be reused across a
    series, or is per-episode/intra-episode work necessary?
 
-This is a consumer of Silver, not a second pipeline. It adds no campaign, Gold
-table, service, worker contract, or research-side orchestration framework. Pure
-logic moves back to `packages/core` only after it works; a proven durable
-computation may move to `packages/data` later with separate sign-off.
+The spike answered enough of questions 1–2 to reject subtitle-only timing as a
+training-label source. Questions 3–4 no longer justify further work in this
+harness. Canonical episode selection remains in the data layer; ALASS
+piecewise-p5 survives only as an optional subsync playback convenience; fine
+ASR/TTS labels require the separately scoped cleaning and forced-alignment
+flow.
 
 ## Input boundary
 
@@ -503,7 +511,7 @@ spans, and duplicate cues. Add one tiny local Docker-backed integration test
 following the existing data-stack seed pattern: remote data may be read as a
 bounded seed, but all writes happen locally.
 
-## Outputs, cost, and promotion
+## Original promotion criteria
 
 Each Markdown report links its CSVs and clearly separates measured results from
 assumptions. It includes source identities, sample/LID counts, Gate 1
@@ -517,7 +525,7 @@ poor at resumable runs and durable review labels; putting this in Dagster now
 would prematurely freeze unknown metrics; a generic evaluation platform would
 defeat the experiment's purpose.
 
-After the experiment:
+These promotion criteria were not triggered by the final findings:
 
 - move proven interval search/transforms/metrics into `packages/core`;
 - leave executable adapters with the runtime that owns their dependencies;
@@ -527,7 +535,7 @@ After the experiment:
 
 Production code must never import `research/`.
 
-## Current implementation slice
+## Concluded implementation
 
 Completed:
 
@@ -543,22 +551,17 @@ Completed:
 6. compiled a data-driven Typst paper and wrote pair-, method-, and cue-grain
    Parquet/DuckDB products for the annotator; and
 7. corrected the 30-second condition from a rejection status to a per-cue
-   translation diagnostic and added an artifact-only timeline annotator.
+   translation diagnostic and added an artifact-only timeline annotator; and
+8. retained ALASS piecewise-p5 as an optional, in-memory subsync TUI action
+   when `alass-cli` and an embedded anchor are available.
 
 This already proves the central machinery claim: a Silver intermediate produced
 by Dagster can feed a useful local experiment without a Gold layer or a second
 orchestration system.
 
-The next bounded slice is language verification and audio-backed review:
-
-1. LID all cached Kitsunekko candidates and retain every exclusion/failure in
-   the denominator;
-2. inspect the >30-second cue-shift cases first against the now-correct Japanese
-   audio, retaining anchor usability as a categorical label;
-3. blind method names and collect subjective alignment verdicts, prioritizing
-   ALASS piecewise-p5 versus the global baseline; and
-4. derive any automatic cutoff only from those labels.
-
-Do not add audio/VAD, cue-edge clipping, group transfer, or another transform
-arm before this review. The current matrix is already wide enough to decide
-which abstractions are useful.
+No further subtitle-alignment research slice is pending here. LID expansion,
+audio/VAD comparisons, cutoff fitting, group transfer, and additional transform
+arms are deliberately closed rather than deferred. Future forced-alignment
+work needs its own approved design around cleaned label text and audio-derived
+boundaries; it must not quietly resume these gates or treat the retained ALASS
+outputs as labels.

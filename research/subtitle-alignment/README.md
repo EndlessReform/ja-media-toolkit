@@ -1,8 +1,38 @@
 # Subtitle-alignment research
 
+Status: concluded spike. The retained product value is the canonical Silver
+input boundary plus an optional ALASS piecewise-p5 action in the subsync TUI.
+The experiment remains here as a reproducible record; it is not a production
+alignment or training-label pipeline.
+
 This is a deliberately disposable consumer of the canonical Silver product.
 It is a normal uv workspace project so imports and dependencies are resolved by
 uv; it does not modify `sys.path` or duplicate package source.
+
+## Conclusion and retained value
+
+The final measured cohort is `phase0-420479ef7a50a7ad`; its review matrix is
+`output/gate1-matrix-v6-phase0-420479ef7a50a7ad-n25`. Across 25 pairs from 20
+series, ALASS piecewise-p5 had the best median score (0.663) and median gain
+(0.106), but manual review found cue boundaries that routinely omit trailing
+mora and bleed into adjacent speech. The timing-overlap scorer cannot grade
+those speech boundaries, so these outputs are not trustworthy ground-truth
+labels for ASR or TTS. That use case requires cleaned text plus audio-based
+forced alignment.
+
+Anchor subtitles still have bounded residual value: they can rank candidates,
+provide a visual timing reference, and drive a fast best-effort retime for
+playback. Accordingly, subsync exposes ALASS piecewise-p5 only when
+`alass-cli` is on `PATH` and an embedded anchor is available. It transforms the
+selected track in memory; promotion remains explicit. Missing or failed ALASS
+is a normal degraded state, not a startup failure.
+
+The annotator and matrix code remain under `research/` because their contracts
+are experiment-specific. Their generally useful timeline, subtitle parsing,
+promotion, and audio playback pieces already live in shared packages; creating
+another preview abstraction would add a second public surface without a second
+consumer. Superseded local cohorts may be deleted once this final input-pinned
+cohort is retained.
 
 Phase 0 proves that a local experiment can:
 
