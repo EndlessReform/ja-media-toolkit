@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 
 from ja_media_core.audio_library import (
@@ -12,8 +13,11 @@ from ja_media_core.audio_library import (
     ArtifactRecord,
     AudioProfile,
     EpisodeMapping,
+    SubtitleArtifactRecord,
+    SubtitleStreamProbe,
 )
 from ja_media_core.proc import run as run_process
+from ja_media_core.transcripts import read_subtitle
 
 
 def artifact_filename(episode_key: str) -> str:
@@ -24,6 +28,23 @@ def artifact_filename(episode_key: str) -> str:
             f"Phase 1 needs an explicit filename policy for episode key {episode_key!r}"
         )
     return f"S01E{int(episode_key):03d}.m4a"
+
+
+def subtitle_id(stream: SubtitleStreamProbe) -> str:
+    """Return a stable per-source subtitle identifier."""
+
+    return f"stream-{stream.global_index}"
+
+
+def subtitle_filename(episode_key: str, stream: SubtitleStreamProbe) -> str:
+    """Return the canonical hidden subtitle artifact filename."""
+
+    if not episode_key.isdecimal() or int(episode_key) <= 0:
+        raise ValueError(
+            f"Phase 1 needs an explicit filename policy for episode key {episode_key!r}"
+        )
+    language = _safe_filename_part((stream.language or "und").lower()[:12])
+    return f"S01E{int(episode_key):03d}.{subtitle_id(stream)}.{language}.srt"
 
 
 def build_ffmpeg_command(
@@ -108,6 +129,83 @@ def materialize_episode(
     )
 
 
+def build_subtitle_extraction_command(
+    mapping: EpisodeMapping,
+    stream: SubtitleStreamProbe,
+    destination: Path,
+) -> list[str]:
+    """Build a shell-free ffmpeg command to normalize one subtitle stream to SRT."""
+
+    return [
+        "ffmpeg",
+        "-hide_banner",
+        "-nostdin",
+        "-y",
+        "-i",
+        str(mapping.source_path),
+        "-map",
+        f"0:{stream.global_index}",
+        "-c:s",
+        "subrip",
+        str(destination),
+    ]
+
+
+def materialize_subtitle(
+    mapping: EpisodeMapping,
+    stream: SubtitleStreamProbe,
+    destination: Path,
+    *,
+    relative_path: str,
+) -> SubtitleArtifactRecord:
+    """Extract one subtitle stream, verify it, and atomically publish it."""
+
+    temporary = destination.with_name(f".{destination.stem}.partial{destination.suffix}")
+    temporary.unlink(missing_ok=True)
+    try:
+        run_process(
+            build_subtitle_extraction_command(mapping, stream, temporary),
+            check=True,
+        )
+        verify_subtitle_artifact(temporary)
+        os.replace(temporary, destination)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
+    return subtitle_artifact_record(stream, destination, relative_path=relative_path)
+
+
+def verify_subtitle_artifact(path: Path) -> None:
+    """Verify one extracted subtitle artifact is parseable and non-empty."""
+
+    if not path.is_file() or path.stat().st_size <= 0:
+        raise ValueError(f"subtitle artifact is empty or missing: {path}")
+    if not read_subtitle(path):
+        raise ValueError(f"subtitle artifact has no cues: {path}")
+
+
+def subtitle_artifact_record(
+    stream: SubtitleStreamProbe,
+    path: Path,
+    *,
+    relative_path: str,
+) -> SubtitleArtifactRecord:
+    """Build a manifest record for an already verified subtitle file."""
+
+    return SubtitleArtifactRecord(
+        subtitle_id=subtitle_id(stream),
+        relative_path=relative_path,
+        size_bytes=path.stat().st_size,
+        codec=stream.codec,
+        language=stream.language,
+        title=stream.title,
+        default=stream.default,
+        source_stream_index=stream.global_index,
+        source_stream_ordinal=stream.subtitle_ordinal,
+        sha256=_sha256(path),
+    )
+
+
 def verify_audio_artifact(path: Path, profile: AudioProfile) -> ArtifactRecord:
     """Verify one nonempty audio artifact against the selected profile."""
 
@@ -172,3 +270,8 @@ def _optional_int(value: object) -> int | None:
         return int(value) if value is not None else None
     except (TypeError, ValueError):
         return None
+
+
+def _safe_filename_part(value: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "-", value).strip(".-")
+    return cleaned or "und"

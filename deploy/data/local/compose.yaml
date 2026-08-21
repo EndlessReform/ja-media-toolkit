@@ -1,0 +1,153 @@
+name: ja-media-data-local
+
+x-app-environment: &app-environment
+  JA_MEDIA_DATA_CONFIG: /etc/ja-media/data.toml
+  DAGSTER_HOME: /var/lib/dagster/home
+  DAGSTER_POSTGRES_URL: postgresql://ja_media_lakehouse_test:ja_media_lakehouse_test@127.0.0.1:55432/ja_media_lakehouse_test?options=-csearch_path%3Dja_media_dagster_local
+  JA_MEDIA_CELERY_BROKER_URL: pyamqp://guest@127.0.0.1:5672//
+
+x-app-volumes: &app-volumes
+  - ../../../packages/data/config.local.toml:/etc/ja-media/data.toml:ro
+  - ../../../packages/data/dagster/dagster.yaml:/var/lib/dagster/home/dagster.yaml:ro
+  # Mount the workspace as one unit so package-internal imports and data migrations
+  # cannot drift from the source tree while developing against an older image.
+  - ../../../packages:/opt/ja-media/packages:ro
+
+x-app-depends: &app-depends
+  postgres:
+    condition: service_healthy
+  minio-init:
+    condition: service_completed_successfully
+  rabbitmq:
+    condition: service_healthy
+  dagster-schema-init:
+    condition: service_completed_successfully
+  data-schema-init:
+    condition: service_completed_successfully
+
+x-app-service: &app-service
+  image: ja-media/data-local:local
+  build:
+    context: ../../..
+    dockerfile: packages/data/Dockerfile.dagster
+  network_mode: host
+  init: true
+  restart: unless-stopped
+  env_file:
+    - path: ../../../packages/data/.env.local
+      required: false
+  environment: *app-environment
+  volumes: *app-volumes
+  depends_on: *app-depends
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ja_media_lakehouse_test
+      POSTGRES_USER: ja_media_lakehouse_test
+      POSTGRES_PASSWORD: ja_media_lakehouse_test
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ja_media_lakehouse_test -d ja_media_lakehouse_test"]
+      interval: 2s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  minio:
+    image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ja_media_lakehouse_test
+      MINIO_ROOT_PASSWORD: ja-media-lakehouse-test-only
+    ports:
+      - "127.0.0.1:59000:9000"
+      - "127.0.0.1:59001:9001"
+    volumes:
+      - minio-data:/data
+    restart: unless-stopped
+
+  minio-init:
+    image: quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z
+    depends_on:
+      minio:
+        condition: service_started
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        until mc alias set local http://minio:9000 ja_media_lakehouse_test ja-media-lakehouse-test-only; do sleep 1; done
+        mc mb --ignore-existing local/ja-media-lakehouse-test
+        mc anonymous set none local/ja-media-lakehouse-test
+    restart: "no"
+
+  rabbitmq:
+    image: rabbitmq:4.1-management-alpine
+    ports:
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:55672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  dagster-schema-init:
+    image: postgres:17-alpine
+    environment:
+      PGHOST: postgres
+      PGDATABASE: ja_media_lakehouse_test
+      PGUSER: ja_media_lakehouse_test
+      PGPASSWORD: ja_media_lakehouse_test
+    command: ["/bin/sh", "-ec", "psql -v ON_ERROR_STOP=1 -c 'CREATE SCHEMA IF NOT EXISTS ja_media_dagster_local'"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  data-schema-init:
+    image: ja-media/data-local:local
+    build:
+      context: ../../..
+      dockerfile: packages/data/Dockerfile.dagster
+    network_mode: host
+    init: true
+    restart: "no"
+    env_file:
+      - path: ../../../packages/data/.env.local
+        required: false
+    environment: *app-environment
+    volumes: *app-volumes
+    command: ["ja-data-schema-init"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+
+  dagster:
+    <<: *app-service
+    command: ["dagster-webserver", "--host", "127.0.0.1", "--port", "53000", "--module-name", "ja_media_data.orchestration.dagster.definitions"]
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:53000/server_info"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  dagster-daemon:
+    <<: *app-service
+    command: ["dagster-daemon", "run", "--module-name", "ja_media_data.orchestration.dagster.definitions"]
+
+  dagster-server-worker:
+    <<: *app-service
+    command: ["dagster-celery", "worker", "start", "--config-yaml", "/opt/ja-media/packages/data/dagster/celery-container.yaml", "--queue", "server", "--app", "dagster_celery.app", "--loglevel", "INFO", "--", "--concurrency=1"]
+
+volumes:
+  postgres-data:
+  minio-data:

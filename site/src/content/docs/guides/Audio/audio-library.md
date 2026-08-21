@@ -73,6 +73,9 @@ ja-media audio-library ingest \
 
 The initial `portable-aac-v1` profile produces AAC-LC in M4A at 128 kbps and
 48 kHz, preserving mono sources as mono and limiting other sources to stereo.
+During the same ffprobe pass, ingest records embedded subtitle streams. Every
+text-based subtitle stream is normalized to SRT and written under `_subs/`,
+where Audiobookshelf will not surface it as a playback sidecar.
 
 Output uses the AniList ID as the stable directory identity:
 
@@ -83,13 +86,23 @@ Output uses the AniList ID as the stable directory identity:
     ├── metadata.json
     ├── cover.jpg
     ├── S01E001.m4a
-    └── S01E002.m4a
+    ├── S01E002.m4a
+    └── _subs/
+        ├── S01E001.stream-3.eng.srt
+        └── S01E001.stream-4.kor.srt
 ```
 
 `.ja-media.json` is authoritative. It records normalized AniList metadata, the
 selected conversion profile, source fingerprints, global ffmpeg stream
 indices, and verified artifact properties. `metadata.json` and audio tags are
 projections for Audiobookshelf.
+
+Hidden subtitle artifacts are recorded in the manifest with source stream
+identity, language, title, codec, size, and checksum. The Anime Audio service
+advertises them through its subtitle endpoints so clients can choose an
+alignment reference, for example preferring English or Korean before trying
+other tracks. Pass `--no-subtitles` when a source has known-bad embedded
+subtitle streams that should not be extracted.
 
 After ingest, scan the **Anime Audio** podcast library in Audiobookshelf.
 
@@ -129,6 +142,9 @@ ja-media audio-library ingest \
 
 An artifact is skipped only when its source relative path, size, modification
 time, selected global stream, profile, and verified output still match.
+When `--resume` skips an audio artifact, subtitle extraction still runs for
+matching sources, making it the normal backfill path for directories ingested
+before hidden subtitle extraction existed.
 
 Conflicting or untracked files stop that episode instead of being adopted
 silently. After inspecting the conflict, `--replace` allows the confirmed plan

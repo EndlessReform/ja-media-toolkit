@@ -1,0 +1,3 @@
+<hx-partial hx-target="#resolution-history" hx-swap="outerHTML">{% include '_resolution_history.html' %}</hx-partial>
+<hx-partial hx-target="#resolution-series-rail" hx-swap="outerHTML">{% include '_resolution_series_rail.html' %}</hx-partial>
+{% if refresh_resolved_workspace %}<hx-partial hx-target="#resolution-workspace" hx-swap="outerHTML">{% include '_resolution_resolved_workspace.html' %}</hx-partial>{% endif %}

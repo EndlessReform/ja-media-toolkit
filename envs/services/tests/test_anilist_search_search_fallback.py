@@ -28,6 +28,7 @@ def write_dataset(path: Path) -> None:
                 "season",
                 "seasonYear",
                 "format",
+                "popularity",
                 "synonyms",
             ],
         )
@@ -38,6 +39,7 @@ def write_dataset(path: Path) -> None:
             "title_english": "Local Anime",
             "title_native": "ローカル",
             "format": "TV",
+            "popularity": "",
             "synonyms": "[]",
         })
 
@@ -55,6 +57,7 @@ def media_payload(anilist_id: int = 169580, *, format_: str = "TV") -> dict[str,
         "status": "NOT_YET_RELEASED",
         "season": "WINTER",
         "seasonYear": 2026,
+        "popularity": 1234,
         "synonyms": [],
         "trailer": None,
         "coverImage": None,
@@ -163,6 +166,30 @@ def test_forced_search_fetches_anilist_and_caches_query(tmp_path: Path) -> None:
         assert fallback["search_hit_rate"] == 0.5
         assert 'anilist_search_fallback_requests_total{kind="search"} 2.0' in metrics
         assert "anilist_search_fallback_cached_rows 1.0" in metrics
+    finally:
+        reset_app_state()
+        con.close()
+
+
+def test_forced_search_projects_extra_fields_from_fallback_payload(
+    tmp_path: Path,
+) -> None:
+    csv_path = tmp_path / dataset.CSV_NAME
+    db_path = tmp_path / "anime_index.db"
+    write_dataset(csv_path)
+    con = db.open_db(db_path)
+    db.build_index(csv_path, con)
+    client = FakeAniListClient([[media_payload()]])
+    configure_app_state(con, client)
+    api = TestClient(create_app())
+    try:
+        response = api.get(
+            "/search?query=Class+de+2-banme&k=1&force_anilist=true&"
+            "extraFields=popularity"
+        )
+
+        assert response.status_code == 200
+        assert response.json()[0]["popularity"] == 1234
     finally:
         reset_app_state()
         con.close()

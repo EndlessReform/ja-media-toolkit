@@ -8,25 +8,30 @@ import sqlite3
 import threading
 from collections.abc import Callable
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Any
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.responses import FileResponse
 
 from ja_media_services.anime_audio.db import (
     fetch_artifact,
     fetch_artifacts,
-    fetch_inventory,
     fetch_series,
     initialize,
     resolve_content_path,
     stats,
 )
+from ja_media_services.anime_audio.inventory import fetch_inventory
 from ja_media_services.anime_audio.index import reconcile
 from ja_media_services.anime_audio.metrics import render_metrics
 from ja_media_services.anime_audio.settings import AnimeAudioSettings
+from ja_media_services.anime_audio.subtitle_api import (
+    public_subtitle,
+    public_subtitle_content,
+    select_subtitles,
+)
+from ja_media_services.anime_audio.subtitle_db import fetch_subtitle, fetch_subtitles
 from ja_media_services.anime_audio.watcher import IndexWatcher, ObserverLike
 
 logger = logging.getLogger(__name__)
@@ -96,13 +101,24 @@ def create_app(
             if fetch_series(connection, anilist_id) is None:
                 raise HTTPException(status_code=404, detail="Anime audio series not found")
             artifacts = fetch_artifacts(connection, anilist_id)
+            subtitles = fetch_subtitles(connection, anilist_id)
+        subtitles_by_episode: dict[str, list[dict[str, Any]]] = {}
+        for subtitle in subtitles:
+            subtitles_by_episode.setdefault(str(subtitle["episode_key"]), []).append(
+                public_subtitle(subtitle)
+            )
         episodes: dict[str, list[dict[str, Any]]] = {}
         for artifact in artifacts:
             episodes.setdefault(str(artifact["episode_key"]), []).append(
                 _public_artifact(artifact)
             )
         return [
-            {"anilist_id": anilist_id, "episode_key": key, "artifacts": values}
+            {
+                "anilist_id": anilist_id,
+                "episode_key": key,
+                "artifacts": values,
+                "subtitles": subtitles_by_episode.get(key, []),
+            }
             for key, values in episodes.items()
         ]
 
@@ -137,6 +153,51 @@ def create_app(
         if not path.is_file():
             raise HTTPException(status_code=503, detail="Indexed artifact is unavailable")
         return FileResponse(path, media_type="audio/mp4", filename=path.name)
+
+    @app.get("/series/{anilist_id}/episodes/{episode_key}/subtitles")
+    def subtitles_endpoint(anilist_id: int, episode_key: str) -> list[dict[str, Any]]:
+        with lock:
+            if fetch_series(connection, anilist_id) is None:
+                raise HTTPException(status_code=404, detail="Anime audio series not found")
+            subtitles = fetch_subtitles(connection, anilist_id, episode_key)
+        return [public_subtitle(subtitle) for subtitle in subtitles]
+
+    @app.get("/series/{anilist_id}/episodes/{episode_key}/subtitles/content")
+    def subtitle_contents_endpoint(
+        anilist_id: int,
+        episode_key: str,
+        ids: list[str] | None = Query(default=None, alias="id"),
+        getall: bool = False,
+    ) -> list[dict[str, Any]]:
+        if not getall and not ids:
+            raise HTTPException(status_code=400, detail="Pass id or getall=true")
+        with lock:
+            if fetch_series(connection, anilist_id) is None:
+                raise HTTPException(status_code=404, detail="Anime audio series not found")
+            subtitles = fetch_subtitles(connection, anilist_id, episode_key)
+            selected = select_subtitles(subtitles, ids=ids, getall=getall)
+            return [
+                public_subtitle_content(connection, active.library_root, subtitle)
+                for subtitle in selected
+            ]
+
+    @app.get(
+        "/series/{anilist_id}/episodes/{episode_key}/subtitles/{subtitle_id}/content"
+    )
+    def subtitle_content_endpoint(
+        anilist_id: int, episode_key: str, subtitle_id: str
+    ) -> FileResponse:
+        with lock:
+            subtitle = fetch_subtitle(connection, anilist_id, episode_key, subtitle_id)
+            if subtitle is None:
+                raise HTTPException(status_code=404, detail="Anime audio subtitle not found")
+            try:
+                path = resolve_content_path(connection, active.library_root, subtitle)
+            except (FileNotFoundError, ValueError) as error:
+                raise HTTPException(status_code=503, detail="Indexed subtitle is unavailable") from error
+        if not path.is_file():
+            raise HTTPException(status_code=503, detail="Indexed subtitle is unavailable")
+        return FileResponse(path, media_type="application/x-subrip", filename=path.name)
 
     @app.post("/reconcile")
     def reconcile_endpoint() -> dict[str, Any]:

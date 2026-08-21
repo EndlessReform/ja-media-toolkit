@@ -1,0 +1,35 @@
+environment = "local"
+
+[bronze]
+endpoint_url = "http://storage.example.ts.net:3900"
+# Bucket and prefix identify the active bronze generation independently. An
+# empty prefix is valid when a dedicated bucket stores series at its root.
+bucket = "ja-media-bronze-v2"
+prefix = "audio/anime/bronze"
+addressing_style = "path"
+
+[ducklake]
+postgres_url = "postgresql://ja_media_lakehouse_test:ja_media_lakehouse_test@127.0.0.1:55432/ja_media_lakehouse_test"
+catalog_schema = "ja_media_ducklake_local"
+data_path = "s3://ja-media-lakehouse-test/ducklake/local/"
+s3_endpoint_url = "http://127.0.0.1:59000"
+s3_region = "us-east-1"
+s3_access_key_id = "ja_media_lakehouse_test"
+s3_secret_access_key = "ja-media-lakehouse-test-only"
+
+[control]
+schema = "ja_media_control"
+
+[dagster]
+ui_url = "http://127.0.0.1:53000"
+
+[services]
+root_url = "http://services.example.ts.net"
+
+[agent]
+# Model and base URL are intentionally unset. Enter them in the browser for the
+# first full cycle; uncomment these only when server-side defaults are useful.
+# model_id = "gpt-5.6-terra"
+# base_url = "https://api.openai.com/v1"
+max_turns = 12
+openai_tracing_enabled = false

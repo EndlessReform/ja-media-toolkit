@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from subprocess import CompletedProcess
 from unittest.mock import patch
@@ -9,7 +10,9 @@ from ja_media_frontend.audio_library.discovery import (
     _run_ffprobe,
     choose_unambiguous_audio_stream,
     discover_media,
+    probe_media,
     suggest_episode_key,
+    text_subtitle_streams,
 )
 
 
@@ -73,6 +76,55 @@ def test_stream_choice_prefers_one_japanese_stream() -> None:
     )
 
     assert choose_unambiguous_audio_stream(probe) == japanese
+
+
+def test_probe_media_collects_audio_and_subtitle_streams(tmp_path: Path) -> None:
+    media = tmp_path / "episode.mkv"
+    media.write_bytes(b"not-real-media")
+    payload = {
+        "format": {"duration": "1.5"},
+        "streams": [
+            {
+                "index": 0,
+                "codec_type": "video",
+                "codec_name": "h264",
+            },
+            {
+                "index": 1,
+                "codec_type": "audio",
+                "codec_name": "flac",
+                "channels": 2,
+                "sample_rate": "48000",
+                "tags": {"language": "jpn"},
+                "disposition": {"default": 1},
+            },
+            {
+                "index": 3,
+                "codec_type": "subtitle",
+                "codec_name": "ass",
+                "tags": {"language": "eng", "title": "English"},
+                "disposition": {"default": 0},
+            },
+            {
+                "index": 4,
+                "codec_type": "subtitle",
+                "codec_name": "hdmv_pgs_subtitle",
+                "tags": {"language": "jpn"},
+                "disposition": {"default": 0},
+            },
+        ],
+    }
+
+    with patch(
+        "ja_media_frontend.audio_library.discovery._run_ffprobe",
+        return_value=CompletedProcess(["ffprobe"], 0, json.dumps(payload), ""),
+    ):
+        probe = probe_media(media)
+
+    assert probe.duration_ms == 1500
+    assert probe.audio_streams[0].global_index == 1
+    assert [stream.global_index for stream in probe.subtitle_streams] == [3, 4]
+    assert [stream.global_index for stream in text_subtitle_streams(probe)] == [3]
 
 
 def test_ffprobe_retries_signal_crashes() -> None:

@@ -210,7 +210,7 @@ atomically.
 
 - `discover_media()` discovers supported immediate children.
 - `probe_media()` adapts ffprobe JSON into `SourceMediaProbe`.
-- `choose_unambiguous_audio_stream()` applies language/default evidence.
+- `choose_unambiguous_audio_stream()` applies language and default-track flags.
 
 `packages/frontend/src/ja_media_frontend/audio_library/metadata.py`:
 

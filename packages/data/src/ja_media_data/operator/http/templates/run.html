@@ -1,0 +1,32 @@
+{% extends 'base.html' %}
+{% from '_identity.html' import internal_ids %}
+{% block title %}Run #{{ run.run_number }}{% endblock %}
+{% block header %}
+<div class="breadcrumb"><a href="/operator">Operator Home</a> » <a href="/operator/runs">Run Log</a> » Run #{{ run.run_number }}</div>
+<header class="page-header campaign-header">
+  <div><h1>Run #{{ run.run_number }}</h1><p>One Dagster campaign run across the listed steps. {{ internal_ids(run.run_id) }}</p></div>
+  <table class="context-table">
+    <tr><th>target</th><td>{{ run.target }}</td></tr>
+    <tr><th>status</th><td><span class="status {{ run.status }}">{{ run.status }}</span></td></tr>
+    <tr><th>snapshot</th><td>{{ run.terminal_snapshot_id or '—' }}</td></tr>
+    <tr><th>Dagster</th><td><a href="{{ run.dagster_url }}">open raw execution</a></td></tr>
+    {% if run.items_total is not none %}<tr><th>items</th><td>{{ run.items_succeeded }} / {{ run.items_total }} advanced</td></tr>{% endif %}
+  </table>
+</header>
+{% endblock %}
+{% block content %}
+{% if run.terminal_snapshot_id %}<div class="notice"><a href="/operator/campaigns/canonicalization-gate?run_id={{ run.run_id }}">[ VIEW WORKSPACE LEFT BY THIS RUN ]</a></div>{% endif %}
+<div class="terminology-note"><strong>Reading this page:</strong> Run #{{ run.run_number }} is Dagster's monotonic run record. Each row is one Dagster step. Domain products commit independently, so item progress may advance even when the enclosing run fails.</div>
+<section class="forum-panel">
+  <h2>Stage Executions</h2>
+  <table class="data-table run-table">
+    <thead><tr><th>#</th><th>Step</th><th>Result</th><th>Elapsed</th><th>Failure</th></tr></thead>
+    <tbody>{% for step in run.steps %}<tr>
+      <td>{{ step.ordinal }}</td><td><strong>{{ step.stage }}</strong></td>
+      <td><span class="status {{ step.disposition }}">{{ step.disposition }}</span></td>
+      <td>{% if step.started_at and step.finished_at %}{{ ((step.finished_at - step.started_at).total_seconds() * 1000) | round | int }} ms{% else %}—{% endif %}</td>
+      <td class="error">{{ step.error or '—' }}</td>
+    </tr>{% endfor %}</tbody>
+  </table>
+</section>
+{% endblock %}

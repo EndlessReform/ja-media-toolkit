@@ -24,6 +24,7 @@ Returns a list of matching anime entries.
 | `include_ova` | `bool` | `false` | Include OVA entries in search results. |
 | `all_formats` | `bool` | `false` | Include all anime formats (specials, music, etc.). |
 | `force_anilist` | `bool` | `false` | Query AniList GraphQL directly instead of the local BM25 index. |
+| `extraFields` | `string` | None | Comma-separated public metadata fields to add to each candidate. |
 
 **Example Request:**
 ```sh
@@ -41,6 +42,105 @@ curl "http://localhost:8080/api/v1/anilist/search?query=Class+de+2-banme+ni+Kawa
 ```
 
 The current smoke-test expectation for that query is AniList ID `169580`.
+
+### Bulk Search Anime
+`POST /search/bulk`
+
+Runs ordered, local-only BM25 searches for many raw title strings in one
+request. This endpoint is intended for workflows such as resolving scraped
+review-site sidebars or other title inventories where the caller wants
+candidates for later review.
+
+Bulk search never calls AniList GraphQL. If the request includes
+`force_anilist`, the service returns a readable local-only error; other
+unrecognized body fields are ignored. Misses return an empty `results` list,
+leaving retry policy to the caller. Requests accept up to 2,000 queries and
+preserve input order.
+
+**Request Body:**
+
+| Field | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `queries` | `string[]` | Required | Raw title strings to search, up to 2,000 items. |
+| `k` | `int` | `3` | Number of candidates per title (1-50). |
+| `include_movies` | `bool` | `false` | Include movies in search results. |
+| `include_ova` | `bool` | `false` | Include OVA entries in search results. |
+| `all_formats` | `bool` | `false` | Include all anime formats (specials, music, etc.). |
+| `extraFields` | `string[]` or `string` | None | Public metadata fields to add to each candidate. |
+
+**JSON Request:**
+
+```sh
+curl --compressed -X POST "http://localhost:8080/api/v1/anilist/search/bulk" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "queries": ["Aria", "Non Non Biyori", "not a real title"],
+    "k": 2,
+    "all_formats": true
+  }'
+```
+
+**Example Response:**
+
+```json
+{
+  "results": [
+    {
+      "query": "Aria",
+      "results": [
+        {"anilist_id": 477, "title_english": "Aria The Animation", "title_native": "ARIA The ANIMATION", "title_romaji": "ARIA The ANIMATION", "season": "FALL", "season_year": 2005, "format": "TV", "score": 12.3456}
+      ]
+    },
+    {"query": "not a real title", "results": []}
+  ]
+}
+```
+
+For analytical workloads, request newline-delimited JSON:
+
+```sh
+curl --compressed -X POST \
+  "http://localhost:8080/api/v1/anilist/search/bulk?format=jsonl" \
+  -H 'Content-Type: application/json' \
+  -d '{"queries":["Aria","Non Non Biyori","not a real title"],"k":2}' \
+  > anilist-title-candidates.jsonl
+```
+
+Each JSONL line is one input query:
+
+```json
+{"query":"Aria","results":[{"anilist_id":477,"title_english":"Aria The Animation","title_native":"ARIA The ANIMATION","title_romaji":"ARIA The ANIMATION","season":"FALL","season_year":2005,"format":"TV","score":12.3456}]}
+{"query":"not a real title","results":[]}
+```
+
+`format=json` is the default for SDK-style clients. `format=jsonl` returns
+`application/x-ndjson`, which is better for `jq`, shell pipelines, resumable
+review files, and bulk analysis. The service gzips larger responses when the
+client sends `Accept-Encoding: gzip`; `curl --compressed` handles request and
+decode automatically.
+
+Search and bulk search candidates always include the default title, format,
+season, and BM25 score fields. `extraFields` can add public metadata columns
+such as `popularity`, `averageScore`, `favourites`, `siteUrl`, or `genres`;
+unknown or private columns return `400`.
+
+### Full Metadata Export
+`GET /export.jsonl`
+
+Returns one JSON object per local AniList metadata row, ordered by AniList ID.
+The dump covers the public columns from the current DuckDB `anime` table,
+decodes known JSON-shaped columns, and omits service-private fields such as the
+FTS `search_text` column. This is a full table export, unlike bulk search JSONL,
+which returns one result line per requested query.
+
+```sh
+curl --compressed \
+  -OJ "http://localhost:8080/api/v1/anilist/export.jsonl"
+```
+
+The response is `application/x-ndjson` with a download filename shaped like
+`anilist-<YYYY-MM-DD_HH-MM-SS><commit-hash>-export.jsonl`. The timestamp is UTC;
+larger responses are gzipped when the client sends `Accept-Encoding: gzip`.
 
 ### Anime Metadata
 `GET /anime/{anilist_id}`
@@ -137,6 +237,14 @@ results = client.search(
     force_anilist=True,
 )
 print(results.results[0].anilist_id)
+
+bulk = client.search_bulk(
+    ["Aria", "Non Non Biyori", "not a real title"],
+    top_k=2,
+    all_formats=True,
+)
+for item in bulk.results:
+    print(item.query, [candidate.anilist_id for candidate in item.results])
 
 metadata = client.anime(
     395,

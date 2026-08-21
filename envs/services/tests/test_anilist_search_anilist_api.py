@@ -74,6 +74,26 @@ async def test_fetch_media_by_id_acquires_limiter_once_per_graphql_call() -> Non
 
 
 @pytest.mark.asyncio
+async def test_fetch_media_by_id_maps_upstream_http_404_to_no_media() -> None:
+    client = AniListGraphQLClient(
+        endpoint="https://example.test/graphql",
+        timeout_seconds=15,
+        limiter=CountingLimiter(),
+        http_client=FakeAsyncClient(  # type: ignore[arg-type]
+            httpx.Response(
+                404,
+                json={
+                    "errors": [{"message": "Not Found.", "status": 404}],
+                    "data": {"Media": None},
+                },
+            )
+        ),
+    )
+
+    assert await client.fetch_media_by_id(999_999_999) is None
+
+
+@pytest.mark.asyncio
 async def test_search_media_acquires_limiter_and_uses_search_match() -> None:
     limiter = CountingLimiter()
     http_client = FakeAsyncClient(

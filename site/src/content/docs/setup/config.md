@@ -26,6 +26,17 @@ root_url = "http://ja-media.local"
 
 When this is set, clients (like the Kitsunekko subtitle client) will automatically use this as their base URL if no other override is provided. This means you can host multiple services behind a single Caddy or Nginx proxy and manage only one URL.
 
+Containerized code locations and deployed processes should not mount an
+operator's personal configuration file. Set the equivalent deployment variable
+instead:
+
+```sh
+export JA_MEDIA_SERVICES_ROOT_URL="http://ja-media.internal"
+```
+
+Precedence is: an explicit client argument, a service-specific environment
+variable, `JA_MEDIA_SERVICES_ROOT_URL`, then personal `[services].root_url`.
+
 ### Overriding Service URLs
 
 If a specific service is hosted on a different machine or port, you can still override the global root using environment variables. For example, for Kitsunekko subtitles:
@@ -67,7 +78,7 @@ that need tuning:
 
 ```toml
 [subtitles.language_id]
-# Sample evenly across the complete subtitle when script evidence is ambiguous.
+# Sample evenly across the complete subtitle when script metrics are ambiguous.
 sample_lines = 50
 min_line_characters = 5
 

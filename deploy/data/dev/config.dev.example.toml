@@ -1,0 +1,34 @@
+environment = "dev"
+
+[bronze]
+endpoint_url = "http://storage.example.ts.net:3900"
+# Repoint both values together when changing bronze generations. Use an empty
+# prefix when the dedicated bucket stores series directly at its root.
+bucket = "ja-media-bronze-v2"
+prefix = "audio/anime/bronze"
+
+[ducklake]
+# Supplied as JA_MEDIA_DUCKLAKE__POSTGRES_URL by the protected secrets file.
+catalog_schema = "ja_media_ducklake_dev"
+data_path = "s3://ja-media-dev/ducklake/dev/"
+s3_endpoint_url = "http://storage.example.ts.net:3900"
+s3_region = "garage"
+
+[control]
+schema = "ja_media_control"
+
+[dagster]
+ui_url = "http://data-dev.example.ts.net:8080/dagster"
+
+[services]
+root_url = "http://services.example.ts.net"
+
+[agent]
+# Optional server defaults. The browser can provide model/base per run. Both
+# values must be explicit before a run may send data.
+# model_id = "gpt-5.6-terra"
+# base_url = "https://api.openai.com/v1"
+max_turns = 12
+# Traces go to OpenAI's tracing service, even when the model uses a custom
+# base_url. Leave this false unless that export is explicitly wanted.
+openai_tracing_enabled = false

@@ -186,7 +186,7 @@ Good defaults:
 The scoring code should accept intervals and numbers only. It should not import
 `ja_media_apple`, MLX, ffmpeg wrappers, or concrete VAD backends.
 
-### Phase 3: Drift And Local Evidence
+### Phase 3: Drift And Local Diagnostics
 
 Add local windows only after global offset ranking works.
 
@@ -250,8 +250,8 @@ Prefer JSON first:
 }
 ```
 
-Add a readable `.txt` summary if useful. Defer HTML until there is enough
-evidence that terminal output and JSON are insufficient.
+Add a readable `.txt` summary if useful. Defer HTML until actual review work
+shows that terminal output and JSON are insufficient.
 
 ## Metrics To Start With
 

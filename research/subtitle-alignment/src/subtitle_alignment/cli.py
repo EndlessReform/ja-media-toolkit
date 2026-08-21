@@ -1,0 +1,165 @@
+"""Private command line for the subtitle-alignment experiment."""
+
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+
+RESEARCH_ROOT = Path(__file__).resolve().parents[2]
+
+
+def main() -> None:
+    """Run one research operation without expanding the public ja-media CLI."""
+
+    parser = argparse.ArgumentParser(prog="alignment-research")
+    commands = parser.add_subparsers(dest="command", required=True)
+
+    snapshot = commands.add_parser("snapshot", help="freeze a Phase 0 dataset")
+    snapshot.add_argument("--series-count", type=int, default=25)
+    snapshot.add_argument("--seed", type=int, default=20260726)
+    snapshot.add_argument(
+        "--cache-root",
+        type=Path,
+        default=Path(".cache"),
+        help="local immutable dataset directory",
+    )
+    snapshot.add_argument("--download-workers", type=int, default=8)
+    snapshot.add_argument(
+        "--data-config",
+        type=Path,
+        help="read Silver from an existing data TOML (default: DEV)",
+    )
+
+    inspect = commands.add_parser("inspect", help="summarize a local dataset")
+    inspect.add_argument("dataset", type=Path)
+
+    identity = commands.add_parser(
+        "identity", help="run and report the naive Gate 1 identity baseline"
+    )
+    identity.add_argument("dataset", type=Path)
+    identity.add_argument("--workers", type=int, default=8)
+    identity.add_argument("--output-root", type=Path, default=Path("output"))
+
+    matrix = commands.add_parser(
+        "matrix", help="run the restricted Gate 1 executable method matrix"
+    )
+    matrix.add_argument("dataset", type=Path)
+    matrix.add_argument("--identity-result", type=Path)
+    matrix.add_argument("--sample-size", type=int, default=25)
+    matrix.add_argument("--workers", type=int, default=4)
+    matrix.add_argument("--output-root", type=Path, default=Path("output"))
+
+    annotate = commands.add_parser(
+        "annotate", help="inspect precomputed pair-method artifacts"
+    )
+    annotate.add_argument("result", type=Path)
+    annotate.add_argument(
+        "--all-pairs",
+        action="store_true",
+        help="include pairs without a >30-second cue-shift flag",
+    )
+    annotate.add_argument(
+        "--labels",
+        type=Path,
+        help="append-only JSONL destination (default: RESULT/annotations.jsonl)",
+    )
+
+    args = parser.parse_args()
+    if args.command == "snapshot":
+        from subtitle_alignment.snapshot import build_snapshot
+
+        if args.series_count < 1:
+            parser.error("--series-count must be positive")
+        if not 1 <= args.download_workers <= 32:
+            parser.error("--download-workers must be between 1 and 32")
+        path = build_snapshot(
+            cache_root=args.cache_root,
+            series_count=args.series_count,
+            seed=args.seed,
+            download_workers=args.download_workers,
+            data_config=args.data_config,
+        )
+        print(f"dataset={path}")
+        return
+
+    if args.command == "annotate":
+        from subtitle_alignment.review_app import run_annotator
+
+        result = _resolve_result(args.result)
+        database = result / "gate1-matrix.duckdb"
+        if not database.is_file():
+            parser.error(f"matrix database not found: {database}")
+        labels = (
+            args.labels.expanduser().resolve()
+            if args.labels
+            else result / "annotations.jsonl"
+        )
+        run_annotator(result, flagged_only=not args.all_pairs, labels=labels)
+        return
+
+    dataset = args.dataset.expanduser().resolve()
+    manifest = dataset / "manifest.json"
+    if not manifest.is_file():
+        parser.error(f"dataset manifest not found: {manifest}")
+    if args.command == "inspect":
+        payload = json.loads(manifest.read_text())
+        print(json.dumps(payload["counts"], indent=2, sort_keys=True))
+        return
+    if not 1 <= args.workers <= 32:
+        parser.error("--workers must be between 1 and 32")
+    if args.command == "matrix":
+        from subtitle_alignment.access import REPO_ROOT
+        from subtitle_alignment.matrix import run_method_matrix
+        from subtitle_alignment.matrix_report import write_matrix_paper
+
+        if not 10 <= args.sample_size <= 1000:
+            parser.error("--sample-size must be between 10 and 1000")
+        output_root = args.output_root.expanduser().resolve()
+        identity_result = (
+            args.identity_result.expanduser().resolve()
+            if args.identity_result
+            else output_root
+            / f"gate1-identity-v3-{json.loads(manifest.read_text())['dataset_id']}"
+        )
+        if not (identity_result / "gate1-identity.duckdb").is_file():
+            parser.error(f"identity result not found: {identity_result}")
+        result = run_method_matrix(
+            dataset,
+            identity_result,
+            output_root=output_root,
+            sample_size=args.sample_size,
+            workers=args.workers,
+        )
+        pdf = write_matrix_paper(result, pdf_root=REPO_ROOT / "output" / "pdf")
+        print(f"results={result}")
+        print(f"pdf={pdf}")
+        return
+    from subtitle_alignment.access import REPO_ROOT
+    from subtitle_alignment.identity import run_identity_survey
+    from subtitle_alignment.identity_report import write_identity_report
+
+    result = run_identity_survey(
+        dataset,
+        output_root=args.output_root.expanduser().resolve(),
+        workers=args.workers,
+    )
+    pdf = write_identity_report(
+        result,
+        pdf_root=REPO_ROOT / "output" / "pdf",
+    )
+    print(f"results={result}")
+    print(f"pdf={pdf}")
+
+
+def _resolve_result(value: Path) -> Path:
+    """Resolve result paths from either the repo root or research project."""
+
+    expanded = value.expanduser()
+    candidates = [expanded.resolve()]
+    if not expanded.is_absolute():
+        candidates.append((RESEARCH_ROOT / expanded).resolve())
+    for candidate in candidates:
+        if (candidate / "gate1-matrix.duckdb").is_file():
+            return candidate
+    return candidates[0]

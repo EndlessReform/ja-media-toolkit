@@ -21,6 +21,7 @@ from ja_media_services.anilist_search.fallback_query_cache import (
     FallbackQueryRow,
     query_cache_key,
 )
+from ja_media_services.anilist_search.metadata import _parse_value
 from ja_media_services.anilist_search.observability import FallbackObserver
 
 
@@ -50,6 +51,7 @@ async def resolve_search_fallback(
     client: AniListSearchFallbackClient,
     ttl_policy: FallbackTtlPolicy,
     observer: FallbackObserver | None = None,
+    extra_fields: tuple[str, ...] = (),
     now: float | None = None,
 ) -> list[dict[str, Any]]:
     """Resolve a forced title search through AniList and durable DuckDB caches."""
@@ -65,7 +67,13 @@ async def resolve_search_fallback(
     fresh = _read_query_cache(con, db_lock, cache_key, fresh_only=True, now=now)
     if fresh is not None:
         _increment(observer, "search_cache_hits")
-        return _rows_for_cached_ids(con, db_lock, ttl_policy, fresh.result_ids)
+        return _rows_for_cached_ids(
+            con,
+            db_lock,
+            ttl_policy,
+            fresh.result_ids,
+            extra_fields=extra_fields,
+        )
     _increment(observer, "search_cache_misses")
 
     stale = _read_query_cache(con, db_lock, cache_key, fresh_only=False, now=now)
@@ -81,12 +89,19 @@ async def resolve_search_fallback(
             client=client,
             ttl_policy=ttl_policy,
             observer=observer,
+            extra_fields=extra_fields,
             now=now,
         )
     except AniListApiError as exc:
         _record_query_error(con, db_lock, cache_key, str(exc))
         if stale is not None:
-            return _rows_for_cached_ids(con, db_lock, ttl_policy, stale.result_ids)
+            return _rows_for_cached_ids(
+                con,
+                db_lock,
+                ttl_policy,
+                stale.result_ids,
+                extra_fields=extra_fields,
+            )
         raise SearchFallbackUnavailable(str(exc)) from exc
 
 
@@ -102,6 +117,7 @@ async def _fetch_cache_and_project(
     client: AniListSearchFallbackClient,
     ttl_policy: FallbackTtlPolicy,
     observer: FallbackObserver | None,
+    extra_fields: tuple[str, ...],
     now: float | None,
 ) -> list[dict[str, Any]]:
     per_page = max(min(top_k * 3, 50), min(top_k, 50), 10)
@@ -142,7 +158,10 @@ async def _fetch_cache_and_project(
             now=now,
             ttl_seconds=ttl_policy.airing_seconds,
         )
-    return [_search_result(row, rank=index + 1) for index, row in enumerate(rows)]
+    return [
+        _search_result(row, rank=index + 1, extra_fields=extra_fields)
+        for index, row in enumerate(rows)
+    ]
 
 
 async def _search_honoring_retry_after(
@@ -191,6 +210,7 @@ def _rows_for_cached_ids(
     db_lock: threading.Lock,
     ttl_policy: FallbackTtlPolicy,
     result_ids: list[int],
+    extra_fields: tuple[str, ...] = (),
 ) -> list[dict[str, Any]]:
     with db_lock:
         anime_cache = AniListFallbackCache(con, ttl_policy=ttl_policy)
@@ -200,7 +220,10 @@ def _rows_for_cached_ids(
             if (row := anime_cache.get_anime(result_id, fresh_only=False)) is not None
             and not row.negative
         ]
-    return [_search_result(row, rank=index + 1) for index, row in enumerate(rows)]
+    return [
+        _search_result(row, rank=index + 1, extra_fields=extra_fields)
+        for index, row in enumerate(rows)
+    ]
 
 
 def _record_query_error(
@@ -217,9 +240,14 @@ def _matches_format(payload: dict[str, Any], formats: tuple[str, ...]) -> bool:
     return payload.get("format") in formats
 
 
-def _search_result(row: FallbackAnimeRow, *, rank: int) -> dict[str, Any]:
+def _search_result(
+    row: FallbackAnimeRow,
+    *,
+    rank: int,
+    extra_fields: tuple[str, ...] = (),
+) -> dict[str, Any]:
     payload = row.payload
-    return {
+    result = {
         "anilist_id": int(row.aid),
         "title_english": payload.get("title_english"),
         "title_native": payload.get("title_native"),
@@ -229,6 +257,13 @@ def _search_result(row: FallbackAnimeRow, *, rank: int) -> dict[str, Any]:
         "format": payload.get("format"),
         "score": round(1 / rank, 4),
     }
+    result.update(
+        {
+            field: _parse_value(field, payload.get(field))
+            for field in extra_fields
+        }
+    )
+    return result
 
 
 def _status(payload: dict[str, Any]) -> str | None:

@@ -27,15 +27,39 @@ class AudioStreamProbe:
     default: bool
 
 
+_TEXT_SUBTITLE_CODECS = frozenset(
+    {"ass", "ssa", "subrip", "srt", "webvtt", "vtt", "mov_text", "utf8"}
+)
+
+
+@dataclass(frozen=True)
+class SubtitleStreamProbe:
+    """One text or image subtitle stream reported by ffprobe."""
+
+    global_index: int
+    subtitle_ordinal: int
+    codec: str
+    language: str | None
+    title: str | None
+    default: bool
+
+    @property
+    def is_text_based(self) -> bool:
+        """Whether ffmpeg can convert this subtitle stream to SRT."""
+
+        return self.codec.casefold() in _TEXT_SUBTITLE_CODECS
+
+
 @dataclass(frozen=True)
 class SourceMediaProbe:
-    """Stable source fingerprint and audio-stream inventory."""
+    """Stable source fingerprint and stream inventory."""
 
     path: Path
     duration_ms: int
     size_bytes: int
     mtime_ns: int
     audio_streams: tuple[AudioStreamProbe, ...]
+    subtitle_streams: tuple[SubtitleStreamProbe, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -70,11 +94,12 @@ class AnimeAudioSeriesMetadata:
 
 @dataclass(frozen=True)
 class EpisodeMapping:
-    """One confirmed source episode and selected audio stream."""
+    """One confirmed source episode and selected media streams."""
 
     episode_key: str
     source: SourceMediaProbe
     stream: AudioStreamProbe
+    subtitle_streams: tuple[SubtitleStreamProbe, ...] = ()
 
     @property
     def source_path(self) -> Path:
@@ -145,6 +170,22 @@ class ArtifactRecord:
 
 
 @dataclass(frozen=True)
+class SubtitleArtifactRecord:
+    """One verified extracted subtitle artifact."""
+
+    subtitle_id: str
+    relative_path: str
+    size_bytes: int
+    codec: str
+    language: str | None
+    title: str | None
+    default: bool
+    source_stream_index: int
+    source_stream_ordinal: int
+    sha256: str | None = None
+
+
+@dataclass(frozen=True)
 class ManifestEpisode:
     """One completed episode entry in the canonical manifest."""
 
@@ -158,6 +199,7 @@ class ManifestEpisode:
     audio_language: str | None
     artifact: ArtifactRecord
     created_at: str
+    subtitles: tuple[SubtitleArtifactRecord, ...] = ()
 
 
 @dataclass(frozen=True)

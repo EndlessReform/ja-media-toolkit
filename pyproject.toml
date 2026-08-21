@@ -9,7 +9,9 @@ dependencies = []
 [tool.uv.workspace]
 members = [
   "packages/core",
+  "packages/data",
   "packages/media",
+  "research/subtitle-alignment",
 ]
 
 [dependency-groups]

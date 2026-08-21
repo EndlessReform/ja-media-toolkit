@@ -18,11 +18,20 @@ export default defineConfig({
 						{ label: 'Audiobookshelf', link: '/setup/audiobookshelf/' },
 						{ label: 'Configuration', link: '/setup/config/' },
 						{ label: 'Monitoring', link: '/setup/monitoring/' },
+						{ label: 'Lakehouse', link: '/setup/lakehouse/' },
+						{ label: 'Operator Workbench', link: '/setup/operator-workbench/' },
 					],
 				},
 				{
 					label: 'Guides',
 					items: [{ autogenerate: { directory: 'guides' } }],
+				},
+				{
+					label: 'Services',
+					items: [
+						{ label: 'Overview', link: '/guides/services/' },
+						{ autogenerate: { directory: 'services' } },
+					],
 				},
 				{
 					label: 'Reference',

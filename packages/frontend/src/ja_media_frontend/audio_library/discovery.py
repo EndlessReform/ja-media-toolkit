@@ -9,7 +9,11 @@ import subprocess
 import time
 from pathlib import Path
 
-from ja_media_core.audio_library import AudioStreamProbe, SourceMediaProbe
+from ja_media_core.audio_library import (
+    AudioStreamProbe,
+    SourceMediaProbe,
+    SubtitleStreamProbe,
+)
 from ja_media_core.media_filename import suggest_ordinary_episode
 from ja_media_core.proc import run as run_process
 
@@ -76,8 +80,6 @@ def probe_media(path: Path) -> SourceMediaProbe:
         "ffprobe",
         "-v",
         "error",
-        "-select_streams",
-        "a",
         "-show_entries",
         (
             "format=duration:"
@@ -92,23 +94,34 @@ def probe_media(path: Path) -> SourceMediaProbe:
     result = _run_ffprobe(command, path)
     payload = json.loads(result.stdout)
     audio_streams: list[AudioStreamProbe] = []
+    subtitle_streams: list[SubtitleStreamProbe] = []
     for stream in payload.get("streams", []):
-        if stream.get("codec_type") != "audio":
-            continue
         tags = stream.get("tags") or {}
         disposition = stream.get("disposition") or {}
-        audio_streams.append(
-            AudioStreamProbe(
-                global_index=int(stream["index"]),
-                audio_ordinal=len(audio_streams),
-                codec=str(stream.get("codec_name") or "unknown"),
-                language=_clean_tag(tags.get("language")),
-                title=_clean_tag(tags.get("title")),
-                channels=_optional_int(stream.get("channels")),
-                sample_rate_hz=_optional_int(stream.get("sample_rate")),
-                default=bool(disposition.get("default")),
+        if stream.get("codec_type") == "audio":
+            audio_streams.append(
+                AudioStreamProbe(
+                    global_index=int(stream["index"]),
+                    audio_ordinal=len(audio_streams),
+                    codec=str(stream.get("codec_name") or "unknown"),
+                    language=_clean_tag(tags.get("language")),
+                    title=_clean_tag(tags.get("title")),
+                    channels=_optional_int(stream.get("channels")),
+                    sample_rate_hz=_optional_int(stream.get("sample_rate")),
+                    default=bool(disposition.get("default")),
+                )
             )
-        )
+        elif stream.get("codec_type") == "subtitle":
+            subtitle_streams.append(
+                SubtitleStreamProbe(
+                    global_index=int(stream["index"]),
+                    subtitle_ordinal=len(subtitle_streams),
+                    codec=str(stream.get("codec_name") or "unknown"),
+                    language=_clean_tag(tags.get("language")),
+                    title=_clean_tag(tags.get("title")),
+                    default=bool(disposition.get("default")),
+                )
+            )
     stat = path.stat()
     duration = float((payload.get("format") or {}).get("duration") or 0)
     return SourceMediaProbe(
@@ -117,7 +130,14 @@ def probe_media(path: Path) -> SourceMediaProbe:
         size_bytes=stat.st_size,
         mtime_ns=stat.st_mtime_ns,
         audio_streams=tuple(audio_streams),
+        subtitle_streams=tuple(subtitle_streams),
     )
+
+
+def text_subtitle_streams(probe: SourceMediaProbe) -> tuple[SubtitleStreamProbe, ...]:
+    """Return subtitle streams that can be normalized to SRT."""
+
+    return tuple(stream for stream in probe.subtitle_streams if stream.is_text_based)
 
 
 def _run_ffprobe(
@@ -161,7 +181,7 @@ def choose_unambiguous_audio_stream(
     *,
     preferred_languages: tuple[str, ...] = ("jpn", "ja"),
 ) -> AudioStreamProbe | None:
-    """Choose one stream only when language/default evidence is decisive."""
+    """Choose one stream only when language and default flags select one."""
 
     language_matches = tuple(
         stream

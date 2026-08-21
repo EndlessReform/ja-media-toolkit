@@ -6,7 +6,8 @@ requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.136.3",
     "httpx>=0.28,<1",
-    "ja-media-core>=0.1.0",
+    "ja-media-core[audio]>=0.1.0",
+    "ja-media-media[playback]",
     "numpy",
     "parse-torrent-title>=2.8.2",
     "pydantic>=2.13.4",
@@ -33,6 +34,7 @@ build-backend = "hatchling.build"
 [tool.uv.sources]
 ja-media-core = { path = "../core", editable = true }
 ja-media-apple = { path = "../../envs/apple", editable = true }
+ja-media-media = { path = "../media", editable = true }
 
 [dependency-groups]
 dev = [

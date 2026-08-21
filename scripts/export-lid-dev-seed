@@ -1,0 +1,133 @@
+#!/usr/bin/env python
+"""Export a bounded, read-only DEV canonical-subtitle seed for local testing."""
+
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+import tomllib
+from urllib.parse import quote, unquote
+
+from dotenv import dotenv_values
+
+from ja_media_data.lakehouse.catalog import CatalogConfig, connect_catalog
+from ja_media_data.storage.bronze import BronzeStore
+
+
+ROOT = Path(__file__).resolve().parents[1]
+DATA = ROOT / "packages" / "data"
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--limit", type=int, default=3)
+    args = parser.parse_args()
+    if args.limit < 1 or args.limit > 20:
+        parser.error("--limit must be between 1 and 20")
+
+    root_env = dotenv_values(ROOT / ".env")
+    local_env = dotenv_values(DATA / ".env.local")
+    worker_env = dotenv_values(DATA / ".env.worker.dev")
+    local_config = tomllib.loads((DATA / "config.local.toml").read_text())
+    endpoint = str(local_config["bronze"]["endpoint_url"])
+    catalog = CatalogConfig(
+        postgres_url=_postgres_url(_required(root_env, "JA_MEDIA_DATA_DATABASE_URL")),
+        metadata_schema="ja_media_ducklake_dev",
+        data_path="s3://ja-media-dev/ducklake/dev/",
+        s3_endpoint_url=endpoint,
+        s3_region="garage",
+        s3_key_id=_required(
+            worker_env, "JA_MEDIA_WORKER_STAGING_ACCESS_KEY_ID"
+        ),
+        s3_secret=_required(
+            worker_env, "JA_MEDIA_WORKER_STAGING_SECRET_ACCESS_KEY"
+        ),
+    )
+    bronze = BronzeStore(
+        endpoint_url=endpoint,
+        bucket=str(local_config["bronze"]["bucket"]),
+        prefix=str(local_config["bronze"]["prefix"]),
+        addressing_style=str(
+            local_config["bronze"].get("addressing_style", "path")
+        ),
+        access_key_id=_required(local_env, "JA_MEDIA_BRONZE__ACCESS_KEY_ID"),
+        secret_access_key=_required(
+            local_env, "JA_MEDIA_BRONZE__SECRET_ACCESS_KEY"
+        ),
+    )
+    connection = connect_catalog(catalog, initialize_catalog=False)
+    try:
+        total = int(
+            connection.execute(
+                "SELECT count(*) FROM canonical_subtitle_inputs"
+            ).fetchone()[0]
+        )
+        rows = connection.execute(
+            """SELECT subtitle_input_id, canonical_id, namespace, series_id,
+                      episode, audio_capture_id, object_bucket, object_key,
+                      stream_index, codec, declared_language, input_fingerprint
+               FROM canonical_subtitle_inputs
+               ORDER BY subtitle_input_id LIMIT ?""",
+            [args.limit],
+        ).fetchall()
+    finally:
+        connection.close()
+    records = [
+        {
+            "canonical": {
+                "subtitle_input_id": str(row[0]),
+                "canonical_id": str(row[1]),
+                "namespace": str(row[2]),
+                "series_id": str(row[3]),
+                "episode": str(row[4]),
+                "audio_capture_id": str(row[5]),
+                "object_bucket": str(row[6]),
+                "object_key": str(row[7]),
+                "stream_index": int(row[8]),
+                "codec": str(row[9]) if row[9] is not None else None,
+                "declared_language": (
+                    str(row[10]) if row[10] is not None else None
+                ),
+                "input_fingerprint": str(row[11]),
+            },
+            "body": bronze.read_text(str(row[7])),
+        }
+        for row in rows
+    ]
+    args.output.write_text(
+        json.dumps(
+            {
+                "source": "dev-canonical-inputs",
+                "canonical_subtitle_count": total,
+                "records": records,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+    print(f"canonical_subtitles={total} exported={len(records)}")
+
+
+def _required(values: dict[str, str | None], name: str) -> str:
+    value = values.get(name)
+    if value is None or not value:
+        raise RuntimeError(f"{name} is missing")
+    return value
+
+
+def _postgres_url(value: str) -> str:
+    """Encode URL-special password characters in the legacy root DSN."""
+
+    scheme, raw = value.split("://", 1)
+    auth, target = raw.rsplit("@", 1)
+    user, password = auth.split(":", 1)
+    return (
+        f"{scheme}://{quote(unquote(user), safe='')}:"
+        f"{quote(unquote(password), safe='')}@{target}"
+    )
+
+
+if __name__ == "__main__":
+    main()

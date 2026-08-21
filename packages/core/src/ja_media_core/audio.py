@@ -4,53 +4,15 @@ import json
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 from urllib.parse import urlparse
 
 import numpy as np
 import soundfile as sf
 from numpy.typing import NDArray
 
+from ja_media_core.audio_contracts import AudioChunk, AudioFormat, AudioSource
 from ja_media_core.proc import run as run_process
-
-
-AudioSourceKind = Literal["client-local", "s3"]
-
-
-@dataclass(frozen=True)
-class AudioSource:
-    id: str
-    locator: str
-    kind: AudioSourceKind = "client-local"
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class AudioFormat:
-    sample_rate_hz: int
-    channels: int
-    duration_s: float | None = None
-    codec: str | None = None
-    container: str | None = None
-    frame_count: int | None = None
-    sample_width_bytes: int | None = None
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class AudioChunk:
-    source: AudioSource
-    start_s: float
-    end_s: float
-    source_start_frame: int | None = None
-    source_end_frame: int | None = None
-    format: AudioFormat | None = None
-    kind: str = "media_fragment"
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-    @property
-    def duration_s(self) -> float:
-        return self.end_s - self.start_s
 
 
 @dataclass(frozen=True)

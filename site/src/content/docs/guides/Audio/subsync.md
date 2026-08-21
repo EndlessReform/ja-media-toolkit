@@ -71,6 +71,13 @@ uv run ja-media subsync tui ../../media/gantz.mkv \
 
 While the TUI is running, you can press `F6` to open a modal and change the AniList/TVDB ID or episode number to fetch a new set of candidates.
 
+When an embedded anchor was discovered and `alass-cli` is available on
+`PATH`, the status bar also shows `a ALASS p5`. Press `a` to retime the selected
+candidate with the same piecewise penalty-5 configuration used by the research
+spike. The operation runs in the background and changes only the in-memory
+candidate; press `p` to promote it explicitly. The action is absent when its
+optional executable or anchor is unavailable.
+
 ### Understanding the Layout
 
 The TUI is divided into four main regions:
@@ -94,6 +101,8 @@ The timeline uses colored half-blocks to represent subtitle spans and blank spac
 | `+` or `=` | Zoom in (show fewer seconds) |
 | `-` / `_` | Zoom out (show more seconds) |
 | `F6` | Configure IDs/episode and fetch Kitsunekko candidates |
+| `a` | Apply optional ALASS piecewise-p5 retiming against the embedded anchor |
+| `p` | Promote the selected candidate beside the media file |
 | `q` | Quit |
 
 ## Browser Reader

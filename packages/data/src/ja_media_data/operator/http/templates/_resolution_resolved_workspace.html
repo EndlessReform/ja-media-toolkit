@@ -1,0 +1,14 @@
+<div id="resolution-workspace" class="resolution-workspace resolved-workspace">
+  <section class="forum-panel resolved-review">
+    <h2>Applied Crosswalks · {% if selected_anilist_id %}AniList {{ selected_anilist_id }}{% else %}none{% endif %}</h2>
+    {% if active_resolution_batches %}
+      {% for batch in active_resolution_batches %}<article class="resolved-batch">
+        <header><strong>{{ batch.summary }}</strong><br><code>{{ batch.batch_id }}</code> · {{ batch.created_at.strftime('%Y-%m-%d %H:%M') }}</header>
+        <div class="table-scroll"><table class="data-table"><thead><tr><th>Capture</th><th>Decision</th><th>Destination</th><th>Episode</th><th>Rationale</th></tr></thead><tbody>
+          {% for item in batch.items %}<tr><td><code>{{ item.capture_id }}</code></td><td>{{ item.decision }}</td><td>{% if item.destination_anilist_id %}<a href="https://anilist.co/anime/{{ item.destination_anilist_id }}" target="_blank" rel="noopener noreferrer">AL {{ item.destination_anilist_id }} ↗</a>{% else %}Not indexed{% endif %}</td><td>{{ item.destination_episode or '—' }}</td><td>{{ item.rationale }}</td></tr>{% endfor %}
+        </tbody></table></div>
+        {% if review_mode != 'local' %}<form class="resolved-reverse" hx-post="/operator/resolution-review/history/{{ batch.batch_id }}/reverse" hx-target="#resolution-workspace" hx-swap="outerHTML" hx-confirm="Reverse this accepted decision batch?"><input type="hidden" name="series_view" value="resolved"><input type="hidden" name="anilist_id" value="{{ selected_anilist_id }}"><label>Reversal reason <input name="reason" required></label><button type="submit">REVERSE BATCH</button></form>{% endif %}
+      </article>{% endfor %}
+    {% else %}<div class="empty-state">This series has no active accepted decisions. It may have just been reversed.</div>{% endif %}
+  </section>
+</div>

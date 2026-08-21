@@ -12,13 +12,40 @@ Utilities for processing and managing local media files (e.g., anime, podcasts, 
 - **Media Management**: E.g. splitting audio based on voice activity (VAD), and aligning community subtitles to actual audio.
 - **Mining & Analytics**: Diarizing audio for speaker separation and visualizing content for shadowing or sentence mining.
 
-### Services
-Infrastructure and APIs that facilitate the tools and coordinate data:
-- **Data Mirrors**: Local mirrors of heavyweight datasets (e.g., Kitsunekko) to reduce dependency on upstream git repos.
-- **Metadata Bridges**: Crosswalk services to resolve IDs across various anime databases (TVDB, MAL, AniList, etc.).
-- **Static Surfaces**: Documentation and search interfaces for transcript corpuses.
-
 *Note: These examples are illustrative; the system is designed to evolve as new language learning workflows are identified.*
+
+## Repo structure
+
+See [docs/monorepo-philosophy.md](docs/monorepo-philosophy.md) for the full rationale if needed.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the durable ASR/config/backend boundaries.
+
+**Documentation Strategy:**
+- **User/Developer facing content** (guides, setup, references) lives in `site/src/content/docs/`. This is the default place for documenting new features.
+    - NOTE! This uses Astro Starlight, so the page title in frontmatter is shown by default. Only write headings at H2 or below, don't write a page title as this is redundant.
+- **Internal design/architectural notes** live in `docs/`.
+
+```text
+.
+├── compose.yaml           # Docker orchestration for the full service stack
+├── AGENTS.md              # Agent guidelines and repo map
+├── docs/                  # Internal design & architectural notes
+├── site/                  # User-facing documentation site (Astro/Starlight)
+│   └── Caddyfile          # Unified API Gateway & Static site config
+├── packages/              # Shared libraries (workspace members)
+│   ├── core/              # Shared contracts, config, and transcript formats
+│   ├── data/              # DuckLake compiler and local operator workbench
+│   ├── frontend/          # CLI entrypoints and TUI surfaces
+│   └── media/             # Media processing utilities
+├── envs/                  # Platform-specific runtimes & dependencies
+│   ├── apple/             # MacBook workflows (MLX, Metal, local ASR/VAD)
+│   ├── inference/         # Dedicated inference runtimes
+│   └── services/          # Service deployments (Kitsunekko API, etc.)
+├── examples/              # Fixtures and sample media for smoke-testing
+├── input/                 # Local input storage
+├── output/                # Local output storage
+├── scripts/               # Operational glue and experiments
+└── pyproject.toml         # Workspace coordination
+```
 
 ## Philosophy
 
@@ -28,6 +55,95 @@ Infrastructure and APIs that facilitate the tools and coordinate data:
     - Ensure all core abstractions have descriptive docstrings. (no need to comment every line though).
     - Explain _why_ key decisions were made
     - Ensure config has nontrivial examples
+
+### Resist sprawl
+
+This monorepo already has a significant public API surface to maintain. Avoid adding new contracts unless strongly user-requested or clearly necessary.
+- **Services**: Ensure that each service has a clear semantic use.
+    - Do not create services merely to query internal bronze/silver data; prefer data-layer assets, durable artifacts, or embedded query engines. New human-facing APIs should normally expose gold contracts.
+    - Ex. If there is a new data source (e.g. a new subtitle repository for subtitle service, a new crosswalk), see how you can (ideally) add new parameters or (at most) a new endpoint before adding a brand-new service.
+- **CLI/Control Surfaces**: Avoid dedicated commands or endpoints for every campaign, stage, or recipe. Prefer a small set of general operations (e.g., plan/run/inspect) driven by identifiers.
+- **API Design**: New top-level routes/commands must represent a distinct operation that existing ones cannot express. Intermediate-stage execution should be a parameter, debug option, or library, not a command.
+- **Escape Hatches**: Interactive tools or experiments may temporarily read lower layers or perform direct transformations, but these must be visible and promoted to the data layer if they become stable/reused.
+- **Legacy**: Existing narrow mirrors and metadata bridges may remain until a real migration benefit justifies the disruption.
+
+### Architectural decision protocol
+
+Consequential choices require informed sign-off. Before treating
+a high-level choice as settled, explain:
+
+1. the concrete user/domain problem being solved;
+2. the proposed end-to-end data flow and ownership boundaries;
+3. where each unit of computation executes;
+4. which durable artifacts it produces and where they live;
+5. how later steps query, join, or consume those artifacts;
+6. operational and maintenance costs;
+7. credible alternatives and why the recommendation wins; and
+8. which conclusions come from measured corpus results versus assumptions.
+
+Lead with the recommendation and work backward from the problem. Clearly label
+repository facts, existing proposals, new recommendations, and approved
+decisions. Proposed plan documents provide context; they are not automatically
+approved architecture. Do not respond to disagreement by reflexively abandoning
+a recommendation, but also work to understand the user need that prompted the disagreement before replying. Reassess the measurements, repository facts, and constraints, then defend the recommendation concretely or explain
+why another choice better suits the user's needs. The user is learning parts of this stack, so
+define framework concepts in terms of this media pipeline before relying on
+framework jargon.
+
+### Forbidden umbrella terminology
+
+The word `evidence` is forbidden in this repository. Do not use it in prose,
+documentation, plans, comments, docstrings, prompts, identifiers, filenames,
+schemas, API fields, UI labels, commit messages, or user-facing replies. This
+ban is case-insensitive and includes compounds such as `proposal_evidence` and
+`evidence-bound`. If the strict logical meaning is genuinely intended, use
+`proof` instead and state the premises and conclusion.
+
+Name the actual concept according to its role:
+
+- values read directly from a manifest are **source facts**;
+- versioned records of source facts are **observations**;
+- derived categorical inputs such as parsed episode tokens are **signals**;
+- quantitative outputs such as script ratios or timing errors are **metrics**;
+- hashes, revisions, and source identifiers are **provenance**;
+- failure or warning explanations are **diagnostics**;
+- files, logs, plots, and datasets are **artifacts**;
+- direct computation outputs are **results**;
+- conclusions drawn from measurements or review are **findings**;
+- information shown to a human is **review material**;
+- acceptance rules are **criteria**; and
+- decisions tied to exact fingerprints are **revision-bound** or
+  **input-pinned**.
+
+Do not evade this rule by replacing the banned word with another vague umbrella
+term. For example, parser outputs are not generic "context" when `signals` is
+accurate; a materialization ID is `provenance`, not a diagnostic; an aligned SRT
+is an `artifact`, not a metric; and a UI drill-down should be labelled
+`Details`, `Diagnostics`, `Candidates`, `Comparison`, `Artifacts`, or `Run logs`
+according to what it actually contains.
+
+The only allowed quotations are this policy, the design document that defines
+the migration, and checksum-protected historical migrations that cannot be
+edited. The tracked pre-commit hook enforces the source-code boundary. See
+`docs/terminology-taxonomy-and-enforcement.md` for the full taxonomy and cleanup
+plan.
+
+## Data Lake
+
+The system uses a medallion architecture (Bronze $\rightarrow$ Silver $\rightarrow$ Gold) for data processing and management. Most transformations and data compilation should occur within this layer. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for technical details on the storage stack and orchestration.
+
+When asked to inspect, export, or analyze a DEV Dagster/DuckLake asset or
+materialization, use the
+[inspect-ducklake skill](.agents/skills/inspect-ducklake/SKILL.md). Resolve the
+exact or latest durable DuckLake snapshot with its bundled read-only exporter.
+Never scrape or paginate the operator UI as a data-export fallback.
+
+## Git workflow
+
+- Never create or rename a branch to a name containing `/`. Use flat,
+  hyphenated branch names such as `subtitle-alignment-research`. Slash-delimited
+  branch names are prohibited in this repository because they are ambiguous
+  with working-directory paths and break local tooling.
 
 ## File Size Limits — This Must Never Be Allowed to Happen Again™
 
@@ -68,20 +184,51 @@ failure, not a harmless style nit.**
 The services are typically deployed as a suite of containers coordinated by `compose.yaml` in the root.
 
 - **Remote infrastructure operations are user-owned.** Under no circumstances
-  should an agent proactively SSH into any machine, connect to a hypervisor or
-  guest, inspect remote containers, alter remote infrastructure, or
-  deploy/restart services. Do not interpret requests to investigate, fix,
-  remediate, or verify a service as authorization for remote infrastructure
-  access or deployment. Prepare and validate the repository changes locally,
-  then give the user the commands or handoff needed to perform remote
-  infrastructure operations themselves. This remains in force until these
-  repository instructions explicitly say otherwise.
+  should an agent proactively open an administrative shell/session on a host,
+  hypervisor, or guest; inspect remote containers; alter host or cluster
+  configuration; or deploy/restart services. Do not interpret requests to
+  investigate, fix, remediate, or verify an application as authorization for
+  host-level access or deployment. Prepare and validate repository changes
+  locally, then give the user the commands or handoff needed for remote
+  infrastructure operations. Connecting to a configured application or data
+  service is not, by itself, a host-level infrastructure operation; the
+  data-plane rules below govern those connections.
 - **User-requested API smoke tests are allowed.** Agents may make
   application-level HTTP/API requests to user-specified service URLs for client
   validation and smoke testing when the user explicitly asks for that test.
   Keep these calls limited to the documented API behavior under test, and do
   not treat API access as permission to inspect or operate the remote host
   itself.
+- **Configured data-plane reads are allowed.** Agents may use repository clients
+  and configured credentials to perform non-mutating reads against development
+  or production application data services when relevant to the task. This
+  includes PostgreSQL connection checks and `SELECT`/catalog queries, and
+  S3-compatible `LIST`, `HEAD`, and `GET` operations. These reads do not require
+  separate live-smoke authorization merely because the service runs on another
+  machine. Continue to avoid sensitive system catalogs, credential tables,
+  private user data unrelated to the task, and unnecessarily broad result
+  dumps. Use bounded projections/counts instead of `SELECT *` when output could
+  expose sensitive or voluminous data.
+- **Additive development migrations are allowed.** When implementation work
+  includes a schema change, agents may run checked-in, non-destructive migrations
+  against the configured development database. Allowed operations include
+  creating new application tables, indexes, constraints, and adding compatible
+  columns. Review the rendered migration first. Production migrations always
+  remain user-owned unless the user separately and explicitly authorizes that
+  exact production migration.
+- **Remote data writes are not implied.** Read access and additive development
+  migration permission do not authorize application `INSERT`, `UPDATE`,
+  `DELETE`, `COPY FROM`, object upload/overwrite/delete, remote file edits,
+  destructive or compatibility-breaking DDL, or test fixtures written to a
+  shared database. `DROP`, `TRUNCATE`, destructive `ALTER`, database resets, and
+  bulk rewrites require separate explicit authorization even in development.
+  Database/role/principal creation, grants, credential creation/rotation, and
+  secret inspection remain user-owned. Passing an existing configured secret
+  opaquely to its intended client is allowed; printing, parsing for disclosure,
+  or modifying the secret is not.
+- These remote-data restrictions do not prohibit ordinary edits to repository
+  files when the user asks to build or change code; they govern external data
+  services and remote machine state.
 - **Local Docker is allowed.** Agents may build, run, restart, inspect, and test
   containers on the current development machine when useful for validation.
   Keep local validation clearly distinguished from remote deployment.
@@ -90,34 +237,6 @@ The services are typically deployed as a suite of containers coordinated by `com
 - **Gateway**: The `site/Caddyfile` defines the unified routing. It serves the static docsite and reverse-proxies `/api/v1/*` requests to the backend services (e.g., `anime-crosswalk` and `kitsunekko-subtitles`).
 
 
-## Repo structure
-
-See [docs/monorepo-philosophy.md](docs/monorepo-philosophy.md) for the full rationale if needed.
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the durable ASR/config/backend boundaries.
-
-**Documentation Strategy:**
-- **User/Developer facing content** (guides, setup, references) lives in `site/src/content/docs/`. This is the default place for documenting new features.
-    - NOTE! This uses Astro Starlight, so the page title in frontmatter is shown by default. Only write headings at H2 or below, don't write a page title as this is redundant.
-- **Internal design/architectural notes** live in `docs/`.
-
-```text
-.
-├── compose.yaml           # Docker orchestration for the full service stack
-├── AGENTS.md              # Agent guidelines and repo map
-├── docs/                  # Internal design & architectural notes
-├── site/                  # User-facing documentation site (Astro/Starlight)
-│   └── Caddyfile          # Unified API Gateway & Static site config
-├── packages/              # Shared libraries (workspace members)
-│   ├── core/              # Shared contracts, config, and transcript formats
-│   └── frontend/          # CLI entrypoints and TUI surfaces
-├── envs/                  # Platform-specific runtimes & dependencies
-│   ├── apple/             # MacBook workflows (MLX, Metal, local ASR/VAD)
-│   ├── cuda/              # Nvidia workstation workflows (CUDA ASR)
-│   └── services/          # Service deployments (Kitsunekko API, etc.)
-├── examples/              # Fixtures and sample media for smoke-testing
-└── pyproject.toml         # Workspace coordination
-```
-
 ---
 ## Toolchain
 
@@ -125,7 +244,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the durable ASR/config/back
 
 This repo uses Astral uv.
 
-**Always work from an environment that provides the dependencies required for your task.** 
+**Always work from an environment that provides the dependencies required for your task.**
 
 #### 1. Lightweight / Frontend Tools
 For TUI surfaces, simple file management, or subtitle alignment, use the `packages/frontend` environment. These tools do not require ML dependencies.
@@ -219,7 +338,14 @@ service-specific override first, then fall back to `[services].root_url` in
 `~/.config/ja-media-toolkit/config.toml`. See
 [site/src/content/docs/setup/config.md](site/src/content/docs/setup/config.md).
 
+When the user asks to test against "live", "prod", "remote", "LAN", or
+"tailnet", use the
+[live-service-smoke skill](.agents/skills/live-service-smoke/SKILL.md). Assume
+the user has already configured the tailnet service root in system config unless
+config discovery proves otherwise. Use SDK clients or derive curl bases from
+config at runtime; never hard-code private service URLs into repo files.
+
 When adding or substantially changing a service, use
 [the add-service skill](.agents/skills/add-service/SKILL.md). It covers the
 complete vertical slice: runtime, core SDK, tests, Compose/Caddy integration,
-`/healthz`, `/metrics`, Prometheus discovery, and docsite updates.
+/healthz, /metrics, Prometheus discovery, and docsite updates.

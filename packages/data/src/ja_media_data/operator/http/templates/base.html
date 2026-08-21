@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="htmx-config" content='{"defaultTimeout":0,"noSwap":[204,304,"4xx","5xx"],"extensions":"sse"}'>
+    <title>{% block title %}Operator workbench{% endblock %} :: ja-data</title>
+    <link rel="stylesheet" href="{{ url_for('operator-static', path='/operator.css') }}">
+    <script src="{{ url_for('operator-static', path='/vendor/htmx.min.js') }}" defer></script>
+    <script src="{{ url_for('operator-static', path='/vendor/hx-sse.min.js') }}" defer></script>
+    <script src="{{ url_for('operator-static', path='/operator.js') }}" defer></script>
+  </head>
+  <body>
+    <div class="page-shell">
+      <div class="site-banner" role="img" aria-label="Fansub workstation at night">
+        <div class="banner-title">
+          <strong>JA-MEDIA OPERATOR</strong>
+          <span>lakehouse compilation &amp; inspection console</span>
+        </div>
+      </div>
+      <nav class="utility-nav" aria-label="Primary">
+        <a href="/operator">Campaign Index</a>
+        <a href="/operator/resolution-review">Resolution Review</a>
+        <a href="/api/operator/v1/recipes">Recipe DB</a>
+        <a href="/operator/runs">Run Log</a>
+        <span>mode: READ ONLY</span>
+      </nav>
+      {% block header %}{% endblock %}
+      <main>{% block content %}{% endblock %}</main>
+      <footer>ja-data operator // localhost console // generated state is never stored in the UI</footer>
+    </div>
+  </body>
+</html>

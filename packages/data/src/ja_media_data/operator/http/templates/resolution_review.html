@@ -1,0 +1,17 @@
+{% extends 'base.html' %}
+{% block title %}Resolution Review{% endblock %}
+{% block header %}
+<div class="breadcrumb"><a href="/operator">Campaign Index</a> » Resolution Review</div>
+<header class="page-header">
+  <h1>Episode Resolution Review</h1>
+  <p>Investigate rejected captures, inspect the proposed crosswalk, then accept or reject it.</p>
+</header>
+{% endblock %}
+{% block content %}
+{% if review_mode == 'local' %}<div class="notice local-preview"><strong>LOCAL PREVIEW:</strong> Accept completes the agent lifecycle but writes no control rows.</div>{% else %}<div class="notice"><strong>{{ review_mode|upper }} WRITEBACK:</strong> Accept atomically promotes the reviewed crosswalk into durable control rows.</div>{% endif %}
+<div class="resolution-layout">
+  {% include '_resolution_series_rail.html' %}
+  {% if series_view == 'resolved' %}{% include '_resolution_resolved_workspace.html' %}{% else %}{% include '_resolution_workspace.html' %}{% endif %}
+</div>
+{% include '_resolution_history.html' %}
+{% endblock %}

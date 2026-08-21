@@ -1,0 +1,38 @@
+{% extends 'base.html' %}
+{% block title %}Run Log{% endblock %}
+{% block header %}
+<div class="breadcrumb"><a href="/operator">Operator Home</a> » Run Log</div>
+<header class="page-header campaign-header">
+  <div><h1>Run Log</h1><p>Latest durable compiler invocations; newest activity first.</p></div>
+  <table class="context-table">
+    <tr><th>shown</th><td>{{ runs.items | length }} / {{ runs.total }}</td></tr>
+    <tr><th>source</th><td><a href="/api/operator/v1/runs">JSON API</a></td></tr>
+  </table>
+</header>
+{% endblock %}
+{% block content %}
+<section class="forum-panel" aria-labelledby="runs-heading">
+  <h2 id="runs-heading">Pipeline Run History</h2>
+  {% if runs.items %}
+  <table class="data-table run-table">
+    <thead><tr><th>Run</th><th>Started</th><th>Status</th><th>Dagster job</th><th>Steps</th><th>Item progress</th><th>Snapshot</th><th>Elapsed</th><th>Failure</th></tr></thead>
+    <tbody>
+      {% for run in runs.items %}
+      <tr>
+        <td><a href="/operator/runs/{{ run.run_id }}"><strong>Run #{{ run.run_number }}</strong></a></td>
+        <td class="nowrap">{{ run.started_at.strftime('%Y-%m-%d %H:%M:%S') }} UTC</td>
+        <td><span class="status {{ run.status }}">{{ run.status }}</span></td>
+        <td><strong>{{ run.target }}</strong><br><a href="{{ run.dagster_url }}">Dagster detail</a></td>
+        <td>{% for step in run.steps %}<div><strong>{{ step.ordinal }} {{ step.stage }}</strong> · <span class="status {{ step.disposition }}">{{ step.disposition }}</span></div>{% endfor %}</td>
+        <td class="number">{% if run.items_total is not none %}{{ run.items_succeeded }} / {{ run.items_total }} advanced{% else %}—{% endif %}</td>
+        <td class="number">{{ run.terminal_snapshot_id or '—' }}</td>
+        <td class="number">{% if run.duration_ms is not none %}{{ run.duration_ms }} ms{% else %}—{% endif %}</td>
+        <td class="error">{{ run.error or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<div class="empty-state">No compiler runs have been recorded.</div>{% endif %}
+</section>
+{% if runs.total > runs.items | length %}<div class="notice">Showing the latest {{ runs.items | length }} of {{ runs.total }} runs. Use the JSON API for bounded pagination.</div>{% endif %}
+{% endblock %}

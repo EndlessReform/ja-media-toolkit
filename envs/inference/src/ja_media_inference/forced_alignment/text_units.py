@@ -173,7 +173,7 @@ def segment_group_with_nagisa(
     """Segment a text group with nagisa while preserving group membership.
 
     Japanese punctuation is skipped by default because Qwen predicts it as
-    boundary evidence rather than durable spoken material. Callers that need
+    boundary markers rather than durable spoken material. Callers that need
     karaoke-style punctuation handling can pass an empty ``exclude_postags`` and
     decide how to merge or display those tokens downstream.
     """

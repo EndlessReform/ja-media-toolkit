@@ -1,0 +1,21 @@
+<hx-partial hx-target="#agent-status" hx-swap="innerHTML"><span class="status awaiting_acceptance">AWAITING REVIEW</span> The agent is paused.</hx-partial>
+<hx-partial hx-target="#proposal" hx-swap="innerHTML">
+  <div class="proposal-inline-home"></div>
+  <section class="proposal-card">
+    <div class="proposal-title"><h3>Proposed Crosswalk</h3><button type="button" data-proposal-expand>EXPAND ↗</button></div>
+    <p>{{ proposal.summary }}</p>
+    <div class="table-scroll"><table class="data-table"><thead><tr><th>Capture</th><th>Current</th><th>Decision</th><th>Proposed</th><th>Episode</th><th>Subtitle check</th><th>Rationale</th></tr></thead><tbody>
+      {% for row in proposal.rows %}<tr><td><strong>{{ row.filename }}</strong><br><code>{{ row.capture_id }}</code></td><td><a class="anilist-reference" href="{{ row.current_anilist.url }}" target="_blank" rel="noopener noreferrer" title="{{ row.current_anilist.tooltip }}"><strong>{{ row.current_anilist.title }}</strong><br><code>AL {{ row.current_anilist.anilist_id }} ↗</code></a></td><td>{{ row.decision }}</td><td>{% if row.proposed_anilist %}<a class="anilist-reference" href="{{ row.proposed_anilist.url }}" target="_blank" rel="noopener noreferrer" title="{{ row.proposed_anilist.tooltip }}"><strong>{{ row.proposed_anilist.title }}</strong><br><code>AL {{ row.proposed_anilist.anilist_id }} ↗</code></a>{% else %}<span title="This capture will not enter the canonical episode index.">Not indexed</span>{% endif %}</td><td>{{ row.destination_episode or '—' }}</td><td><span class="comparison-status {{ row.subtitle_comparison or 'not_checked' }}">{% if row.subtitle_comparison == 'compared' %}COMPARED{% elif row.subtitle_comparison == 'reference_unavailable' %}UNVERIFIED · NO REFERENCE{% elif row.subtitle_comparison == 'service_unavailable' %}UNVERIFIED · SERVICE UNAVAILABLE{% elif row.subtitle_comparison == 'not_checked' %}NOT CHECKED{% else %}NOT REQUIRED{% endif %}</span></td><td>{{ row.rationale }}</td></tr>{% endfor %}
+    </tbody></table></div>
+    <div class="proposal-actions">
+      <form hx-post="/operator/resolution-review/paused/{{ token }}/accept" hx-target="#agent-events" hx-swap="beforeend" hx-disable="find button" hx-confirm="{% if review_mode == 'local' %}Complete this local preview?{% else %}Write this entire crosswalk to {{ review_mode|upper }} control storage?{% endif %}"><button type="submit">{% if review_mode == 'local' %}ACCEPT LOCAL PREVIEW{% else %}ACCEPT INTO {{ review_mode|upper }}{% endif %}</button></form>
+      <form hx-post="/operator/resolution-review/paused/{{ token }}/reject" hx-target="#agent-events" hx-swap="beforeend" hx-disable="find button, find input"><label>Reject reason <input name="reason" required></label><button type="submit">REJECT &amp; REVISE</button></form>
+    </div>
+  </section>
+  <dialog class="proposal-dialog" aria-label="Expanded proposed crosswalk">
+    <div class="proposal-dialog-frame">
+      <div class="proposal-dialog-toolbar"><strong>Proposed Crosswalk</strong><button type="button" data-proposal-close>CLOSE ×</button></div>
+      <div class="proposal-dialog-slot"></div>
+    </div>
+  </dialog>
+</hx-partial>

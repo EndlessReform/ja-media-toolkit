@@ -10,6 +10,8 @@ from ja_media_core.audio_library import (
     MaterializationPlan,
     PORTABLE_AAC_V1,
     SourceMediaProbe,
+    SubtitleArtifactRecord,
+    SubtitleStreamProbe,
 )
 from ja_media_frontend.audio_library.discovery import identity_search_query
 from ja_media_frontend.audio_library.manifest import load_manifest
@@ -74,11 +76,11 @@ def test_execution_checkpoints_manifest_and_resumes(monkeypatch, tmp_path: Path)
         return ArtifactRecord(destination.name, 5, 1000, "aac", 128000, 2, 48000, "hash")
 
     monkeypatch.setattr(
-        "ja_media_frontend.audio_library.wizard.materialize_episode",
+        "ja_media_frontend.audio_library.executor.materialize_episode",
         fake_materialize,
     )
     monkeypatch.setattr(
-        "ja_media_frontend.audio_library.wizard.verify_audio_artifact",
+        "ja_media_frontend.audio_library.executor.verify_audio_artifact",
         lambda path, profile: ArtifactRecord(path.name, 5, 1000, "aac", 128000, 2, 48000),
     )
 
@@ -89,6 +91,129 @@ def test_execution_checkpoints_manifest_and_resumes(monkeypatch, tmp_path: Path)
     assert first.created == ("S01E001.m4a",)
     assert second.skipped == ("S01E001.m4a",)
     assert manifest.episodes[0].source_relative_path == "Episode 01.mkv"
+
+
+def test_execution_adopts_existing_audio_and_backfills_subtitles(
+    monkeypatch, tmp_path: Path
+) -> None:
+    source_root = tmp_path / "source"
+    destination_root = tmp_path / "destination"
+    source_root.mkdir()
+    destination_root.mkdir()
+    plan = _plan(source_root, destination_root)
+    subtitle_stream = SubtitleStreamProbe(3, 0, "ass", "eng", "English", True)
+    mapping = EpisodeMapping(
+        "1",
+        plan.mappings[0].source,
+        plan.mappings[0].stream,
+        (subtitle_stream,),
+    )
+    plan = MaterializationPlan(
+        plan.source_root,
+        plan.destination_root,
+        plan.series,
+        (mapping,),
+        plan.profile,
+    )
+    series_dir = plan.series_directory
+    series_dir.mkdir(parents=True)
+    (series_dir / "S01E001.m4a").write_bytes(b"audio")
+
+    def fail_materialize(mapping, destination, series, profile):
+        raise AssertionError("existing audio should be adopted, not overwritten")
+
+    monkeypatch.setattr(
+        "ja_media_frontend.audio_library.executor.materialize_episode",
+        fail_materialize,
+    )
+    monkeypatch.setattr(
+        "ja_media_frontend.audio_library.executor.verify_audio_artifact",
+        lambda path, profile: ArtifactRecord(
+            path.name, 5, 1000, "aac", 128000, 2, 48000, "hash"
+        ),
+    )
+    monkeypatch.setattr(
+        "ja_media_frontend.audio_library.executor.materialize_episode_subtitles",
+        lambda *args, **kwargs: (
+            SubtitleArtifactRecord(
+                "stream-3",
+                "_subs/S01E001.stream-3.eng.srt",
+                10,
+                "ass",
+                "eng",
+                "English",
+                True,
+                3,
+                0,
+                "subhash",
+            ),
+        ),
+    )
+
+    summary = execute_ingest_plan(plan)
+    manifest = load_manifest(plan.series_directory / ".ja-media.json")
+
+    assert summary.created == ()
+    assert summary.skipped == ("S01E001.m4a",)
+    assert manifest.episodes[0].artifact.relative_path == "S01E001.m4a"
+    assert manifest.episodes[0].subtitles[0].subtitle_id == "stream-3"
+
+
+def test_execution_materializes_new_delta_after_skipping_existing(
+    monkeypatch, tmp_path: Path
+) -> None:
+    source_root = tmp_path / "source"
+    destination_root = tmp_path / "destination"
+    source_root.mkdir()
+    destination_root.mkdir()
+    first = _plan(source_root, destination_root).mappings[0]
+    second_path = source_root / "Episode 02.mkv"
+    second_path.touch()
+    second_source = SourceMediaProbe(
+        second_path,
+        duration_ms=1000,
+        size_bytes=second_path.stat().st_size,
+        mtime_ns=second_path.stat().st_mtime_ns,
+        audio_streams=first.source.audio_streams,
+    )
+    plan = _plan(source_root, destination_root)
+    plan = MaterializationPlan(
+        plan.source_root,
+        plan.destination_root,
+        plan.series,
+        (first, EpisodeMapping("2", second_source, first.stream)),
+        plan.profile,
+    )
+
+    def fake_materialize(mapping, destination, series, profile):
+        destination.write_bytes(b"audio")
+        return ArtifactRecord(destination.name, 5, 1000, "aac", 128000, 2, 48000, "hash")
+
+    monkeypatch.setattr(
+        "ja_media_frontend.audio_library.executor.materialize_episode",
+        fake_materialize,
+    )
+    monkeypatch.setattr(
+        "ja_media_frontend.audio_library.executor.verify_audio_artifact",
+        lambda path, profile: ArtifactRecord(
+            path.name, 5, 1000, "aac", 128000, 2, 48000, "hash"
+        ),
+    )
+
+    first_summary = execute_ingest_plan(
+        MaterializationPlan(
+            plan.source_root,
+            plan.destination_root,
+            plan.series,
+            (first,),
+            plan.profile,
+        )
+    )
+    second_summary = execute_ingest_plan(plan)
+
+    assert first_summary.created == ("S01E001.m4a",)
+    assert second_summary.skipped == ("S01E001.m4a",)
+    assert second_summary.created == ("S01E002.m4a",)
 
 
 def test_identity_search_query_climbs_past_bare_season_directories() -> None:

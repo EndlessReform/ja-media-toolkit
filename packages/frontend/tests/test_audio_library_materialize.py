@@ -10,11 +10,14 @@ from ja_media_core.audio_library import (
     EpisodeMapping,
     PORTABLE_AAC_V1,
     SourceMediaProbe,
+    SubtitleStreamProbe,
 )
 from ja_media_frontend.audio_library.materialize import (
     artifact_filename,
     build_ffmpeg_command,
+    build_subtitle_extraction_command,
     materialize_episode,
+    subtitle_filename,
 )
 
 
@@ -72,6 +75,21 @@ def test_artifact_filename_requires_ordinary_episode_key() -> None:
             pass
         else:
             raise AssertionError(f"{unsupported} should require a future filename policy")
+
+
+def test_subtitle_filename_and_command_use_global_stream_index() -> None:
+    audio = AudioStreamProbe(1, 0, "flac", "jpn", None, 2, 48_000, True)
+    subtitle = SubtitleStreamProbe(4, 1, "ass", "eng-US", "English", False)
+    source = SourceMediaProbe(Path("/source/ep.mkv"), 1000, 2, 3, (audio,), (subtitle,))
+    mapping = EpisodeMapping("7", source, audio, (subtitle,))
+
+    command = build_subtitle_extraction_command(
+        mapping, subtitle, Path("/output/S01E007.stream-4.eng-US.srt")
+    )
+
+    assert subtitle_filename("7", subtitle) == "S01E007.stream-4.eng-us.srt"
+    assert command[command.index("-map") + 1] == "0:4"
+    assert command[command.index("-c:s") + 1] == "subrip"
 
 
 def test_materialize_episode_round_trip_with_ffmpeg(tmp_path: Path) -> None:

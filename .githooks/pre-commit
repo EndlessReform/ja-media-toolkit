@@ -1,0 +1,50 @@
+#!/bin/sh
+
+set -eu
+
+# Assemble the forbidden token so this enforcement source does not contain it.
+forbidden=$(printf '\145\166\151\144\145\156\143\145')
+violations=$(mktemp "${TMPDIR:-/tmp}/ja-media-terminology.XXXXXX")
+trap 'rm -f "$violations"' EXIT HUP INT TERM
+
+is_source_path() {
+    case "$1" in
+        AGENTS.md|docs/*)
+            return 1
+            ;;
+        packages/data/migrations/ducklake/001_identity.sql|\
+        packages/data/migrations/ducklake/002_identity_views.sql|\
+        packages/data/migrations/ducklake/003_phase_d_subtitle_lid.sql|\
+        packages/data/migrations/ducklake/009_resolution_context.sql)
+            return 1
+            ;;
+        *.py|*.pyi|*.sh|*.bash|*.zsh|*.fish|*.js|*.mjs|*.cjs|*.jsx|\
+        *.ts|*.tsx|*.sql|*.toml|*.yaml|*.yml|*.json|*.jsonl|*.html|\
+        *.jinja|*.jinja2|*.css|*.scss|*.rs|*.go|*.c|*.h|*.cpp|*.hpp|\
+        *.swift|*.kt|*.kts|*.java|*.rb|*.php|*.lua|*.r|*.R|*.typ|\
+        *.graphql|*.gql|*.ini|*.cfg|*.conf|*.env|*.env.*|Dockerfile*|\
+        Caddyfile*|Makefile*|.githooks/*|scripts/*|deploy/data/dev/control)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+git ls-files -z | while IFS= read -r -d '' path; do
+    is_source_path "$path" || continue
+    if printf '%s\n' "$path" | grep -Fqi "$forbidden"; then
+        printf '%s\n' "forbidden terminology in source path: $path" >>"$violations"
+        continue
+    fi
+    if git show ":$path" 2>/dev/null | grep -I -Fqi "$forbidden"; then
+        printf '%s\n' "forbidden terminology in staged source: $path" >>"$violations"
+    fi
+done
+
+if [ -s "$violations" ]; then
+    cat "$violations" >&2
+    printf '%s\n' "commit rejected: replace '$forbidden' with the precise domain term" >&2
+    exit 1
+fi

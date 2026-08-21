@@ -1,0 +1,26 @@
+<div class="stage-results" data-stage="{{ page.stage }}">
+  <div class="stage-detail-head"><h3>{{ page.label }}</h3><span>rows {{ page.offset + 1 if page.items else 0 }}–{{ page.offset + page.items | length }} / {{ page.total }}</span></div>
+  {% if page.items %}
+    {% if page.stage == 'episode_resolution' %}
+    <table class="data-table issue-table"><thead><tr><th>Kind</th><th>Series</th><th>Capture</th><th>Manifest</th><th>Details</th></tr></thead><tbody>
+      {% for item in page.items %}<tr><td><span class="status quarantined">{{ item.kind }}</span></td><td><strong>{% if item.series_url %}<a href="{{ item.series_url }}" target="_blank" rel="noreferrer">{{ item.namespace }}:{{ item.series_id }}</a>{% else %}{{ item.namespace }}:{{ item.series_id }}{% endif %}</strong></td><td><code>{{ item.capture_id }}</code></td><td><code>{{ item.manifest_key }}</code></td><td><code>{{ item.details_json }}</code></td></tr>{% endfor %}
+    </tbody></table>
+    {% elif page.stage == 'audio_eligibility' %}
+    <table class="data-table stage-result-table"><thead><tr><th>Status</th><th>Series</th><th>Capture</th><th>Decision</th><th>Selected</th><th>Available tracks</th><th>Manifest</th></tr></thead><tbody>
+      {% for item in page.items %}<tr><td><span class="status {{ 'materialized' if item.status == 'eligible' else 'quarantined' }}">{{ item.status }}</span></td><td><strong>{% if item.series_url %}<a href="{{ item.series_url }}" target="_blank" rel="noreferrer">{{ item.namespace }}:{{ item.series_id }}</a>{% else %}{{ item.namespace }}:{{ item.series_id }}{% endif %}</strong></td><td><code>{{ item.capture_id }}</code></td><td><code>{{ item.reason }}</code></td><td>{% if item.selected_stream_index is not none %}stream {{ item.selected_stream_index }} · {{ item.selected_language or 'undeclared' }}{% else %}—{% endif %}</td><td><code>{{ item.available_tracks_json }}</code></td><td><code>{{ item.manifest_url }}</code></td></tr>{% endfor %}
+    </tbody></table>
+    {% elif page.stage == 'accepted_bindings' %}
+    <table class="data-table stage-result-table"><thead><tr><th>Locator</th><th>Capture</th><th>Proposal</th><th>Acceptance</th><th>Method / Policy</th><th>Computed</th><th>Manifest</th></tr></thead><tbody>
+      {% for item in page.items %}<tr><td><strong>{% if item.series_url %}<a href="{{ item.series_url }}" target="_blank" rel="noreferrer">{{ item.namespace }}:{{ item.series_id }}</a>{% else %}{{ item.namespace }}:{{ item.series_id }}{% endif %}:{{ item.episode.zfill(2) if item.episode.isdecimal() else item.episode }}</strong></td><td><code>{{ item.capture_id }}</code></td><td><code>{{ item.proposal_id }}</code></td><td><code>{{ item.acceptance_id }}</code></td><td>{{ item.method }}<br><code>{{ item.policy_version }}</code></td><td class="nowrap">{{ item.computed_at.strftime('%Y-%m-%d %H:%M') }}</td><td><code>{{ item.manifest_url }}</code></td></tr>{% endfor %}
+    </tbody></table>
+    {% else %}
+    <table class="data-table stage-result-table"><thead><tr><th>Locator</th><th>Capture</th><th>Canonical ID</th><th>Binding Source</th><th>Computed</th><th>Manifest</th></tr></thead><tbody>
+      {% for item in page.items %}<tr><td><strong>{% if item.series_url %}<a href="{{ item.series_url }}" target="_blank" rel="noreferrer">{{ item.namespace }}:{{ item.series_id }}</a>{% else %}{{ item.namespace }}:{{ item.series_id }}{% endif %}:{{ item.episode.zfill(2) if item.episode.isdecimal() else item.episode }}</strong></td><td><code>{{ item.capture_id }}</code></td><td><code>{{ item.canonical_id }}</code></td><td>{{ item.binding_source }}</td><td class="nowrap">{{ item.computed_at.strftime('%Y-%m-%d %H:%M') }}</td><td><code>{{ item.manifest_url }}</code></td></tr>{% endfor %}
+    </tbody></table>
+    {% endif %}
+  {% else %}<div class="empty-state">No results in this stage for the active scope.</div>{% endif %}
+  <nav class="pager" aria-label="Stage result pages"><span>page size {{ page.limit }}</span>
+    {% if page.offset > 0 %}<a href="/operator/campaigns/{{ campaign_id }}/stages/{{ page.stage }}?offset={{ [page.offset - page.limit, 0] | max }}&amp;limit={{ page.limit }}" hx-get="/operator/campaigns/{{ campaign_id }}/stages/{{ page.stage }}?offset={{ [page.offset - page.limit, 0] | max }}&amp;limit={{ page.limit }}" hx-target="#stage-inspector" hx-swap="innerHTML" hx-include="#series-id, #view-run-id">[ ◀ PREV ]</a>{% endif %}
+    {% if page.offset + page.items | length < page.total %}<a href="/operator/campaigns/{{ campaign_id }}/stages/{{ page.stage }}?offset={{ page.offset + page.limit }}&amp;limit={{ page.limit }}" hx-get="/operator/campaigns/{{ campaign_id }}/stages/{{ page.stage }}?offset={{ page.offset + page.limit }}&amp;limit={{ page.limit }}" hx-target="#stage-inspector" hx-swap="innerHTML" hx-include="#series-id, #view-run-id">[ NEXT ▶ ]</a>{% endif %}
+  </nav>
+</div>

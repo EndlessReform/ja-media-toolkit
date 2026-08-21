@@ -1,0 +1,268 @@
+"""Execution semantics for the canonicalization collection assets."""
+
+from __future__ import annotations
+
+import dagster as dg
+
+from ja_media_data.orchestration.dagster.definitions import build_definitions
+from ja_media_data.orchestration.dagster.runtime import (
+    ProductRuntime,
+    hardcoded_runtime_resource,
+)
+from ja_media_data.products.lineage import MaterializationCatalog
+
+from dagster_test_support import (
+    _document,
+    FakeMetadata,
+    FakeOverrides,
+    FakeStore,
+    changed_documents,
+    documents,
+)
+
+
+def _definitions(repository, store, source):
+    runtime = ProductRuntime(
+        store=store,
+        metadata_provider=FakeMetadata(),
+        frozen_documents=source,
+        repository=repository,
+    )
+    resource = hardcoded_runtime_resource(runtime)
+    return build_definitions(product_runtime=resource, canary_runtime=resource)
+
+
+def _head(repository, target: str):
+    return MaterializationCatalog(repository.connection).current_head(target)
+
+
+def test_success_reuse_quarantine_and_competing_candidates(repository) -> None:
+    source = documents()
+    store = FakeStore(source)
+    defs = _definitions(repository, store, source)
+    instance = dg.DagsterInstance.ephemeral()
+
+    observed = defs.resolve_job_def("observe_campaign_inputs").execute_in_process(
+        instance=instance
+    )
+    first = defs.resolve_job_def("canonicalization_campaign").execute_in_process(
+        instance=instance
+    )
+    repeated = defs.resolve_job_def("canonicalization_campaign").execute_in_process(
+        instance=instance
+    )
+
+    assert observed.success and first.success and repeated.success
+    assert repository.connection.execute(
+        "SELECT count(*) FROM resolution_issues_auto"
+    ).fetchone() == (1,)
+    assert repository.connection.execute(
+        "SELECT count(*) FROM episode_binding_proposals"
+    ).fetchone() == (2,)
+    assert repository.connection.execute(
+        "SELECT audio_capture_id FROM canonical_episode_inputs"
+    ).fetchone() == ("capture-new",)
+    assert repository.connection.execute(
+        """SELECT audio_object_bucket, audio_object_key, audio_stream_index,
+                  audio_declared_language
+             FROM canonical_episode_inputs"""
+    ).fetchone() == (
+        "bronze",
+        "audio/anime/bronze/15451/new.japanese.ac3",
+        2,
+        "jpn",
+    )
+    dispositions = {
+        event.asset_key.to_user_string(): event.event_specific_data.materialization.metadata[
+            "write_disposition"
+        ].value
+        for event in repeated.get_asset_materialization_events()
+    }
+    assert set(dispositions.values()) == {"reused"}
+    assert all(
+        event.event_specific_data.materialization.tags.get("dagster/data_version")
+        for event in first.get_asset_materialization_events()
+    )
+
+
+def test_newest_ineligible_capture_falls_back_without_failing_corpus(repository) -> None:
+    source = documents()
+    newest = _document(
+        "capture-no-japanese",
+        "2026-04-01T00:00:00Z",
+        "etag-no-japanese",
+        "no-japanese",
+    )
+    newest.manifest["audio_tracks"] = [newest.manifest["audio_tracks"][0]]
+    source.append(newest)
+    result = _definitions(repository, FakeStore(source), source).resolve_job_def(
+        "canonicalization_campaign"
+    ).execute_in_process(instance=dg.DagsterInstance.ephemeral())
+
+    assert result.success
+    assert repository.connection.execute(
+        "SELECT audio_capture_id FROM canonical_episode_inputs"
+    ).fetchone() == ("capture-new",)
+    assert repository.connection.execute(
+        """SELECT status, reason FROM capture_audio_eligibility
+           WHERE capture_id = 'capture-no-japanese'"""
+    ).fetchone() == ("ineligible", "no_audio_track_declared_japanese")
+
+
+def test_ineligible_override_does_not_silently_fall_back(repository) -> None:
+    source = documents()
+    rejected = _document(
+        "capture-no-japanese",
+        "2026-04-01T00:00:00Z",
+        "etag-no-japanese",
+        "no-japanese",
+    )
+    rejected.manifest["audio_tracks"] = [rejected.manifest["audio_tracks"][0]]
+    source.append(rejected)
+    store = FakeStore(source)
+    overrides = FakeOverrides()
+    repository.override_repository = overrides
+    defs = _definitions(repository, store, source)
+    instance = dg.DagsterInstance.ephemeral()
+    assert defs.resolve_job_def("canonicalization_campaign").execute_in_process(
+        instance=instance
+    ).success
+
+    overrides.revision = 1
+    overrides.capture_id = "capture-no-japanese"
+    result = defs.resolve_job_def("canonicalization_from_acceptance").execute_in_process(
+        instance=instance
+    )
+
+    assert result.success
+    assert repository.connection.execute(
+        "SELECT count(*) FROM canonical_episode_inputs"
+    ).fetchone() == (0,)
+
+
+def test_changed_source_version_advances_resolver_outputs(repository) -> None:
+    source = documents()
+    instance = dg.DagsterInstance.ephemeral()
+    first_defs = _definitions(repository, FakeStore(source), source)
+    first_defs.resolve_job_def("observe_campaign_inputs").execute_in_process(
+        instance=instance
+    )
+    first = first_defs.resolve_job_def("canonicalization_campaign").execute_in_process(
+        instance=instance
+    )
+    old_fingerprint = _head(repository, "episode_resolution").fingerprint
+
+    changed = changed_documents(source)
+    second_defs = _definitions(repository, FakeStore(changed), changed)
+    observed = second_defs.resolve_job_def(
+        "observe_campaign_inputs"
+    ).execute_in_process(instance=instance)
+    second = second_defs.resolve_job_def(
+        "canonicalization_campaign"
+    ).execute_in_process(instance=instance)
+
+    assert first.success and observed.success and second.success
+    assert _head(repository, "episode_resolution").fingerprint != old_fingerprint
+    assert len(observed.get_asset_observation_events()) == 2
+
+
+def test_failed_canonical_keeps_old_head_after_acceptance(repository) -> None:
+    source = documents()
+    store = FakeStore(source)
+    instance = dg.DagsterInstance.ephemeral()
+    initial_defs = _definitions(repository, store, source)
+    initial = initial_defs.resolve_job_def(
+        "canonicalization_campaign"
+    ).execute_in_process(instance=instance)
+    assert initial.success
+    old_canonical = _head(repository, "canonical_inputs").materialization_id
+
+    changed = changed_documents(source)
+    failing_store = FakeStore(changed)
+    failing_store.fail_manifests = True
+    failed = (
+        _definitions(repository, failing_store, changed)
+        .resolve_job_def("canonicalization_campaign")
+        .execute_in_process(instance=instance, raise_on_error=False)
+    )
+
+    assert not failed.success
+    assert _head(repository, "accepted_bindings").run_id.startswith("dagster:")
+    assert _head(repository, "canonical_inputs").materialization_id == old_canonical
+    latest = instance.get_latest_materialization_events(
+        [dg.AssetKey("canonical_episode_inputs")]
+    )
+    assert latest[dg.AssetKey("canonical_episode_inputs")].run_id == initial.run_id
+
+
+def test_acceptance_commits_without_waiting_for_lid(repository) -> None:
+    source = documents()
+    store = FakeStore(source)
+    instance = dg.DagsterInstance.ephemeral()
+    defs = _definitions(repository, store, source)
+    defs.resolve_job_def("observe_campaign_inputs").execute_in_process(
+        instance=instance
+    )
+    prior_override_version = instance.get_latest_data_version_record(
+        dg.AssetKey("binding_overrides"), is_source=True
+    ).event_log_entry.tags["dagster/data_version"]
+    initial = defs.resolve_job_def("canonicalization_campaign").execute_in_process(
+        instance=instance
+    )
+    assert initial.success
+    initial_lid = defs.resolve_job_def(
+        "subtitle_lid_from_canonical"
+    ).execute_in_process(instance=instance)
+    assert initial_lid.success
+    old_lid = _head(repository, "subtitle_lid").materialization_id
+
+    overrides = FakeOverrides()
+    overrides.revision = 1
+    overrides.capture_id = "capture-old"
+    repository.override_repository = overrides
+    store.fail_text = True
+    changed_defs = _definitions(repository, store, source)
+    changed_defs.resolve_job_def("observe_campaign_inputs").execute_in_process(
+        instance=instance
+    )
+    current_override_version = instance.get_latest_data_version_record(
+        dg.AssetKey("binding_overrides"), is_source=True
+    ).event_log_entry.tags["dagster/data_version"]
+    accepted = changed_defs.resolve_job_def(
+        "canonicalization_from_acceptance"
+    ).execute_in_process(instance=instance)
+
+    assert accepted.success
+    assert prior_override_version != current_override_version
+    assert repository.connection.execute(
+        "SELECT audio_capture_id FROM canonical_episode_inputs"
+    ).fetchone() == ("capture-old",)
+    assert _head(repository, "subtitle_lid").materialization_id == old_lid
+    assert {
+        event.asset_key.to_user_string()
+        for event in accepted.get_asset_materialization_events()
+    } == {
+        "canonical_episode_inputs",
+        "canonical_subtitle_inputs",
+    }
+
+    failed_lid = changed_defs.resolve_job_def(
+        "subtitle_lid_from_canonical"
+    ).execute_in_process(instance=instance, raise_on_error=False)
+
+    assert not failed_lid.success
+    assert _head(repository, "subtitle_lid").materialization_id == old_lid
+    latest = instance.get_latest_materialization_events(
+        [dg.AssetKey("subtitle_language_results")]
+    )
+    assert latest[dg.AssetKey("subtitle_language_results")].run_id == initial_lid.run_id
+
+    store.fail_text = False
+    downstream_lid = changed_defs.resolve_job_def(
+        "subtitle_lid_from_canonical"
+    ).execute_in_process(instance=instance)
+    assert downstream_lid.success
+    assert {
+        event.asset_key.to_user_string()
+        for event in downstream_lid.get_asset_materialization_events()
+    } == {"subtitle_language_results"}

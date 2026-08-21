@@ -1,0 +1,256 @@
+#!/bin/sh
+# Operate the persistent DEV bundle without a monorepo checkout.
+set -eu
+
+die() {
+    printf 'data-dev: %s\n' "$*" >&2
+    exit 1
+}
+
+need() {
+    command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
+}
+
+usage() {
+    printf '%s\n' \
+        "Usage: ./control reconcile [dev|git-commit|sha256:digest]" \
+        "       ./control update [dev|git-commit|sha256:digest]" \
+        "       ./control rollback [dev|git-commit|sha256:digest]" \
+        "       ./control login" \
+        "       ./control preflight" \
+        "       ./control status"
+}
+
+bundle_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+config_dir=${JA_MEDIA_DEV_CONFIG_DIR:-/etc/ja-media}
+secret_env="$config_dir/.env.dev"
+image_env="$bundle_dir/.image.env"
+previous_image_env="$bundle_dir/.image.env.previous"
+
+# The adjacent state file is authoritative after selection. Do not let an old
+# interactive-shell export silently override it during a later operation.
+unset JA_MEDIA_DATA_IMAGE
+
+command=${1:-}
+case "$command" in
+    -h|--help|help)
+        usage
+        exit 0
+        ;;
+    update|rollback|reconcile|login|preflight|status) ;;
+    *)
+        usage >&2
+        exit 1
+        ;;
+esac
+shift
+
+need docker
+docker compose version >/dev/null 2>&1 || die "Docker Compose v2 is unavailable"
+[ -r "$secret_env" ] || die "protected environment is not readable: $secret_env"
+[ -r "$config_dir/config.dev.toml" ] \
+    || die "configuration is not readable: $config_dir/config.dev.toml"
+
+registry=$(awk -F= '
+    $1 == "JA_MEDIA_REGISTRY" {
+        sub(/^[^=]*=/, "")
+        sub(/\r$/, "")
+        sub(/^[[:space:]]+/, "")
+        sub(/[[:space:]]+$/, "")
+        print
+        found++
+    }
+    END {
+        if (found != 1) exit 1
+    }
+' "$secret_env") || die "JA_MEDIA_REGISTRY must appear exactly once in $secret_env"
+printf '%s\n' "$registry" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._:-]*$' \
+    || die "JA_MEDIA_REGISTRY must be a registry authority without a scheme or path"
+repository="$registry/ja-media/data-dev"
+
+compose() {
+    if [ -f "$image_env" ]; then
+        docker compose \
+            --env-file "$secret_env" \
+            --env-file "$image_env" \
+            --file "$bundle_dir/compose.yaml" \
+            "$@"
+    else
+        docker compose \
+            --env-file "$secret_env" \
+            --file "$bundle_dir/compose.yaml" \
+            "$@"
+    fi
+}
+
+valid_image() {
+    case "$1" in
+        "$repository"@sha256:*)
+            image_digest=${1#"$repository"@sha256:}
+            printf '%s\n' "$image_digest" | grep -Eq '^[0-9a-f]{64}$'
+            ;;
+        *) return 1 ;;
+    esac
+}
+
+read_image() {
+    read_state_file=$1
+    [ -f "$read_state_file" ] || return 1
+    read_state_value=$(sed -n 's/^JA_MEDIA_DATA_IMAGE=//p' "$read_state_file")
+    valid_image "$read_state_value" \
+        || die "invalid image selection in $read_state_file"
+    printf '%s\n' "$read_state_value"
+}
+
+selected_image() {
+    read_image "$image_env" \
+        || die "no image selected; run ./control reconcile to deploy the :dev image"
+}
+
+write_state() {
+    write_state_file=$1
+    write_state_value=$2
+    valid_image "$write_state_value" \
+        || die "image must be a digest-pinned OCI reference"
+    umask 077
+    state_temporary=$(mktemp "$bundle_dir/.image.env.XXXXXX")
+    trap 'rm -f "$state_temporary"' 0 HUP INT TERM
+    printf 'JA_MEDIA_DATA_IMAGE=%s\n' "$write_state_value" >"$state_temporary"
+    mv "$state_temporary" "$write_state_file"
+    trap - 0 HUP INT TERM
+}
+
+record_image() {
+    desired_image=$1
+    current_image=none
+    if [ -f "$image_env" ]; then
+        current_image=$(selected_image)
+    fi
+    [ "$current_image" = "$desired_image" ] && return
+    if [ "$current_image" != none ]; then
+        write_state "$previous_image_env" "$current_image"
+    fi
+    write_state "$image_env" "$desired_image"
+}
+
+candidate_reference() {
+    requested=${1:-dev}
+    case "$requested" in
+        sha256:*) printf '%s@%s\n' "$repository" "$requested" ;;
+        "$repository":*|"$repository"@sha256:*) printf '%s\n' "$requested" ;;
+        */*|*@*) die "image override must belong to $repository" ;;
+        *) printf '%s:%s\n' "$repository" "$requested" ;;
+    esac
+}
+
+resolve_image() {
+    candidate=$(candidate_reference "${1:-dev}")
+    docker pull "$candidate" >&2
+    if valid_image "$candidate"; then
+        printf '%s\n' "$candidate"
+        return
+    fi
+    resolved_image=$(
+        docker image inspect "$candidate" \
+            --format '{{range .RepoDigests}}{{println .}}{{end}}' \
+            | awk -v prefix="$repository@" 'index($0, prefix) == 1 { print; exit }'
+    )
+    valid_image "$resolved_image" \
+        || die "Docker did not report a digest for $candidate in $repository"
+    printf '%s\n' "$resolved_image"
+}
+
+preflight() {
+    compose --profile tools run --rm --no-deps preflight
+}
+
+topology_is_running() {
+    running_services=$(compose ps --status running --services)
+    for required_service in rabbitmq dagster-webserver dagster-daemon gateway; do
+        printf '%s\n' "$running_services" | grep -Fxq "$required_service" \
+            || return 1
+    done
+}
+
+reconcile_image() {
+    reconciled_image=$1
+    record_image "$reconciled_image"
+    compose pull
+    compose up -d --wait
+    preflight
+    printf 'deployed=%s\n' "$(selected_image)"
+}
+
+update() {
+    [ "$#" -le 1 ] || die "usage: ./control update [dev|git-commit|sha256:digest]"
+    target_image=$(resolve_image "${1:-dev}")
+    if ! topology_is_running; then
+        printf '%s\n' \
+            "data-dev: control-plane topology is incomplete; running full reconcile" >&2
+        reconcile_image "$target_image"
+        return
+    fi
+    previous=none
+    if [ -f "$image_env" ]; then
+        previous=$(selected_image)
+    fi
+
+    JA_MEDIA_DATA_IMAGE="$target_image" compose run --rm --no-deps schema-init
+    record_image "$target_image"
+    if ! compose up -d --no-deps --force-recreate --wait \
+        code-location server-worker operator-web; then
+        die "application replacement failed; previous image was $previous"
+    fi
+    # Caddy's upstream is the replaceable operator container. Recreate the
+    # gateway only after that container is healthy so Caddy provisions against
+    # the current Docker endpoint rather than the container just removed.
+    if ! compose up -d --no-deps --force-recreate --wait gateway; then
+        die "gateway replacement failed; previous image was $previous"
+    fi
+    if ! preflight; then
+        die "preflight failed; inspect the deployment or roll back to $previous"
+    fi
+    printf 'deployed=%s\n' "$target_image"
+}
+
+reconcile() {
+    [ "$#" -le 1 ] || die "usage: ./control reconcile [dev|git-commit|sha256:digest]"
+    if [ "$#" -eq 1 ]; then
+        reconcile_target=$(resolve_image "$1")
+    elif [ ! -f "$image_env" ]; then
+        reconcile_target=$(resolve_image dev)
+    else
+        reconcile_target=$(selected_image)
+    fi
+    reconcile_image "$reconcile_target"
+}
+
+case "$command" in
+    update) update "$@" ;;
+    login)
+        [ "$#" -eq 0 ] || die "usage: ./control login"
+        docker login "$registry"
+        ;;
+    rollback)
+        [ "$#" -le 1 ] || die "usage: ./control rollback [dev|git-commit|sha256:digest]"
+        if [ "$#" -eq 1 ]; then
+            update "$1"
+        else
+            previous=$(read_image "$previous_image_env") \
+                || die "no previous image recorded; pass an explicit tag or digest"
+            update "$previous"
+        fi
+        ;;
+    reconcile) reconcile "$@" ;;
+    preflight) [ "$#" -eq 0 ] || die "usage: ./control preflight"; preflight ;;
+    status)
+        [ "$#" -eq 0 ] || die "usage: ./control status"
+        printf 'selected=%s\n' "$(selected_image)"
+        if previous=$(read_image "$previous_image_env"); then
+            printf 'previous=%s\n' "$previous"
+        else
+            printf 'previous=none\n'
+        fi
+        compose ps
+        ;;
+esac

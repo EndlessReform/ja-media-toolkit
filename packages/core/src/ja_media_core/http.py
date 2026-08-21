@@ -13,6 +13,16 @@ from typing import Any
 
 import httpx
 
+_UNSET: Any = object()
+"""Sentinel distinguishing "use the client default" from an explicit override.
+
+httpx treats ``timeout=None`` as "no timeout", so a bare ``None`` default on
+the public methods would be ambiguous: callers need a way to say "disable the
+timeout for this one long-running request" distinct from "I don't care, use
+whatever the client was built with". Per-call methods accept ``timeout_s`` with
+this sentinel default; passing ``None`` explicitly disables the timeout.
+"""
+
 
 class ServiceHttpError(RuntimeError):
     """A first-party service returned a non-success HTTP status."""
@@ -43,13 +53,23 @@ class ServiceHttpClient:
 
         return f"{self.base_url}/{path.lstrip('/')}"
 
-    def get_json(self, path: str) -> dict[str, Any] | list[Any]:
+    def get_json(
+        self, path: str, *, timeout_s: float | None | object = _UNSET
+    ) -> dict[str, Any] | list[Any]:
         """Fetch and decode a JSON response."""
 
-        response = self._request("GET", path, headers={"Accept": "application/json"})
+        response = self._request(
+            "GET", path, headers={"Accept": "application/json"}, timeout_s=timeout_s
+        )
         return response.json()
 
-    def post_json(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+    def post_json(
+        self,
+        path: str,
+        payload: dict[str, Any],
+        *,
+        timeout_s: float | None | object = _UNSET,
+    ) -> dict[str, Any]:
         """POST a JSON object and decode the JSON response."""
 
         response = self._request(
@@ -57,26 +77,34 @@ class ServiceHttpClient:
             path,
             headers={"Accept": "application/json"},
             json=payload,
+            timeout_s=timeout_s,
         )
         data = response.json()
         if not isinstance(data, dict):
             raise RuntimeError(f"{self.error_label} returned non-object JSON")
         return data
 
-    def get_bytes(self, path: str) -> bytes:
+    def get_bytes(
+        self, path: str, *, timeout_s: float | None | object = _UNSET
+    ) -> bytes:
         """Fetch an opaque binary response."""
 
-        return self._request("GET", path, headers={"Accept": "*/*"}).content
+        return self._request(
+            "GET", path, headers={"Accept": "*/*"}, timeout_s=timeout_s
+        ).content
 
     def _request(
         self,
         method: str,
         path: str,
+        *,
+        timeout_s: float | None | object = _UNSET,
         **kwargs: Any,
     ) -> httpx.Response:
         url = self.url(path)
+        effective_timeout = self.timeout_s if timeout_s is _UNSET else timeout_s
         with httpx.Client(
-            timeout=self.timeout_s,
+            timeout=effective_timeout,
             trust_env=False,
             follow_redirects=True,
         ) as client:

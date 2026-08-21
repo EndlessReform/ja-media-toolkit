@@ -62,6 +62,11 @@ def register_audio_library_parser(subparsers: argparse._SubParsersAction) -> Non
         action="store_true",
         help="Replace conflicting artifacts after the final plan confirmation.",
     )
+    ingest.add_argument(
+        "--no-subtitles",
+        action="store_true",
+        help="Skip embedded subtitle extraction during ingest.",
+    )
     ingest.set_defaults(audio_library_parser=parser)
 
 
@@ -79,6 +84,7 @@ def run_audio_library_ingest(args: argparse.Namespace) -> None:
         anilist_id=args.anilist,
         audio_stream_ordinal=args.audio_stream,
         preferred_languages=tuple(args.language or ("jpn", "ja")),
+        extract_subtitles=not args.no_subtitles,
     )
     try:
         plan = build_ingest_plan(request)

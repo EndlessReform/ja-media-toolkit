@@ -1,0 +1,12 @@
+{% macro internal_ids(run_id=None, attempt_id=None, materialization_id=None) -%}
+  {% if run_id or attempt_id or materialization_id %}
+  <details class="identity-disclosure">
+    <summary title="Show internal identifiers" aria-label="Show internal identifiers">ⓘ</summary>
+    <span class="identity-popover">
+      {% if run_id %}<strong>run UUID</strong><code>{{ run_id }}</code>{% endif %}
+      {% if attempt_id %}<strong>stage execution ID</strong><code>{{ attempt_id }}</code>{% endif %}
+      {% if materialization_id %}<strong>product version ID</strong><code>{{ materialization_id }}</code>{% endif %}
+    </span>
+  </details>
+  {% endif %}
+{%- endmacro %}
