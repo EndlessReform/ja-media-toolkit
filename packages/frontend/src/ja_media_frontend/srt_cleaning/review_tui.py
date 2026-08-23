@@ -58,6 +58,7 @@ class SrtCleaningReviewApp(
         ("f5", "show_cue_review", "Cue review"),
         ("f6", "show_reason_pivot", "Reason pivot"),
         ("f7", "show_alignment_ab", "Alignment comparison"),
+        ("t", "toggle_timing", "Timing borders"),
         ("e", "select_episode", "Episode"),
         ("s", "show_stats", "Stats"),
         ("r", "toggle_rule_overlay", "Rule overlay"),
@@ -121,6 +122,7 @@ class SrtCleaningReviewApp(
         self._clipboard_status = ""
         self._playback_poll = None
         self.rule_overlay = False
+        self.timing_mode = "aligned"
 
     @staticmethod
     def episode_modal(current: int) -> EpisodeSelectModal:
@@ -209,12 +211,19 @@ class SrtCleaningReviewApp(
         if source is None:
             timeline.set_timeline((), start_s=0, duration_s=self.window_s)
         else:
+            use_alignment = self.timing_mode == "aligned"
+            timed_cues = tuple(
+                cue.cue_with_timing(use_alignment=use_alignment)
+                for cue in source.cues
+            )
             timeline.set_timeline(
-                source.cues,
+                timed_cues,
                 start_s=self.window_start_s,
                 duration_s=self.window_s,
-                title=source.filename,
-                active_span=self.current_cue,
+                title=f"{source.filename} — {self.timing_mode} borders",
+                active_span=(
+                    timed_cues[self.cue_index(source)] if timed_cues else None
+                ),
                 span_styles=(
                     rule_timeline_styles(source.cues)
                     if self.rule_overlay

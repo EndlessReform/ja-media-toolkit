@@ -31,6 +31,7 @@ class ReviewViewRenderingMixin:
             text.append(self._clipboard_status, style="dim")
         if self.rule_overlay:
             text.append("  rule overlay on", style="bold cyan")
+        text.append(f"  cue borders: {self.timing_mode}", style="bold yellow")
         return text
 
     def render_candidates(self) -> Table:
@@ -67,12 +68,14 @@ class ReviewViewRenderingMixin:
             self.current_cue,
             playing=self.is_playing(),
             rule_overlay=self.rule_overlay,
+            timing_mode=self.timing_mode,
         )
 
     def render_help(self) -> str:
         return (
             "space play  c copy JSON  h/l cue  n/N next/previous non-accept  "
             "j/k source  bracket keys series/episode  e episode jump  "
+            "t toggle original/aligned cue borders  "
             "F7 alignment comparison  r rule overlay  R rule scores  "
             "s reason stats  Ctrl-f/b page  f/F next/previous flag  "
             "Ctrl-d/u half-page  +/- zoom  q quit"

@@ -87,6 +87,8 @@ def test_alignment_case_links_source_index_and_changes_playback_clock(
     assert loaded["audio_path"] == audio
     assert cue.playback_cue.start_s == 12.5
     assert cue.playback_cue.end_s == 14.0
+    assert cue.cue_with_timing(use_alignment=False).start_s == 10.0
+    assert cue.cue_with_timing(use_alignment=False).end_s == 11.0
     assert alignment.window_index == 4
     assert alignment.window_kind == "boundary"
     assert alignment.candidate_count == 2
@@ -152,7 +154,7 @@ def test_suspicious_alignment_is_visible_and_part_of_flagged_walk(tmp_path: Path
     console = Console(record=True, width=140)
     console.print(render_cue_panel(cue, playing=False, rule_overlay=False))
     rendered = console.export_text()
-    assert "Space plays (forced alignment): 00:00.000 -> 00:18.000" in rendered
+    assert "Forced-aligned borders: 00:00.000 -> 00:18.000  ACTIVE" in rendered
     assert "Moved from original: start 10.00s earlier; end 7.00s later" in rendered
     assert "NEEDS TIMING REVIEW" in rendered
     assert "1 text piece ends before it starts" in rendered

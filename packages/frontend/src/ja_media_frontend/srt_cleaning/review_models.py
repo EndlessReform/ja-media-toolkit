@@ -84,7 +84,12 @@ class ReviewCue:
     def playback_cue(self) -> SubtitleCue:
         """Play candidate timing when loaded, otherwise the source cue timing."""
 
-        if self.alignment is None:
+        return self.cue_with_timing(use_alignment=True)
+
+    def cue_with_timing(self, *, use_alignment: bool) -> SubtitleCue:
+        """Project this cue onto original or forced-aligned borders."""
+
+        if not use_alignment or self.alignment is None:
             return self.original
         return SubtitleCue(
             source_path=self.original.source_path,
@@ -123,6 +128,17 @@ class ReviewSource:
     @property
     def end_s(self) -> float:
         return max((cue.end_s for cue in self.cues), default=0.0)
+
+    def end_s_for_timing(self, *, use_alignment: bool) -> float:
+        """Return the end of the original or aligned cue track."""
+
+        return max(
+            (
+                cue.cue_with_timing(use_alignment=use_alignment).end_s
+                for cue in self.cues
+            ),
+            default=0.0,
+        )
 
     @property
     def changed_count(self) -> int:

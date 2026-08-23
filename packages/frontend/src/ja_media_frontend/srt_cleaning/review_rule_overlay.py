@@ -85,6 +85,7 @@ def render_cue_panel(
     *,
     playing: bool,
     rule_overlay: bool,
+    timing_mode: str = "aligned",
 ) -> Panel:
     """Render the standard cue comparison with an optional rule projection."""
 
@@ -92,23 +93,30 @@ def render_cue_panel(
         return Panel("No cue selected.", title="Original vs cleaned")
     original = cue.original
     decision = cue.decision
+    uses_alignment = timing_mode == "aligned" and cue.alignment is not None
     header = Text(f"{original.index}\n", style="bold cyan")
     header.append(
-        f"Original subtitle time: {format_clock(original.start_s)} -> "
+        f"Original subtitle borders: {format_clock(original.start_s)} -> "
         f"{format_clock(original.end_s)}",
-        style="cyan",
+        style="bold yellow" if not uses_alignment else "cyan",
     )
+    if not uses_alignment:
+        header.append("  ACTIVE", style="bold yellow")
+        if playing:
+            header.append(" / PLAYING", style="bold orange3")
     if cue.alignment is not None:
         delta_start = cue.alignment.start_s - original.start_s
         delta_end = cue.alignment.end_s - original.end_s
         header.append(
-            f"\nSpace plays (forced alignment): "
+            f"\nForced-aligned borders: "
             f"{format_clock(cue.alignment.start_s)} -> "
             f"{format_clock(cue.alignment.end_s)}",
-            style="bold yellow",
+            style="bold yellow" if uses_alignment else "yellow",
         )
-        if playing:
-            header.append("  PLAYING", style="bold orange3")
+        if uses_alignment:
+            header.append("  ACTIVE", style="bold yellow")
+            if playing:
+                header.append(" / PLAYING", style="bold orange3")
         header.append(
             f"\nMoved from original: start {_movement_phrase(delta_start)}; "
             f"end {_movement_phrase(delta_end)}",
@@ -169,8 +177,6 @@ def render_cue_panel(
                 f"{backward_count} out-of-order starts.",
                 style="dim",
             )
-    elif playing:
-        header.append("  PLAYING ORIGINAL TIME", style="bold orange3")
     kind = decision.kind if decision else "missing"
     comparison = rule_comparison_diff(cue) if rule_overlay else colored_model_diff(cue)
     body = Group(

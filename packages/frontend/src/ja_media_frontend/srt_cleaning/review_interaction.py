@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from ja_media_core.transcripts import SubtitleCue
 from ja_media_frontend.audio import MaterializedAudioPlayer
 from ja_media_frontend.srt_cleaning.review_audio import (
     ReviewAudio,
@@ -152,14 +153,15 @@ class SrtCleaningReviewInteractionMixin:
         self.refresh_view()
 
     def zoom_window(self, factor: float) -> None:
-        focus = self.current_cue.start_s if self.current_cue else self.window_start_s
+        current = self.current_timed_cue()
+        focus = current.start_s if current is not None else self.window_start_s
         self.window_s = max(5.0, min(self.timeline_end_s(), self.window_s * factor))
         self.window_start_s = focus - self.window_s / 2
         self.normalize_window()
         self.refresh_view()
 
     def ensure_cue_visible(self) -> None:
-        cue = self.current_cue
+        cue = self.current_timed_cue()
         if cue is None:
             return
         if cue.start_s < self.window_start_s:
@@ -176,7 +178,30 @@ class SrtCleaningReviewInteractionMixin:
 
     def timeline_end_s(self) -> float:
         source = self.source
-        return max(self.window_s, source.end_s if source is not None else 0.0)
+        return max(
+            self.window_s,
+            (
+                source.end_s_for_timing(use_alignment=self.timing_mode == "aligned")
+                if source is not None
+                else 0.0
+            ),
+        )
+
+    def current_timed_cue(self) -> SubtitleCue | None:
+        """Return the selected cue projected onto the active timing track."""
+
+        cue = self.current_cue
+        if cue is None:
+            return None
+        return cue.cue_with_timing(use_alignment=self.timing_mode == "aligned")
+
+    def action_toggle_timing(self) -> None:
+        """Switch F5 timeline and playback together between timing tracks."""
+
+        self.stop_playback()
+        self.timing_mode = "original" if self.timing_mode == "aligned" else "aligned"
+        self.ensure_cue_visible()
+        self.refresh_view()
 
     def toggle_playback(self) -> None:
         if self.is_playing():
@@ -188,10 +213,10 @@ class SrtCleaningReviewInteractionMixin:
             self._playback_status = "no audio loaded"
             self.refresh_view()
             return
-        cue = self.current_cue
+        cue = self.current_timed_cue()
         if cue is None:
             return
-        start_s, duration_s = playback_range(cue.playback_cue)
+        start_s, duration_s = playback_range(cue)
         self._player.play(start_s, duration_s)
         self._playback_status = f"playing {format_clock(start_s)}"
         self._stop_playback_poll()
