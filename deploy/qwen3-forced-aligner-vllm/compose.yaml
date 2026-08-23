@@ -60,7 +60,7 @@ services:
     volumes:
       - ${HF_HOME:-/var/lib/qwen3-forced-aligner/huggingface}:/root/.cache/huggingface
       - ${ALIGNER_AUDIO_CACHE:-/var/lib/qwen3-forced-aligner/audio}:/var/cache/ja-media/audio
-      - ${JA_MEDIA_DATA_CONFIG_HOST:?set by start-compose.sh}:/etc/ja-media/data.toml:ro
+      - ${JA_MEDIA_DATA_CONFIG_HOST:-../../packages/data/config.local.toml}:/etc/ja-media/data.toml:ro
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8000/healthz"]
       interval: 15s
