@@ -24,6 +24,7 @@ def read_alignment_case(case_path: Path | None) -> dict[str, Any] | None:
         cue for window in results["windows"] for cue in window["cues"]
     ]
     return {
+        "source_subtitle_id": case["cleaned_subtitle"]["source_subtitle_id"],
         "source_sha256": case["cleaned_subtitle"]["source_sha256"],
         "results_path": results_path,
         "by_source_index": {
@@ -44,3 +45,25 @@ def read_alignment_case(case_path: Path | None) -> dict[str, Any] | None:
             for cue in cues
         },
     }
+
+
+def read_alignment_cases(path: Path | None) -> dict[tuple[str, str], dict[str, Any]]:
+    """Load one case or every case named by a prepared slice manifest."""
+
+    if path is None:
+        return {}
+    resolved = path.expanduser().resolve()
+    payload = json.loads(resolved.read_text(encoding="utf-8"))
+    if payload.get("schema_name") == "ja-media.forced-alignment.prepared-slice":
+        case_paths = [Path(row["case_manifest"]) for row in payload["cases"]]
+    else:
+        case_paths = [resolved]
+    loaded = [read_alignment_case(case_path) for case_path in case_paths]
+    alignments = {
+        (item["source_subtitle_id"], item["source_sha256"]): item
+        for item in loaded
+        if item is not None
+    }
+    if len(alignments) != len(loaded):
+        raise ValueError("alignment slice contains duplicate source identities")
+    return alignments

@@ -12,6 +12,7 @@ from forced_alignment_retiming.cleaned_input import prepare_cleaned_input
 from forced_alignment_retiming.media import cache_canonical_media
 from forced_alignment_retiming.pull import pull_candidates
 from forced_alignment_retiming.ranking import pair_case
+from forced_alignment_retiming.slice import discover_cleaned_slice
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -45,7 +46,22 @@ def main() -> None:
         type=Path,
         default=REPO_ROOT / "packages" / "data" / "config.dev.toml",
     )
+    prepare_slice = commands.add_parser(
+        "prepare-slice", help="prepare every unique subtitle in one cleaning run"
+    )
+    prepare_slice.add_argument("reconstruct", type=Path)
+    prepare_slice.add_argument("--episode", type=int, required=True)
+    prepare_slice.add_argument("--output-root", type=Path, default=PROJECT_ROOT / "output")
+    prepare_slice.add_argument(
+        "--data-config",
+        type=Path,
+        default=REPO_ROOT / "packages" / "data" / "config.dev.toml",
+    )
     args = parser.parse_args()
+
+    if args.command == "prepare-slice":
+        _prepare_slice(args, parser)
+        return
 
     selected = load_case(args.cases.expanduser().resolve(), args.case)
     data_config = args.data_config.expanduser().resolve()
@@ -93,6 +109,48 @@ def _prepare(selected, canonical, bronze, output_root: Path) -> None:
     path = case_root / "case.json"
     path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
     print(f"case_manifest={path}")
+
+
+def _prepare_slice(args, parser: argparse.ArgumentParser) -> None:  # type: ignore[no-untyped-def]
+    """Prepare a cleaning run while sharing one data connection."""
+
+    reconstruct = args.reconstruct.expanduser().resolve()
+    data_config = args.data_config.expanduser().resolve()
+    if not reconstruct.is_dir():
+        parser.error(f"reconstruction not found: {reconstruct}")
+    if not data_config.is_file():
+        parser.error(f"data config not found: {data_config}")
+    output_root = args.output_root.expanduser().resolve()
+    selected = discover_cleaned_slice(reconstruct, episode=args.episode)
+    manifests = []
+    with open_dev_inputs(data_config) as (connection, bronze):
+        for item in selected:
+            canonical = resolve_case(connection, item.case)
+            _prepare(item.case, canonical, bronze, output_root)
+            manifests.append(
+                {
+                    "case": item.case.name,
+                    "case_manifest": str(output_root / item.case.name / "case.json"),
+                    "catalog_subtitle_ids": list(item.catalog_subtitle_ids),
+                }
+            )
+    slice_manifest = output_root / "slice.json"
+    slice_manifest.write_text(
+        json.dumps(
+            {
+                "schema_name": "ja-media.forced-alignment.prepared-slice",
+                "schema_version": "1.0.0",
+                "episode": args.episode,
+                "source_count": len(manifests),
+                "cases": manifests,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    print(f"slice_manifest={slice_manifest}")
 
 
 if __name__ == "__main__":

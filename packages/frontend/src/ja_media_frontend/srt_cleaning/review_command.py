@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 from typing import Any
+import json
 
 from dotenv import load_dotenv
 from rich.console import Console
@@ -54,11 +55,17 @@ def run_review(args: argparse.Namespace) -> None:
     initial_anilist_id = args.anilist or first_key[0]
     episode = args.episode or first_key[1]
     manual_audio = Path(args.audio).expanduser().resolve() if args.audio else None
-    if manual_audio is None and alignment_case is not None:
-        import json
-
-        case = json.loads(alignment_case.read_text(encoding="utf-8"))
-        manual_audio = alignment_case.parent / case["audio"]["relative_path"]
+    alignment_payload = (
+        json.loads(alignment_case.read_text(encoding="utf-8"))
+        if alignment_case is not None
+        else None
+    )
+    single_alignment_case = bool(
+        alignment_payload
+        and alignment_payload.get("schema_name") == "ja-media.forced-alignment.case"
+    )
+    if manual_audio is None and alignment_case is not None and single_alignment_case:
+        manual_audio = alignment_case.parent / alignment_payload["audio"]["relative_path"]
     initial_audio = load_review_audio(
         anilist_id=initial_anilist_id,
         episode_number=episode,
@@ -75,7 +82,7 @@ def run_review(args: argparse.Namespace) -> None:
         initial_audio=initial_audio,
         alignment_eval_path=(
             alignment_case.parent / "stability" / "results.json"
-            if alignment_case is not None
+            if alignment_case is not None and single_alignment_case
             else None
         ),
     )

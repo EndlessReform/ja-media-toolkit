@@ -35,7 +35,11 @@ def prepare_cleaned_input(
     records, excluded = _build_records(
         read_srt(source_path), cue_inputs, decision_by_index, case
     )
-    cleaned_path = _cleaned_path(reconstruct_dir, case.subtitle_source_sha256)
+    cleaned_path = _cleaned_path(
+        reconstruct_dir,
+        case.subtitle_source_sha256,
+        source_filename=str(manifests[0]["filename"]),
+    )
     _validate_reconstruction(records, read_srt(cleaned_path))
 
     inputs = case_root / "inputs"
@@ -174,11 +178,16 @@ def _build_records(cues, inputs, decisions, case) -> tuple[list[dict[str, Any]],
     return records, excluded
 
 
-def _cleaned_path(reconstruct_dir: Path, source_hash: str) -> Path:
-    matches = list((reconstruct_dir / "cleaned").glob(f"*.{source_hash[:12]}.cleaned.srt"))
-    if len(matches) != 1:
-        raise RuntimeError(f"expected one reconstructed SRT, found {len(matches)}")
-    return matches[0]
+def _cleaned_path(
+    reconstruct_dir: Path, source_hash: str, *, source_filename: str
+) -> Path:
+    """Select the reconstruction owned by this catalog row and cleaning run."""
+
+    stem = Path(source_filename).stem
+    expected = reconstruct_dir / "cleaned" / f"{stem}.{source_hash[:12]}.cleaned.srt"
+    if not expected.is_file():
+        raise RuntimeError(f"reconstructed SRT is missing: {expected}")
+    return expected
 
 
 def _validate_reconstruction(records: list[dict[str, Any]], cleaned_cues) -> None:

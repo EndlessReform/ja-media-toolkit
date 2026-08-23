@@ -38,6 +38,19 @@ def test_boundary_cue_is_context_in_both_requests() -> None:
     ]
 
 
+def test_final_core_receives_cues_timed_after_canonical_audio() -> None:
+    payload = {"split_chunks": [_chunk(0, 60), _chunk(60, 120)]}
+    final_core = plan_alignment_windows(
+        payload, duration_s=120, boundary_radius_s=12
+    )[-1]
+    records = [_cue("inside", 110, 112), _cue("after", 145, 147)]
+
+    assert [
+        row["cue_id"]
+        for row in records_for_window(records, final_core, duration_s=120)
+    ] == ["inside", "after"]
+
+
 def test_reconciliation_keeps_plausible_owning_core_despite_token_diagnostics() -> None:
     records = [_cue("bridge", 57, 61)]
     first = _window_result(1, 0, 60, _result("bridge", "suspicious", edge=20))

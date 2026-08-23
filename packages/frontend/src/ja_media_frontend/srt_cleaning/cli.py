@@ -149,7 +149,7 @@ def add_review_parser(
     )
     review.add_argument(
         "--alignment-case",
-        help="Prepared case.json whose full-alignment result should be reviewed.",
+        help="Prepared case.json or slice.json whose alignments should be reviewed.",
     )
     review.add_argument(
         "--audio-profile",

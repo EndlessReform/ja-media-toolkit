@@ -26,6 +26,7 @@ def test_prepares_stable_cues_and_reproduces_cleaned_srt(tmp_path: Path) -> None
         "subtitle_id": "sub-1",
         "source_sha256": source_hash,
         "source_key": f"57:sub-1:{source_hash}",
+        "filename": "fixture.srt",
         "local_cache_path": str(source),
         "active_indexes": [1, 2, 3],
         "active_original_texts": ["（人）話す", "（音）", "元の文"],

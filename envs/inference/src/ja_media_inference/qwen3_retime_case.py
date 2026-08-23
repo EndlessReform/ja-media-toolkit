@@ -57,7 +57,7 @@ def main() -> None:
     parser.add_argument(
         "--concurrency",
         type=int,
-        default=16,
+        default=32,
         help="Maximum simultaneous full-alignment or stability requests.",
     )
     parser.add_argument(

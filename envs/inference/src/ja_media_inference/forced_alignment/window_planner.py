@@ -77,15 +77,30 @@ def plan_alignment_windows(
 
 
 def records_for_window(
-    records: list[dict[str, Any]], window: AlignmentWindow
+    records: list[dict[str, Any]],
+    window: AlignmentWindow,
+    *,
+    duration_s: float | None = None,
 ) -> list[dict[str, Any]]:
-    """Assign core text by midpoint and duplicate only boundary-probe context."""
+    """Assign core text by midpoint and keep out-of-range text at audio edges."""
 
     if window.kind == "core":
         return [
             row
             for row in records
-            if window.core_start_s <= _midpoint(row) < window.core_end_s
+            if (
+                window.core_start_s <= _midpoint(row) < window.core_end_s
+                or (
+                    duration_s is not None
+                    and window.core_start_s == 0.0
+                    and _midpoint(row) < 0.0
+                )
+                or (
+                    duration_s is not None
+                    and abs(window.core_end_s - duration_s) <= 0.001
+                    and _midpoint(row) >= duration_s
+                )
+            )
         ]
     return [
         row

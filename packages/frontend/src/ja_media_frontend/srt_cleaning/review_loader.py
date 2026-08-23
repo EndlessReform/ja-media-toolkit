@@ -16,7 +16,7 @@ from ja_media_frontend.srt_cleaning.review_models import (
     ReviewSource,
     ReviewWorkspace,
 )
-from ja_media_frontend.srt_cleaning.review_alignment import read_alignment_case
+from ja_media_frontend.srt_cleaning.review_alignment import read_alignment_cases
 from ja_media_frontend.srt_cleaning.source_rebuild import (
     cleaned_srt_name,
     source_key,
@@ -91,13 +91,13 @@ def _load_review_artifacts(
     manifest_rows = read_jsonl(manifest_path)
     _validate_manifest_rows(manifest_path, manifest_rows)
     decisions = _read_decisions(reconstruct_dir / "decisions.jsonl")
-    alignment = read_alignment_case(alignment_case)
+    alignments = read_alignment_cases(alignment_case)
     by_source: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in manifest_rows:
         by_source[source_key(row)].append(row)
 
     sources = [
-        _load_source(rows, decisions.get(key, {}), source_root, reconstruct_dir, alignment)
+        _load_source(rows, decisions.get(key, {}), source_root, reconstruct_dir, alignments)
         for key, rows in sorted(by_source.items())
     ]
     loaded_sources = tuple(source for source in sources if source.cues)
@@ -200,7 +200,7 @@ def _load_source(
     decisions: dict[int, ReviewDecision],
     source_root: Path,
     reconstruct_dir: Path,
-    alignment: dict[str, Any] | None,
+    alignments: dict[tuple[str, str], dict[str, Any]],
 ) -> ReviewSource:
     rows = sorted(rows, key=lambda row: int(row["window_number"]))
     first = rows[0]
@@ -210,11 +210,10 @@ def _load_source(
     cleaned_path = reconstruct_dir / "cleaned" / cleaned_srt_name(first)
     if not cleaned_path.exists():
         cleaned_path = None
-    alignment_by_index = (
-        alignment["by_source_index"]
-        if alignment and alignment["source_sha256"] == str(first["source_sha256"])
-        else {}
+    alignment = alignments.get(
+        (str(first["subtitle_id"]), str(first["source_sha256"]))
     )
+    alignment_by_index = alignment["by_source_index"] if alignment else {}
     review_cues = tuple(
         _review_cue(cue, decisions.get(cue.index), alignment_by_index.get(cue.index))
         for cue in cues
@@ -229,7 +228,7 @@ def _load_source(
         episode_number=_episode_number(first),
         source_sha256=str(first["source_sha256"]),
         cues=review_cues,
-        alignment_path=alignment["results_path"] if alignment_by_index else None,
+        alignment_path=alignment["results_path"] if alignment else None,
     )
 
 

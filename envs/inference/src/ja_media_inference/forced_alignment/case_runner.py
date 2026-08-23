@@ -92,7 +92,7 @@ def align_full_case(
     vad_plan_path: Path,
     boundary_radius_s: float = 30.0,
     text_field: str = "alignment_text",
-    concurrency: int = 16,
+    concurrency: int = 32,
 ) -> Path:
     """Align VAD-windowed audio and reconcile duplicate boundary cues."""
 
@@ -106,12 +106,13 @@ def align_full_case(
     aligner = Qwen3AdapterClient(base_url=base_url)
     audio_id = aligner.cache_audio(case["audio"])
     run_root = case_root / "full-alignment"
+    run_root.mkdir(parents=True, exist_ok=True)
     planned_windows = plan_alignment_windows(
         vad_payload, duration_s=duration_s, boundary_radius_s=boundary_radius_s
     )
     jobs = []
     for window in planned_windows:
-        members = records_for_window(records, window)
+        members = records_for_window(records, window, duration_s=duration_s)
         if not members:
             continue
         jobs.append((window, prepare_alignment_window(members, text_field)))

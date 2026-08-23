@@ -8,7 +8,10 @@ from pathlib import Path
 from rich.console import Console
 
 from ja_media_core.transcripts import SubtitleCue
-from ja_media_frontend.srt_cleaning.review_alignment import read_alignment_case
+from ja_media_frontend.srt_cleaning.review_alignment import (
+    read_alignment_case,
+    read_alignment_cases,
+)
 from ja_media_frontend.srt_cleaning.review_models import (
     ReviewAlignment,
     ReviewCue,
@@ -26,7 +29,14 @@ def test_alignment_case_links_source_index_and_changes_playback_clock(
 ) -> None:
     case = tmp_path / "case.json"
     case.write_text(
-        json.dumps({"cleaned_subtitle": {"source_sha256": "abc123"}})
+        json.dumps(
+            {
+                "cleaned_subtitle": {
+                    "source_subtitle_id": "sub-1",
+                    "source_sha256": "abc123",
+                }
+            }
+        )
     )
     results = tmp_path / "full-alignment" / "results.json"
     results.parent.mkdir()
@@ -73,7 +83,16 @@ def test_alignment_case_links_source_index_and_changes_playback_clock(
 
 def test_suspicious_alignment_is_visible_and_part_of_flagged_walk(tmp_path: Path) -> None:
     case = tmp_path / "case.json"
-    case.write_text(json.dumps({"cleaned_subtitle": {"source_sha256": "abc123"}}))
+    case.write_text(
+        json.dumps(
+            {
+                "cleaned_subtitle": {
+                    "source_subtitle_id": "sub-1",
+                    "source_sha256": "abc123",
+                }
+            }
+        )
+    )
     results = tmp_path / "full-alignment" / "results.json"
     results.parent.mkdir()
     results.write_text(
@@ -159,3 +178,38 @@ def test_workspace_prefers_aligned_source_for_episode(tmp_path: Path) -> None:
 
     assert workspace.preferred_source_index(57, 1) == 1
     assert workspace.preferred_cue_indices() == {"sub-1": 1}
+
+
+def test_alignment_slice_loads_each_case_by_catalog_identity(tmp_path: Path) -> None:
+    cases = []
+    for index in (1, 2):
+        root = tmp_path / f"case-{index}"
+        root.mkdir()
+        case = root / "case.json"
+        case.write_text(
+            json.dumps(
+                {
+                    "cleaned_subtitle": {
+                        "source_subtitle_id": f"sub-{index}",
+                        "source_sha256": f"hash-{index}",
+                    }
+                }
+            )
+        )
+        results = root / "full-alignment" / "results.json"
+        results.parent.mkdir()
+        results.write_text(json.dumps({"selected_cues": [], "windows": []}))
+        cases.append({"case_manifest": str(case)})
+    slice_path = tmp_path / "slice.json"
+    slice_path.write_text(
+        json.dumps(
+            {
+                "schema_name": "ja-media.forced-alignment.prepared-slice",
+                "cases": cases,
+            }
+        )
+    )
+
+    loaded = read_alignment_cases(slice_path)
+
+    assert set(loaded) == {("sub-1", "hash-1"), ("sub-2", "hash-2")}
