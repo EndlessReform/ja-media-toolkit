@@ -63,13 +63,21 @@ class RuleOverlayMixin:
         current = self.cue_index(source)
         for distance in range(1, len(source.cues) + 1):
             index = (current + delta * distance) % len(source.cues)
-            if cue_has_candidate_flags(source.cues[index]):
+            if cue_needs_review(source.cues[index]):
                 self.stop_playback()
                 self.cue_indices[source.subtitle_id] = index
                 self.ensure_cue_visible()
                 self.refresh_view()
                 return
-        self.notify("No flagged cues in this source")
+        self.notify("No cleaning or alignment flags in this source")
+
+
+def cue_needs_review(cue: ReviewCue) -> bool:
+    """Include failed alignment geometry in the existing flagged-cue walk."""
+
+    return (
+        cue.alignment is not None and cue.alignment.status != "aligned"
+    ) or cue_has_candidate_flags(cue)
 
 
 def render_cue_panel(
@@ -91,6 +99,34 @@ def render_cue_panel(
     )
     if playing:
         header.append(" PLAY", style="bold orange3")
+    if cue.alignment is not None:
+        delta_start = cue.alignment.start_s - original.start_s
+        delta_end = cue.alignment.end_s - original.end_s
+        header.append(
+            f"\nretimed {format_clock(cue.alignment.start_s)} -> "
+            f"{format_clock(cue.alignment.end_s)}  "
+            f"Δ {delta_start:+.2f}s/{delta_end:+.2f}s  "
+            f"{cue.alignment.token_count} tokens  {cue.alignment.status}",
+            style=(
+                "bold red"
+                if cue.alignment.status != "aligned"
+                else "bold yellow"
+            ),
+        )
+        scores = cue.alignment.score_signals or {}
+        if scores:
+            header.append(
+                "\nscore signals  "
+                f"p(min) {scores['min_endpoint_max_probability']:.3f}  "
+                f"margin(min) {scores['min_top_two_probability_margin']:.3f}  "
+                f"entropy(max) {scores['max_normalized_entropy']:.3f}  "
+                f"edge(min) {scores['min_edge_distance_s']:.2f}s  "
+                f"zero/reverse/repeat/back {scores['zero_duration_token_count']}/"
+                f"{scores.get('reversed_token_count', 0)}/"
+                f"{scores['repeated_timestamp_count']}/"
+                f"{scores['backward_token_count']}",
+                style="cyan",
+            )
     kind = decision.kind if decision else "missing"
     comparison = rule_comparison_diff(cue) if rule_overlay else colored_model_diff(cue)
     body = Group(

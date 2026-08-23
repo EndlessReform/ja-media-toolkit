@@ -244,13 +244,18 @@ def merge_token_alignments_by_group(
                 ),
             )
             continue
-        start_s = min(item.start_s for item in items)
-        end_s = max(item.end_s for item in items)
+        timestamps = [value for item in items for value in (item.start_s, item.end_s)]
+        start_s = min(timestamps)
+        end_s = max(timestamps)
+        suspicious = any(item.end_s < item.start_s for item in items) or any(
+            current.start_s < previous.start_s
+            for previous, current in zip(items, items[1:])
+        )
         merged[group.id] = SpanAlignment(
             span_id=group.id,
             start_s=start_s,
             end_s=end_s,
-            status="aligned" if end_s >= start_s else "suspicious",
+            status="suspicious" if suspicious else "aligned",
             metadata={
                 "token_ids": [item.token.id for item in items],
                 "token_count": len(items),

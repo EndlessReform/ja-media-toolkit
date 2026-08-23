@@ -1,300 +1,180 @@
-# Cleaned Subtitle Retiming: First Slice
+# Cleaned Subtitle Forced Alignment: First Episode
 
-Status: approved direction, bounded implementation proposal. This document
-defines the first experiment only. It does not approve a Dagster product,
-automatic publication, or a general subtitle-normalization system.
+Status: working first slice; implementation and full BECK run are complete. Human
+listening review is the remaining gate before choosing a follow-up episode.
 
-## Recommendation
+## Outcome
 
-Start with a cheap subtitle-only funnel, select one base Kitsunekko candidate,
-clean and review its dialogue text, then forced-align that one candidate across
-the complete episode.
+Take the completed cleaned subtitle for BECK episode 1, align every retained cue
+against its canonical Japanese audio, write a retimed SRT, and make failures easy
+to hear and inspect in the existing cleaning review UI.
 
-```text
-canonical episode + embedded timing anchor + Kitsunekko inventory
-  -> categorical candidate gate
-  -> ALASS-derived anchor-fit ranking
-  -> one selected base candidate
-  -> reviewed cleaned dialogue
-  -> full-episode forced alignment
-  -> new retimed SRT + diagnostics
-```
+This slice answers four immediate questions:
 
-Forced alignment is a transformation in this slice, not a candidate-ranking
-fan-out. A later slice may test alignment-derived rejection or confidence
-signals, but only after the selected-candidate path proves useful.
+1. Can deterministic or final cleaned cues drive the aligner without using SRT as
+   the join format? Yes. Stable JSONL records carry both text bases and source cue
+   identity.
+2. Can Qwen results be reconstructed into episode-clock cues? Yes. The client maps
+   word buckets to cue IDs, adds the crop start, and writes 329 retimed cues.
+3. Which unpadded window works for this episode? Use 60 seconds. The 180-second arm
+   produced severe timestamp failures in two of three comparison regions.
+4. Does Qwen expose a direct probability that text exists in the audio? No. Its
+   endpoint distributions and invalid timestamp geometry provide review signals,
+   but this first control set does not justify automatic rejection.
 
-## Problem Being Solved
-
-Kitsunekko commonly offers several files for one episode. Cheap checks can
-discard obvious junk, and the existing ALASS-derived interval score has been
-useful for ranking the survivors. The selected file still needs cleanup before
-alignment because it may contain effects, signs, notices, commentary, karaoke,
-or ASS debris. The first useful end-to-end question is:
-
-> Can one cheaply selected and human-reviewed cleaned candidate be transformed
-> into a useful newly timed subtitle across a complete episode?
-
-## Approved Decisions
-
-1. Canonical bindings provide normal identity/audio; explicit local paths are
-   the ad hoc escape hatch.
-2. Candidate selection precedes cleanup and alignment: rule out obvious junk,
-   then rank the survivors by an ALASS-derived anchor-fit score.
-3. Excess candidate cue count receives no penalty until it exceeds the anchor
-   by more than one third; beyond that point a mild multiplier applies.
-4. The top-ranked eligible candidate is selected immediately. Forced alignment
-   does not fan out across every candidate.
-5. Cleanup is mandatory and reviewed before alignment, which creates a new
-   dialogue-only retimed SRT without mutating its Kitsunekko source.
-6. Dagster integration waits until the five-case slice produces useful
-    results and recognizable failure patterns.
-
-## Repository Facts
-
-- `subtitle_goodness_of_fit` supplies the ALASS-derived interval value.
-- `subtitle_anchor_fit_score` adds active-duration and cue-count penalties. Its
-  cue penalty starts at any excess, so the one-third deadband replaces that
-  term rather than stacking another penalty.
-- Embedded tracks proved useful for rough ranking, not fine speech boundaries.
-- SRT cleaning already records keep, edit, remove, and escalate decisions.
-- Qwen3 alignment works on supplied audio, but episode window planning and cue
-  projection remain unimplemented.
-
-## Scope And Cases
-
-Use five canonical episodes:
-
-1. an ordinary, clean-looking SRT;
-2. a candidate with a substantial constant offset;
-3. a candidate with late drift;
-4. messy ASS containing signs, songs, formatting, or commentary; and
-5. the best available candidate still suspected to be poor.
-
-Cover roughly three series. Canonical cases name an AniList locator and episode
-plus optional selection overrides:
-
-```toml
-[[cases]]
-locator = "anilist:15451:1"
-initial_offset_s = 0.0
-
-[[cases]]
-locator = "anilist:15451:6"
-subtitle_id = "optional-explicit-kitsunekko-id"
-initial_offset_s = -12.4
-```
-
-Without `subtitle_id`, the funnel selects the candidate. An explicit subtitle
-ID bypasses ranking but not validity checks.
-
-The ad hoc escape hatch is deliberately small:
-
-```toml
-[[cases]]
-audio_path = "/path/to/episode.mkv"
-subtitle_path = "/path/to/candidate.ass"
-anchor_path = "/path/to/reference.srt"
-initial_offset_s = 0.0
-```
-
-## Candidate Funnel
-
-### Categorical gate
-
-Rule out a candidate when any of the following is true:
-
-- subtitle download fails;
-- parsing fails;
-- the file has no positive-duration cues;
-- language analysis classifies it as non-Japanese;
-- language analysis reports insufficient text;
-- its episode mapping does not match the requested canonical episode; or
-- it is an unsupported subtitle format.
-
-Japanese and bilingual candidates are eligible. Unknown language remains
-visible but cannot win while a Japanese or bilingual candidate survives.
-
-Coverage, duplicate density, short active duration, and suspicious group hints
-are warnings, not new rejection thresholds.
-
-### Anchor gate
-
-Ranking requires one usable embedded timing anchor. Choose the densest
-parseable embedded track that:
-
-- has at least 100 positive-duration cues;
-- begins within the first 20 percent of episode duration; and
-- ends after 80 percent of episode duration.
-
-These blunt criteria reject sparse signs/song anchors. Without a usable anchor,
-retain the eligible pool and require a manual choice. Change the thresholds
-only in response to an inspected case.
-
-### Ranking score
-
-Let:
-
-- `V` be `subtitle_goodness_of_fit(anchor, candidate)`;
-- `A` be the number of positive-duration anchor cues;
-- `D_anchor` and `D_candidate` be raw active durations; and
-- `r = C_candidate / C_anchor` be the positive-duration cue-count ratio.
-
-Keep the existing active-duration multiplier:
+## Data Flow And Ownership
 
 ```text
-active_multiplier = min(1, D_anchor / D_candidate)
+cleaning manifest + decisions + reconstructed cleaned SRT
+  -> client joins 410 source cues by source hash and original cue index
+  -> client writes 329 retained cue records + 81 exclusions
+  -> client resolves the pinned canonical episode row
+  -> client reads and hashes the exact Bronze audio object
+  -> client cuts consecutive, unpadded mono 16 kHz windows
+  -> vLLM/Qwen returns a probability vector for each requested token boundary
+  -> client selects timestamp buckets and records probability/margin/entropy
+  -> client joins tokens to stable cue IDs and adds each window's episode offset
+  -> client writes episode-clock JSON + retimed SRT
+  -> cleaning review joins candidates back to the 410-cue source and plays audio
 ```
 
-with multiplier `1` when the candidate duration does not exceed the anchor.
+vLLM owns model execution and token-classification probabilities. It does not know
+about SRT cues, source hashes, Bronze, episode offsets, cleaning decisions, or the
+review UI. All cue reconstruction and artifact writing are client-side.
 
-Replace the current immediate cue-count penalty with a one-third deadband:
+SRT is an input/output convenience, not the transfer contract between cleaning and
+alignment. `input-cues.jsonl` is that contract. It retains `source_index`, stable
+`cue_id`, source borders, `mechanical_text`, final `alignment_text`, cleaning action,
+and cleaned SRT ordinal. The runner accepts `--text-base mechanical|cleaned`.
+
+## Pinned Case
 
 ```text
-cue_multiplier = 1                              when r <= 4/3
-cue_multiplier = sqrt((4/3) / r)               when r > 4/3
+series: BECK
+AniList: 57
+episode: 1
+subtitle ID: f2c5d0a0-4cb8-563b-b4de-5b7efd131465
+source SHA-256: f9769b7926c8cf41607064df5c373d8cd4c0457248c5a54bfc8bb7d611673867
+source cues: 410
+retained alignment cues: 329
+excluded cues: 81
+audio duration: 1459.936 seconds
 ```
 
-The initial selection score is:
+Canonical provenance lives in `case.json`, including Silver materialization and
+snapshot IDs, the canonical input fingerprint, Bronze object locator, local audio
+SHA-256, codec, stream, duration, and byte count.
+
+## Artifacts
+
+All local run artifacts live under:
 
 ```text
-selection_score = max(0, V) / A
-                  * active_multiplier
-                  * cue_multiplier
+research/forced-alignment-retiming/output/beck-01-netflix-cleaned/
 ```
 
-This is a ranking heuristic, not an acceptance probability. Sort descending by
-score, then stable subtitle ID, and select the first candidate.
-
-Update the existing helper rather than adding a wrapper penalty. Update its
-tests and displayed subsync scores with the same definition.
-
-## Cleanup Gate
-
-Run the selected candidate through the existing SRT-cleaning workflow.
-
-For this slice, cleanup should:
-
-- retain spoken Japanese;
-- remove sound-effect descriptions and non-spoken signs;
-- remove legal text, credits, translator notes, and release commentary;
-- drop opening and ending karaoke;
-- remove ASS formatting debris; and
-- escalate ambiguous dialogue rather than freely rewriting it.
-
-Review every edit, removal, and escalation. Record decision counts, reviewer
-corrections, and review time.
-
-Stop if accurate spoken text requires cue-by-cue rewriting. That is a cleanup
-failure, not an aligner failure.
-
-The accepted cleaned SRT remains on the source clock. Removed non-dialogue cues
-do not enter the first retimed product.
-
-## Alignment Recipe
-
-Process cleaned cues in source order:
-
-1. Group adjacent cues covering at most approximately 15 source-clock seconds.
-2. Apply the case's coarse `initial_offset_s` when locating audio.
-3. Extract no more than 30 seconds of audio around the group.
-4. Tokenize with the existing Nagisa policy.
-5. Call the existing Qwen3 vLLM adapter.
-6. Translate returned window-relative timestamps to episode time.
-7. Merge token timings into cue start and end times.
-
-Do not add VAD, automatic global-offset search, rolling correction, or multiple
-search strategies yet.
-
-Allow one bounded retry when a group fails or concentrates timestamps at a
-window edge. Retry once in the neighboring 30-second window indicated by the
-edge. If that also fails, mark the group unresolved and continue.
-
-## Local Outputs
-
-Each case writes:
+Important files:
 
 ```text
-output/<case>/
-  candidate-ranking.json
-  source.srt
-  cleaned.srt
-  cleanup-decisions.jsonl
-  windows.jsonl
-  alignments.jsonl
-  retimed.srt
-  unresolved-cues.jsonl
-  summary.md
+case.json
+inputs/input-cues.jsonl
+inputs/excluded-cues.jsonl
+inputs/cleaned.srt
+audio/bd048df5037de583286b1ffa8f7a8a9dfb44c1ce3aadb28bd2a487b4218b1190.ac3
+window-comparison/results.json
+window-comparison/results-180.json
+full-alignment/results.json
+full-alignment/retimed.srt
+confidence-controls/results.json
+summary.md
 ```
 
-`candidate-ranking.json` includes every advertised candidate, categorical gate
-result, warnings, score components, final score, and selected subtitle ID.
+## Completed Checklist
 
-`retimed.srt` is a new dialogue-only artifact. The original candidate and
-embedded anchor remain unchanged.
+- [x] Join the supplied cleaning run to the original BECK source by subtitle ID,
+  source hash, and original cue index.
+- [x] Prove that retained JSONL records reproduce the reconstructed cleaned SRT.
+- [x] Retain both deterministic and final cleaned text on every input cue.
+- [x] Resolve the pinned canonical Silver row and read the exact audio from Bronze.
+- [x] Cache and hash the Japanese AC3 locally without writing to DEV or Bronze.
+- [x] Cut exact, unpadded 30-, 60-, and 180-second mono 16 kHz crops.
+- [x] Run the same early, middle, and late cue identities through all three arms.
+- [x] Run every retained cue across the episode at the selected 60-second size.
+- [x] Convert local Qwen buckets to episode time and reconstruct cue envelopes.
+- [x] Write a 329-cue retimed SRT from final cleaned text.
+- [x] Join candidates to the original 410-cue source in the cleaning review UI.
+- [x] Decode the canonical AC3 through the review audio loader.
+- [x] Play retimed rather than source borders when an alignment candidate exists.
+- [x] Show score components and alignment status in the cue detail panel.
+- [x] Make next/previous flagged navigation include suspicious alignments.
+- [x] Run present, shifted-audio, unrelated-text, inserted-text, and nonspoken-label
+  controls.
+- [ ] Listen through the worst ordinary-dialogue cues and label whether each problem
+  is absent text, cleanup error, wrong border, or model timestamp failure.
 
-## Diagnostics And Review
+## Window Findings
 
-Report the ranked pool, cleanup counts, aligned/unresolved/suspicious cues,
-invalid or edge-pinned timestamps, retries, displacement distribution and
-jumps, cues outside the episode, and runtime. Listen to ordinary early, middle,
-and late regions plus every suspicious region. Record: good, slightly
-early/late, wrong boundary, wrong speech, missing dialogue, hallucinated
-alignment, cleanup error, or cannot judge.
+The comparison targets are around 280, 730, and 1,169 seconds. None is in the
+opening or ending music-only region.
 
-## Implementation Shape
+- The early cue agrees within 40 ms between 30 and 60 seconds. The 180-second arm
+  stretches the same cue to 70.08 seconds and reverses token order.
+- The middle cue is plausible in all arms, but 60 seconds has cleaner endpoint
+  distributions than 180 seconds. The 30-second arm contains a reversed endpoint.
+- The late cue fails in every arm. The 30- and 60-second spans are 17.12 and 15.28
+  seconds; the 180-second span is 79.28 seconds and touches the crop edge.
 
-Keep the experiment disposable:
+The full 60-second run covers all 329 retained cues in 22 populated windows. Empty
+music/SFX windows are skipped because there is no spoken text to align. Failures
+occur throughout ordinary dialogue, not only songs or credits:
 
 ```text
-research/forced-alignment-retiming/
-  pyproject.toml
-  cases.toml
-  probe.py
-  report.py
-  tests/
+aligned: 174
+suspicious: 155
+contains reversed token: 124
+contains backward token order: 113
+touches crop edge: 80
+aligned span over 15 seconds: 66
 ```
 
-Call the existing Qwen adapter directly. Tests cover gating/ranking, the cue
-deadband, grouping, offsets and coordinate conversion, cue projection, the
-single retry, timestamp extraction with a small hard-coded logits array, and
-SRT reconstruction without source mutation.
+For contrast, the 540-600 second window aligned 18/18 cues and the 1320-1380
+second window aligned 7/7. The ordinary-dialogue windows from 960-1080 seconds
+flagged 24/32 cues.
 
-## Execution Order
+## Absent-Text Findings
 
-1. Update and test the anchor-fit cue-count multiplier.
-2. Implement categorical gating and ranking without calling Qwen.
-3. Inspect the selected candidate and score breakdown for all five cases.
-4. Clean and review the ordinary case, prove alignment on a short excerpt, then
-   run its complete episode and inspect runtime and failures.
-5. Continue through the remaining four cases only if that result is promising.
-6. Summarize cleanup burden, ranking behavior, alignment quality, runtime, and
-   recurring failure patterns.
+The present control is aligned with no reversed or backward tokens. All four wrong
+arms are suspicious and contain at least one reversed token. Maximum normalized
+entropy is 0.492 for the present control and 0.615-0.760 for the wrong arms.
 
-## Exit Criteria
+Those observations do not produce a calibrated absent-text probability:
 
-Proceed to a second slice when:
+- reversed-token review would queue 124/329 episode cues;
+- entropy >= 0.60 would queue 144/329 cues;
+- any structural suspicious status would queue 155/329 cues; and
+- minimum endpoint probability below 0.04 would queue 135/329 cues and misses the
+  nonspoken-label control.
 
-- the cheap funnel selects plausible base candidates or clearly requests a
-  manual choice when it lacks a usable anchor;
-- cleanup is manageable on most cases;
-- full-episode alignment works on more than the cleanest case;
-- bad regions can usually be located from diagnostics;
-- runtime is practical; and
-- retimed subtitles materially improve manual review.
+Use structural status first and the probability fields to order human review. Do
+not automatically discard text from this first five-arm control set.
 
-Stop or redesign when:
+## Immediate Review Command
 
-- the ranking repeatedly promotes obvious junk;
-- cleanup becomes episode-specific rewriting;
-- the model silently aligns absent text without recognizable instability;
-- modest source-clock errors routinely place speech outside recoverable
-  windows;
-- unresolved regions are too common; or
-- reviewing the output costs as much as manual retiming.
+```sh
+cd packages/frontend
+uv run ja-media-srt-clean review \
+  --run-dir ../../output/srt-clean/corpus-slice-2026-08-22/luna-openrouter.reconstruct \
+  --alignment-case ../../research/forced-alignment-retiming/output/beck-01-netflix-cleaned/case.json \
+  --episode 1
+```
 
-## Deferred Work
+The case supplies canonical audio automatically. `f` and `F` move among cleaning
+flags and suspicious alignments; cue playback uses the retimed borders.
 
-Defer forced-alignment ranking fan-out, numeric auto-acceptance, confidence
-calibration, VAD checks, series-level reuse, signs/song retiming, Dagster and
-DuckLake integration, automatic publication, and additional aligner backends.
+## Next Decision
+
+Listen to a small worst-first sample across several ordinary-dialogue windows. If
+the bad geometry corresponds to genuinely absent or badly cleaned text, keep the
+current ranking signals and move to a second episode. If much of the text is
+present but Qwen still reverses or stretches timestamps, change the prompt/text
+unit policy before scaling beyond this episode.

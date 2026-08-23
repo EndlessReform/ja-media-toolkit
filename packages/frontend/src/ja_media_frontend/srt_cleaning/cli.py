@@ -148,6 +148,10 @@ def add_review_parser(
         help="Manual local audio/media file to use for playback.",
     )
     review.add_argument(
+        "--alignment-case",
+        help="Prepared case.json whose full-alignment result should be reviewed.",
+    )
+    review.add_argument(
         "--audio-profile",
         default="portable-aac-v1",
         help="Derived audio profile to prefer. Defaults to portable-aac-v1.",

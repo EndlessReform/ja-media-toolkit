@@ -1,6 +1,15 @@
 schema_version = 1
 
 [[case]]
+name = "beck-01-netflix-cleaned"
+namespace = "anilist"
+series_id = "57"
+episode = "1"
+subtitle_id = "f2c5d0a0-4cb8-563b-b4de-5b7efd131465"
+subtitle_source_sha256 = "f9769b7926c8cf41607064df5c373d8cd4c0457248c5a54bfc8bb7d611673867"
+cleaning_reconstruct = "output/srt-clean/corpus-slice-2026-08-22/luna-openrouter.reconstruct"
+
+[[case]]
 name = "arakawa-bridge-09"
 namespace = "anilist"
 series_id = "7647"

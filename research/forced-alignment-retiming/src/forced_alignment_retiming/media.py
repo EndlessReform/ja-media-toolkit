@@ -5,17 +5,12 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 import re
+import subprocess
 
 from ja_media_data.storage.bronze import BronzeStore
 
 
 _SAFE_SUFFIX = re.compile(r"^[a-z0-9]{1,8}$")
-_AC3_BITRATES_KBPS = (
-    32, 40, 48, 56, 64, 80, 96, 112, 128, 160,
-    192, 224, 256, 320, 384, 448, 512, 576, 640,
-)
-
-
 def cache_canonical_media(
     canonical: dict[str, object], case_root: Path, store: BronzeStore
 ) -> tuple[dict[str, object], list[dict[str, object]]]:
@@ -39,10 +34,16 @@ def _cache_audio(
     if not destination.is_file():
         store.download_file(str(canonical["audio_object_key"]), destination)
     return {
+        "object_bucket": canonical["audio_object_bucket"],
+        "object_key": canonical["audio_object_key"],
+        "stream_index": canonical["audio_stream_index"],
+        "codec": canonical.get("audio_codec"),
+        "declared_language": canonical.get("audio_declared_language"),
+        "input_fingerprint": fingerprint,
         "relative_path": destination.relative_to(case_root).as_posix(),
         "byte_count": destination.stat().st_size,
         "sha256": _file_hash(destination),
-        "duration_s": _probe_duration(destination, codec),
+        "duration_s": _probe_duration(destination),
     }
 
 
@@ -64,18 +65,19 @@ def _cache_subtitle(
     }
 
 
-def _probe_duration(path: Path, codec: str) -> float:
-    if codec != "ac3":
-        raise RuntimeError(f"the first slice has no safe duration probe for {codec}")
-    with path.open("rb") as stream:
-        header = stream.read(5)
-    if len(header) != 5 or header[:2] != b"\x0b\x77":
-        raise RuntimeError(f"invalid raw AC3 header: {path}")
-    frame_size_code = header[4] & 0x3F
-    bitrate_index = frame_size_code >> 1
-    if bitrate_index >= len(_AC3_BITRATES_KBPS):
-        raise RuntimeError(f"invalid AC3 frame size code: {frame_size_code}")
-    duration = path.stat().st_size * 8 / (_AC3_BITRATES_KBPS[bitrate_index] * 1000)
+def _probe_duration(path: Path) -> float:
+    """Read duration through ffprobe so the cache accepts any canonical codec."""
+
+    completed = subprocess.run(
+        [
+            "ffprobe", "-v", "error", "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1", str(path),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    duration = float(completed.stdout.strip())
     if duration <= 0:
         raise RuntimeError(f"ffprobe reported invalid duration for {path}")
     return duration

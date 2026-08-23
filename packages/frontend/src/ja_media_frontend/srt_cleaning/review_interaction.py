@@ -136,7 +136,7 @@ class SrtCleaningReviewInteractionMixin:
         self.stop_playback()
         self.anilist_id = anilist_id
         self.episode_number = episode
-        self.source_index = 0
+        self.source_index = self.workspace.preferred_source_index(anilist_id, episode)
         self.window_start_s = 0.0
         key = (anilist_id, episode)
         if sync_rail and key in self.workspace.episode_keys:
@@ -190,7 +190,7 @@ class SrtCleaningReviewInteractionMixin:
         cue = self.current_cue
         if cue is None:
             return
-        start_s, duration_s = playback_range(cue.original)
+        start_s, duration_s = playback_range(cue.playback_cue)
         self._player.play(start_s, duration_s)
         self._playback_status = f"playing {format_clock(start_s)}"
         self._stop_playback_poll()

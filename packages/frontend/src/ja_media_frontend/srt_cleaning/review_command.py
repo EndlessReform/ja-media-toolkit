@@ -24,8 +24,15 @@ def run_review(args: argparse.Namespace) -> None:
     """Resolve a workspace-backed cleaning run and launch the review TUI."""
 
     load_dotenv()
+    alignment_case = (
+        Path(args.alignment_case).expanduser().resolve()
+        if args.alignment_case
+        else None
+    )
     if args.run_dir:
-        workspace = load_review_directory(Path(args.run_dir))
+        workspace = load_review_directory(
+            Path(args.run_dir), alignment_case=alignment_case
+        )
     else:
         workspace_root = (
             Path(args.workspace_root).expanduser() if args.workspace_root else None
@@ -39,7 +46,7 @@ def run_review(args: argparse.Namespace) -> None:
             raise SystemExit(f"Missing review manifest: {run.manifest_path}")
         if not run.reconstruct_dir.exists():
             raise SystemExit(f"Missing reconstruct output: {run.reconstruct_dir}")
-        workspace = load_review_workspace(run)
+        workspace = load_review_workspace(run, alignment_case=alignment_case)
     if not workspace.sources:
         raise SystemExit(f"No reviewable source SRTs found in {workspace.run_dir}")
 
@@ -47,6 +54,11 @@ def run_review(args: argparse.Namespace) -> None:
     initial_anilist_id = args.anilist or first_key[0]
     episode = args.episode or first_key[1]
     manual_audio = Path(args.audio).expanduser().resolve() if args.audio else None
+    if manual_audio is None and alignment_case is not None:
+        import json
+
+        case = json.loads(alignment_case.read_text(encoding="utf-8"))
+        manual_audio = alignment_case.parent / case["audio"]["relative_path"]
     initial_audio = load_review_audio(
         anilist_id=initial_anilist_id,
         episode_number=episode,

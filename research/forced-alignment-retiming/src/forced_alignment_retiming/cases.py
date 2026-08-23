@@ -15,6 +15,9 @@ class CanonicalCase:
     namespace: str
     series_id: str
     episode: str
+    subtitle_id: str | None = None
+    subtitle_source_sha256: str | None = None
+    cleaning_reconstruct: str | None = None
     bootstrap_candidate_id: str | None = None
     prior_identity_score: float | None = None
 
@@ -43,6 +46,9 @@ def load_case(path: Path, name: str) -> CanonicalCase:
         namespace=namespace,
         series_id=series_id,
         episode=episode,
+        subtitle_id=_optional_str(item.get("subtitle_id")),
+        subtitle_source_sha256=_optional_str(item.get("subtitle_source_sha256")),
+        cleaning_reconstruct=_optional_str(item.get("cleaning_reconstruct")),
         bootstrap_candidate_id=_optional_str(item.get("bootstrap_candidate_id")),
         prior_identity_score=_optional_float(item.get("prior_identity_score")),
     )

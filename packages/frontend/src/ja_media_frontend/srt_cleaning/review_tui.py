@@ -109,8 +109,10 @@ class SrtCleaningReviewApp(
             if initial_audio.materialized is not None
             else None
         )
-        self.source_index = 0
-        self.cue_indices: dict[str, int] = {}
+        self.source_index = workspace.preferred_source_index(
+            self.anilist_id, self.episode_number
+        )
+        self.cue_indices = workspace.preferred_cue_indices()
         self.window_start_s = 0.0
         self.window_s = 120.0
         self._playback_status = ""
@@ -169,11 +171,8 @@ class SrtCleaningReviewApp(
 
     @property
     def episode_sources(self) -> tuple[ReviewSource, ...]:
-        return tuple(
-            source
-            for source in self.workspace.sources
-            if source.anilist_id == self.anilist_id
-            and source.episode_number == self.episode_number
+        return self.workspace.sources_for_episode(
+            self.anilist_id, self.episode_number
         )
 
     @property

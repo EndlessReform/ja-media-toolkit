@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import math
 import mimetypes
 from dataclasses import dataclass
 from pathlib import Path
@@ -96,7 +97,7 @@ class Qwen3VllmForcedAligner:
                 "check the server chat template."
             )
 
-        timestamp_s: list[float] = []
+        timestamp_predictions: list[dict[str, float]] = []
         for local_i, token_id in enumerate(local_ids):
             if token_id != timestamp_token_id:
                 continue
@@ -109,22 +110,43 @@ class Qwen3VllmForcedAligner:
                 raise RuntimeError(
                     f"Timestamp row {server_i} is outside logits length {len(logits)}"
                 )
-            timestamp_s.append(
-                _argmax(logits[server_i]) * timestamp_segment_time / 1000
+            row_metrics = _distribution_metrics(logits[server_i])
+            timestamp_predictions.append(
+                {
+                    **row_metrics,
+                    "time_s": row_metrics["argmax_index"]
+                    * timestamp_segment_time
+                    / 1000,
+                    "edge_distance_s": min(
+                        row_metrics["argmax_index"],
+                        len(logits[server_i]) - 1 - row_metrics["argmax_index"],
+                    )
+                    * timestamp_segment_time
+                    / 1000,
+                }
             )
 
         expected = len(plan.tokens) * 2
-        if len(timestamp_s) != expected:
-            raise RuntimeError(f"Expected {expected} timestamps, got {len(timestamp_s)}")
+        if len(timestamp_predictions) != expected:
+            raise RuntimeError(
+                f"Expected {expected} timestamps, got {len(timestamp_predictions)}"
+            )
 
         alignments: list[TokenAlignment] = []
         for index, token in enumerate(plan.tokens):
+            start = timestamp_predictions[index * 2]
+            end = timestamp_predictions[index * 2 + 1]
             alignments.append(
                 TokenAlignment(
                     token=token,
-                    start_s=timestamp_s[index * 2],
-                    end_s=timestamp_s[index * 2 + 1],
-                    metadata={"prompt_layout": plan.layout},
+                    start_s=start["time_s"],
+                    end_s=end["time_s"],
+                    confidence=min(start["max_probability"], end["max_probability"]),
+                    metadata={
+                        "prompt_layout": plan.layout,
+                        "start_distribution": start,
+                        "end_distribution": end,
+                    },
                 )
             )
         return alignments
@@ -225,3 +247,40 @@ def _argmax(values: Sequence[float]) -> int:
             best_i = index
             best_value = value
     return best_i
+
+
+def _distribution_metrics(values: Sequence[float]) -> dict[str, Any]:
+    """Summarize one timestamp distribution without claiming model calibration."""
+
+    if not values:
+        raise ValueError("timestamp logit row is empty")
+    best_i = _argmax(values)
+    best = float(values[best_i])
+    total_input = sum(float(value) for value in values)
+    already_probabilities = (
+        all(float(value) >= 0 for value in values)
+        and math.isclose(total_input, 1.0, rel_tol=1e-3, abs_tol=1e-3)
+    )
+    if already_probabilities:
+        probabilities = [float(value) / total_input for value in values]
+    else:
+        weights = [math.exp(float(value) - best) for value in values]
+        total = sum(weights)
+        probabilities = [weight / total for weight in weights]
+    sorted_probabilities = sorted(probabilities, reverse=True)
+    entropy = -sum(
+        probability * math.log(probability)
+        for probability in probabilities
+        if probability > 0
+    )
+    return {
+        "argmax_index": float(best_i),
+        "distribution_kind": "probabilities" if already_probabilities else "logits",
+        "max_probability": probabilities[best_i],
+        "top_two_probability_margin": (
+            sorted_probabilities[0] - sorted_probabilities[1]
+            if len(sorted_probabilities) > 1
+            else sorted_probabilities[0]
+        ),
+        "normalized_entropy": entropy / math.log(len(values)) if len(values) > 1 else 0.0,
+    }

@@ -16,6 +16,7 @@ from ja_media_frontend.srt_cleaning.review_models import (
     ReviewSource,
     ReviewWorkspace,
 )
+from ja_media_frontend.srt_cleaning.review_alignment import read_alignment_case
 from ja_media_frontend.srt_cleaning.source_rebuild import (
     cleaned_srt_name,
     source_key,
@@ -30,7 +31,9 @@ from ja_media_frontend.srt_cleaning.workspace import (
 )
 
 
-def load_review_workspace(run: SrtCleanRun) -> ReviewWorkspace:
+def load_review_workspace(
+    run: SrtCleanRun, *, alignment_case: Path | None = None
+) -> ReviewWorkspace:
     """Join manifest rows, source SRTs, decisions, and cleaned outputs."""
 
     run_manifest = _read_run_manifest(run)
@@ -40,10 +43,13 @@ def load_review_workspace(run: SrtCleanRun) -> ReviewWorkspace:
         source_root=run.run_dir,
         run_id=str(run_manifest.get("run_id", run.run_id)),
         fallback_anilist_id=int(run_manifest.get("anilist_id", run.anilist_id)),
+        alignment_case=alignment_case,
     )
 
 
-def load_review_directory(reconstruct_dir: Path) -> ReviewWorkspace:
+def load_review_directory(
+    reconstruct_dir: Path, *, alignment_case: Path | None = None
+) -> ReviewWorkspace:
     """Load an explicit reconstructed run, including a multi-series corpus."""
 
     reconstruct_dir = reconstruct_dir.expanduser().resolve()
@@ -69,6 +75,7 @@ def load_review_directory(reconstruct_dir: Path) -> ReviewWorkspace:
         source_root=root,
         run_id=reconstruct_dir.name.removesuffix(".reconstruct"),
         fallback_anilist_id=0,
+        alignment_case=alignment_case,
     )
 
 
@@ -79,16 +86,18 @@ def _load_review_artifacts(
     source_root: Path,
     run_id: str,
     fallback_anilist_id: int,
+    alignment_case: Path | None = None,
 ) -> ReviewWorkspace:
     manifest_rows = read_jsonl(manifest_path)
     _validate_manifest_rows(manifest_path, manifest_rows)
     decisions = _read_decisions(reconstruct_dir / "decisions.jsonl")
+    alignment = read_alignment_case(alignment_case)
     by_source: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in manifest_rows:
         by_source[source_key(row)].append(row)
 
     sources = [
-        _load_source(rows, decisions.get(key, {}), source_root, reconstruct_dir)
+        _load_source(rows, decisions.get(key, {}), source_root, reconstruct_dir, alignment)
         for key, rows in sorted(by_source.items())
     ]
     loaded_sources = tuple(source for source in sources if source.cues)
@@ -191,6 +200,7 @@ def _load_source(
     decisions: dict[int, ReviewDecision],
     source_root: Path,
     reconstruct_dir: Path,
+    alignment: dict[str, Any] | None,
 ) -> ReviewSource:
     rows = sorted(rows, key=lambda row: int(row["window_number"]))
     first = rows[0]
@@ -200,7 +210,15 @@ def _load_source(
     cleaned_path = reconstruct_dir / "cleaned" / cleaned_srt_name(first)
     if not cleaned_path.exists():
         cleaned_path = None
-    review_cues = tuple(_review_cue(cue, decisions.get(cue.index)) for cue in cues)
+    alignment_by_index = (
+        alignment["by_source_index"]
+        if alignment and alignment["source_sha256"] == str(first["source_sha256"])
+        else {}
+    )
+    review_cues = tuple(
+        _review_cue(cue, decisions.get(cue.index), alignment_by_index.get(cue.index))
+        for cue in cues
+    )
     return ReviewSource(
         anilist_id=int(first["anilist_id"]),
         subtitle_id=str(first["subtitle_id"]),
@@ -211,6 +229,7 @@ def _load_source(
         episode_number=_episode_number(first),
         source_sha256=str(first["source_sha256"]),
         cues=review_cues,
+        alignment_path=alignment["results_path"] if alignment_by_index else None,
     )
 
 
@@ -260,7 +279,7 @@ def _trailing_episode_number(value: str) -> int | None:
     return episode if episode > 0 else None
 
 
-def _review_cue(cue: SubtitleCue, decision: ReviewDecision | None) -> ReviewCue:
+def _review_cue(cue: SubtitleCue, decision: ReviewDecision | None, alignment=None) -> ReviewCue:
     mechanical = mechanically_normalize_text(cue.text)
     if decision and decision.mechanical_text is not None:
         return ReviewCue(
@@ -269,6 +288,7 @@ def _review_cue(cue: SubtitleCue, decision: ReviewDecision | None) -> ReviewCue:
             mechanical_text=decision.mechanical_text,
             mechanically_changed=decision.mechanically_changed,
             mechanical_rules=decision.mechanical_rules,
+            alignment=alignment,
         )
     return ReviewCue(
         original=cue,
@@ -276,4 +296,5 @@ def _review_cue(cue: SubtitleCue, decision: ReviewDecision | None) -> ReviewCue:
         mechanical_text=mechanical.text,
         mechanically_changed=mechanical.changed,
         mechanical_rules=mechanical.rules,
+        alignment=alignment,
     )

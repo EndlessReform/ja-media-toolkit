@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 from forced_alignment_retiming.cases import CanonicalCase
 from forced_alignment_retiming.media import _probe_duration
@@ -52,11 +53,15 @@ def test_pair_case_rejects_foreign_candidate_and_selects_japanese(tmp_path: Path
     assert (case_root / "source.srt").is_file()
 
 
-def test_raw_ac3_duration_comes_from_header_bitrate(tmp_path: Path) -> None:
+def test_audio_duration_comes_from_ffprobe(tmp_path: Path, monkeypatch) -> None:
     path = tmp_path / "audio.ac3"
-    path.write_bytes(b"\x0b\x77\x00\x00\x14" + bytes(7680 - 5))
+    path.write_bytes(b"audio")
+    monkeypatch.setattr(
+        "forced_alignment_retiming.media.subprocess.run",
+        lambda *args, **kwargs: SimpleNamespace(stdout="0.320000\n"),
+    )
 
-    assert _probe_duration(path, "ac3") == 0.32
+    assert _probe_duration(path) == 0.32
 
 
 def _candidate(subtitle_id: str, path: str, language_hint: str) -> dict[str, object]:

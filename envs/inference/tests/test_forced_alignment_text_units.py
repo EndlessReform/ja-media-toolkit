@@ -7,7 +7,11 @@ from ja_media_inference.forced_alignment import (
     merge_token_alignments_by_group,
     segment_group_with_nagisa,
 )
-from ja_media_inference.forced_alignment.text_units import TokenAlignment
+from ja_media_inference.forced_alignment.text_units import (
+    AlignmentTextGroup,
+    AlignmentToken,
+    TokenAlignment,
+)
 from ja_media_core.transcripts import SubtitleCue
 
 
@@ -49,3 +53,15 @@ def test_text_lines_and_cues_share_group_shape() -> None:
     assert [group.id for group in line_groups] == ["src:0001", "src:0002"]
     assert cue_groups[0].id == "candidate:cue:7"
     assert cue_groups[0].source_cue is not None
+
+
+def test_merge_uses_timestamp_envelope_and_marks_reversed_token() -> None:
+    group = AlignmentTextGroup("cue:1", "逆")
+    token = AlignmentToken("tok:1", "逆", "cue:1", 0)
+
+    merged = merge_token_alignments_by_group(
+        [group], [TokenAlignment(token, start_s=2.0, end_s=1.0)]
+    )["cue:1"]
+
+    assert (merged.start_s, merged.end_s) == (1.0, 2.0)
+    assert merged.status == "suspicious"
