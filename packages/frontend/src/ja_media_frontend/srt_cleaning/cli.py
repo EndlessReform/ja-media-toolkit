@@ -5,6 +5,8 @@ import sys
 from pathlib import Path
 
 from ja_media_frontend.srt_cleaning.commands import run_generate, run_reconstruct
+from ja_media_frontend.srt_cleaning.provider_batch import run_provider_batch
+from ja_media_frontend.srt_cleaning.provider_cli import register_run_provider_parser
 from ja_media_frontend.srt_cleaning.review_command import run_review
 from ja_media_frontend.srt_cleaning.smoke import (
     fetch_metadata,
@@ -28,6 +30,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_smoke_parser(subparsers)
     add_generate_parser(subparsers)
     register_run_vllm_parser(subparsers)
+    register_run_provider_parser(subparsers)
     add_reconstruct_parser(subparsers)
     add_review_parser(subparsers)
     return parser
@@ -64,6 +67,10 @@ def add_generate_parser(subparsers: argparse._SubParsersAction[argparse.Argument
     generate.add_argument("--anilist", help="Comma-separated AniList IDs")
     generate.add_argument("--anilist-file", help="File with one AniList ID per line")
     generate.add_argument(
+        "--source-manifest",
+        help="Regenerate from the exact cached sources in a prior manifest",
+    )
+    generate.add_argument(
         "--out",
         help="Explicit output prefix; omit to use the AniList workspace",
     )
@@ -74,7 +81,7 @@ def add_generate_parser(subparsers: argparse._SubParsersAction[argparse.Argument
         action="store_true",
         help="Use a stable sha256-* run directory instead of clobbering current",
     )
-    generate.add_argument("--model", default="gpt-5.5", help="Chat model name")
+    generate.add_argument("--model", default="gpt-5.6-luna", help="Chat model name")
     generate.add_argument("--window-size", type=int, default=10)
     generate.add_argument(
         "--context-cues",
@@ -84,6 +91,11 @@ def add_generate_parser(subparsers: argparse._SubParsersAction[argparse.Argument
     )
     generate.add_argument("--group-prefix", action="append")
     generate.add_argument("--episode-one-only", action="store_true")
+    generate.add_argument(
+        "--flagged-windows-only",
+        action="store_true",
+        help="Generate only windows containing a suspicious-cue flag",
+    )
     generate.add_argument("--max-requests-per-shard", type=int, default=50_000)
     generate.add_argument("--max-bytes-per-shard", type=int, default=200 * 1000 * 1000)
     generate.add_argument(
@@ -118,7 +130,12 @@ def add_review_parser(
         "review",
         help="Review original vs cleaned SRTs with optional audio",
     )
-    review.add_argument("--anilist", type=int, required=True, help="AniList series ID")
+    source = review.add_mutually_exclusive_group(required=True)
+    source.add_argument("--anilist", type=int, help="AniList series ID")
+    source.add_argument(
+        "--run-dir",
+        help="Reconstructed single- or multi-series run directory",
+    )
     review.add_argument("--workspace-root", help="Override .ja-media-runs root")
     review.add_argument("--run-id", default="current", help="Workspace run ID")
     review.add_argument(
@@ -152,6 +169,8 @@ def main() -> None:
         )
     elif args.command == "run-vllm":
         run_vllm_batch(args)
+    elif args.command == "run-provider":
+        run_provider_batch(args)
     elif args.command == "reconstruct":
         run_reconstruct(args)
     elif args.command == "review":

@@ -11,6 +11,7 @@ members = [
   "packages/core",
   "packages/data",
   "packages/media",
+  "research/forced-alignment-retiming",
   "research/subtitle-alignment",
 ]
 

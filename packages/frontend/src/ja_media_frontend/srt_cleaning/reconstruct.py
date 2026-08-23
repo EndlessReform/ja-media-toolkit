@@ -71,6 +71,7 @@ def reconstruct_from_batch(
     errors: list[dict[str, Any]] = []
     dlq: list[dict[str, Any]] = []
     window_results: dict[str, WindowResult] = {}
+    failed_window_ids: set[str] = set()
 
     for batch_path in batch_output_paths:
         for line_number, row in iter_jsonl_rows(batch_path, errors):
@@ -82,7 +83,10 @@ def reconstruct_from_batch(
                     **parsed["error"],
                 }
                 errors.append(error)
-                dlq.append(to_dlq_row(error, manifests.get(str(row.get("custom_id", "")))))
+                dlq.append(
+                    to_dlq_row(error, manifests.get(str(row.get("custom_id", ""))))
+                )
+                failed_window_ids.add(str(row.get("custom_id", "")))
                 continue
             result = parsed["result"]
             if result.custom_id in window_results:
@@ -99,6 +103,14 @@ def reconstruct_from_batch(
                 continue
             window_results[result.custom_id] = result
 
+    recovered_ids = failed_window_ids & window_results.keys()
+    if recovered_ids:
+        errors = [
+            error for error in errors if error.get("custom_id") not in recovered_ids
+        ]
+        dlq = [row for row in dlq if row.get("custom_id") not in recovered_ids]
+        failed_window_ids.difference_update(recovered_ids)
+
     decisions_rows: list[dict[str, Any]] = []
     cleaned_count = 0
     skipped_count = 0
@@ -109,7 +121,11 @@ def reconstruct_from_batch(
         decisions_rows.extend(
             render_decision_rows(source_key, source_manifests, window_results)
         )
-        source_errors = validate_source_windows(source_manifests, window_results)
+        source_errors = validate_source_windows(
+            source_manifests,
+            window_results,
+            failed_window_ids=failed_window_ids,
+        )
         if source_errors:
             errors.extend(source_errors)
             dlq.extend(
@@ -121,7 +137,9 @@ def reconstruct_from_batch(
                 continue
 
         source_path = Path(str(source_manifests[0]["local_cache_path"]))
-        cues = parse_srt(source_path.read_text(encoding="utf-8-sig"), source_path=source_path)
+        cues = parse_srt(
+            source_path.read_text(encoding="utf-8-sig"), source_path=source_path
+        )
         decisions_by_index = collect_source_decisions(
             source_manifests,
             window_results,

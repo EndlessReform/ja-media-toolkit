@@ -265,3 +265,28 @@ def clean_result_row(custom_id: str, decisions: list[dict[str, object]]) -> dict
             },
         },
     }
+
+
+def test_result_parser_keeps_clean_v1_results_readable(tmp_path: Path) -> None:
+    source = source_doc(tmp_path / "episode01.srt")
+    window = build_windows(
+        source,
+        SRT_TEXT,
+        window_size=5,
+        context_cues=0,
+        prompt_policy_sha256="a" * 64,
+    )[0]
+    manifest = build_manifest_row(window, model="old-model")
+    manifest["pipeline_version"] = "clean:v1"
+    row = clean_result_row(
+        window.custom_id,
+        [
+            {"id": index, "decision": "asis", "text": None, "category": None}
+            for index in range(1, 6)
+        ],
+    )
+
+    parsed = parse_batch_result_row(row, manifests={window.custom_id: manifest})
+
+    assert "error" not in parsed
+    assert [item.decision for item in parsed["result"].decisions] == ["as_is"] * 5

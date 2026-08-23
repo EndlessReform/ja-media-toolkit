@@ -11,6 +11,8 @@ from pathlib import Path
 
 from rich.console import Console
 
+from ja_media_frontend.srt_cleaning.batch import read_jsonl
+from ja_media_frontend.srt_cleaning.execution_manifest import write_execution_manifest
 from ja_media_frontend.srt_cleaning.workspace import run_for_anilist
 
 
@@ -124,7 +126,14 @@ def run_vllm_batch(args: argparse.Namespace) -> None:
     run_streaming(["docker", "image", "inspect", args.image])
     run_streaming(build_image_start_check(args, paths, env_args))
     run_streaming(docker_cmd)
+    manifest_path = write_execution_manifest(
+        paths.output_path,
+        provider="vllm",
+        requested_model=args.model,
+        rows=read_jsonl(paths.output_path),
+    )
     console.print(f"[green]vLLM results:[/] [cyan]{paths.output_path}[/]")
+    console.print(f"[green]Execution manifest:[/] [cyan]{manifest_path}[/]")
 
 
 def resolve_paths(args: argparse.Namespace) -> VllmBatchPaths:

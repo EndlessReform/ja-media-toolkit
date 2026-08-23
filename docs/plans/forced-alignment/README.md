@@ -4,6 +4,11 @@ Start with [`forced-aligner-backend-design.md`](../../implemented/forced-aligner
 for the backend abstraction and
 proof-of-value workflow.
 
+The current first implementation slice is
+[`cleaned-retiming-first-slice.md`](cleaned-retiming-first-slice.md). It narrows
+the work to cheap candidate gating and ALASS-derived ranking, reviewed cleanup,
+and full-episode retiming of one selected candidate.
+
 Supporting notes:
 
 - [`srt-cleaning-batch-design.md`](../../implemented/srt-cleaning-batch-design.md):

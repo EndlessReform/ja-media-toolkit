@@ -117,6 +117,7 @@ def write_run_manifest(
         "pipeline_version": pipeline_version,
         "prompt_policy_sha256": prompt_policy_sha256,
         "model": model,
+        "requested_model": model,
         "paths": {
             "batch_shards": [path.relative_to(run.run_dir).as_posix() for path in batch_shards],
             "window_manifest": "manifest.jsonl",

@@ -7,7 +7,7 @@ from typing import Any, Iterable
 from ja_media_core.transcripts import SubtitleCue
 
 from ja_media_frontend.srt_cleaning.contracts import CleanDecision
-from ja_media_frontend.srt_cleaning.normalization import mechanically_normalize_text
+from ja_media_frontend.srt_cleaning.preclean import preclean_text
 from ja_media_frontend.srt_cleaning.result_parser import (
     WindowResult,
     base_window_error,
@@ -15,7 +15,9 @@ from ja_media_frontend.srt_cleaning.result_parser import (
 )
 
 
-def group_expected_windows(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+def group_expected_windows(
+    rows: list[dict[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
         grouped[source_key(row)].append(row)
@@ -27,12 +29,16 @@ def group_expected_windows(rows: list[dict[str, Any]]) -> dict[str, list[dict[st
 def validate_source_windows(
     manifests: list[dict[str, Any]],
     results: dict[str, WindowResult],
+    *,
+    failed_window_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     errors: list[dict[str, Any]] = []
     for manifest in manifests:
         custom_id = str(manifest["custom_id"])
         result = results.get(custom_id)
         if result is None:
+            if failed_window_ids and custom_id in failed_window_ids:
+                continue
             errors.append(
                 base_window_error(
                     custom_id,
@@ -129,9 +135,11 @@ def apply_decisions(
     cleaned: list[SubtitleCue] = []
     for cue in cues:
         decision = decisions.get(cue.index)
-        baseline = mechanically_normalize_text(cue.text).text
+        baseline = preclean_text(cue.text).text
+        if not baseline:
+            continue
         if decision is None or decision.decision == "escalate":
-            cleaned.append(cue)
+            cleaned.append(_cue_with_text(cue, baseline))
         elif decision.decision in {"as_is", "asis"}:
             cleaned.append(_cue_with_text(cue, baseline))
         elif decision.decision == "edit":
@@ -181,7 +189,8 @@ def render_decision_rows(
                     "index": source_index,
                     "decision": decision.decision,
                     "text": decision.text,
-                    "category": decision.category,
+                    "reasons": list(decision.reasons),
+                    "served_model": result.served_model,
                     "mechanical_text": mechanical.text,
                     "mechanically_changed": mechanical.changed,
                     "mechanical_rules": list(mechanical.rules),
@@ -211,18 +220,7 @@ def has_blocking_source_error(
     errors: list[dict[str, Any]],
 ) -> bool:
     custom_ids = {str(row["custom_id"]) for row in manifests}
-    blocking = {
-        "missing_result",
-        "duplicate_result",
-        "id_mismatch",
-        "duplicate_decision",
-        "missing_decision",
-        "overlapping_decision",
-    }
-    return any(
-        error.get("custom_id") in custom_ids and error.get("error_kind") in blocking
-        for error in errors
-    )
+    return any(error.get("custom_id") in custom_ids for error in errors)
 
 
 def source_key(row: dict[str, Any]) -> str:
@@ -250,9 +248,9 @@ def _mechanical_for_source_index(row: dict[str, Any], index: int | None):
     texts = row.get("active_original_texts") or row.get("active_texts")
     indexes = row.get("active_indexes")
     if index is None or not isinstance(texts, list) or not isinstance(indexes, list):
-        return mechanically_normalize_text("")
+        return preclean_text("")
     for offset, source_index in enumerate(indexes):
         if int(source_index) == index and offset < len(texts):
             value = texts[offset] if isinstance(texts[offset], str) else ""
-            return mechanically_normalize_text(value)
-    return mechanically_normalize_text("")
+            return preclean_text(value)
+    return preclean_text("")

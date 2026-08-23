@@ -42,3 +42,21 @@ class TimelineWidgetTest(unittest.TestCase):
     def test_clock_formats_sub_hour_and_hour_values(self) -> None:
         self.assertEqual(format_clock(65.25), "01:05.250")
         self.assertEqual(format_clock(3_665.25), "1:01:05.250")
+
+    def test_accepts_per_span_styles(self) -> None:
+        spans = [Span(0.0, 1.0), Span(1.0, 2.0)]
+        widget = TimelineWidget()
+        widget.set_timeline(
+            spans,
+            start_s=0.0,
+            duration_s=2.0,
+            span_styles=("#e03131", "#ff6b6b"),
+        )
+
+        panel = widget.render_timeline()
+        bar = panel.renderable.renderables[2]
+
+        self.assertEqual(
+            {str(span.style) for span in bar.spans},
+            {"#e03131", "#ff6b6b"},
+        )

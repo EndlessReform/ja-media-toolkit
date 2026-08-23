@@ -55,6 +55,8 @@ class TimelineWidget(Static):
         self.empty_message = empty_message
         self._spans: Sequence[TimedSpan] = ()
         self._reference_spans: Sequence[TimedSpan] = ()
+        self._span_styles: Sequence[str] | None = None
+        self._span_legend: Text | None = None
         self._active_span: TimedSpan | None = None
         self._start_s = 0.0
         self._duration_s = 10.0
@@ -71,11 +73,15 @@ class TimelineWidget(Static):
         active_span: TimedSpan | None = None,
         reference_spans: Sequence[TimedSpan] = (),
         reference_title: str = "embedded",
+        span_styles: Sequence[str] | None = None,
+        span_legend: Text | None = None,
     ) -> None:
         """Replace the rendered timeline state and refresh the widget."""
 
         self._spans = spans
         self._reference_spans = reference_spans
+        self._span_styles = span_styles
+        self._span_legend = span_legend
         self._active_span = active_span
         self._start_s = max(0.0, start_s)
         self._duration_s = max(0.001, duration_s)
@@ -114,9 +120,8 @@ class TimelineWidget(Static):
             )
         lines.extend(
             (
-                Text("candidate", style="dim"),
+                self._span_legend or Text("candidate", style="dim"),
                 self.activity_bar(
-                    self._spans,
                     width=width,
                     start_s=self._start_s,
                     end_s=end_s,
@@ -147,6 +152,7 @@ class TimelineWidget(Static):
 
         uses_current_timeline = spans is None
         spans = self._spans if uses_current_timeline else spans
+        per_span_styles = self._span_styles if uses_current_timeline else None
         if uses_current_timeline and active_span is None:
             active_span = self._active_span
         text = Text()
@@ -164,7 +170,11 @@ class TimelineWidget(Static):
             style = (
                 ACTIVE_SPAN_STYLE
                 if span is active_span
-                else styles[span_index % len(styles)]
+                else (
+                    per_span_styles[span_index]
+                    if per_span_styles is not None
+                    else styles[span_index % len(styles)]
+                )
             )
             text.append(SPAN_BLOCK, style=style)
         return text

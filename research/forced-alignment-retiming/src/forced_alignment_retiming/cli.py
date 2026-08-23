@@ -1,0 +1,57 @@
+"""Private command line for the first forced-alignment retiming slice."""
+
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+
+from forced_alignment_retiming.canonical import open_dev_inputs, resolve_case
+from forced_alignment_retiming.cases import load_case
+from forced_alignment_retiming.media import cache_canonical_media
+from forced_alignment_retiming.pull import pull_candidates
+from forced_alignment_retiming.ranking import pair_case
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = PROJECT_ROOT.parents[1]
+
+
+def main() -> None:
+    """Run one bounded research operation without adding a public command."""
+
+    parser = argparse.ArgumentParser(prog="retiming-research")
+    commands = parser.add_subparsers(dest="command", required=True)
+    pair = commands.add_parser(
+        "pair", help="select one Kitsunekko source for one canonical audio case"
+    )
+    pair.add_argument("case")
+    pair.add_argument("--cases", type=Path, default=PROJECT_ROOT / "cases.toml")
+    pair.add_argument("--output-root", type=Path, default=PROJECT_ROOT / "output")
+    pair.add_argument(
+        "--data-config",
+        type=Path,
+        default=REPO_ROOT / "packages" / "data" / "config.dev.toml",
+    )
+    args = parser.parse_args()
+
+    selected = load_case(args.cases.expanduser().resolve(), args.case)
+    data_config = args.data_config.expanduser().resolve()
+    if not data_config.is_file():
+        parser.error(f"data config not found: {data_config}")
+    with open_dev_inputs(data_config) as (connection, bronze):
+        canonical = resolve_case(connection, selected)
+        candidate_manifest = pull_candidates(
+            selected, canonical, args.output_root.expanduser().resolve()
+        )
+        audio, anchors = cache_canonical_media(
+            canonical, candidate_manifest.parent, bronze
+        )
+    ranking = pair_case(
+        selected, canonical, audio, anchors, candidate_manifest
+    )
+    print(f"candidate_manifest={candidate_manifest}")
+    print(f"pairing={ranking}")
+
+
+if __name__ == "__main__":
+    main()

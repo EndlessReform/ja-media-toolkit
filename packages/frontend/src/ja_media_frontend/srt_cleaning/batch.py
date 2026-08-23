@@ -17,7 +17,12 @@ from ja_media_frontend.srt_cleaning.contracts import (
     SourceDocument,
     sha256_text,
 )
-from ja_media_frontend.srt_cleaning.normalization import mechanically_normalize_cue
+from ja_media_frontend.srt_cleaning.preclean import preclean_cue
+from ja_media_frontend.srt_cleaning.jsonl import (
+    encode_jsonl_row,
+    read_jsonl as _read_jsonl,
+    write_jsonl,
+)
 from ja_media_frontend.srt_cleaning.prompt_rendering import render_window_prompt
 from ja_media_frontend.srt_cleaning.workspace import (
     WINDOW_SCHEMA_NAME,
@@ -41,10 +46,8 @@ def build_windows(
         raise ValueError("context_cues must not be negative")
 
     original_cues = parse_srt(source_text, source_path=source.source_path)
-    cues = [
-        mechanically_normalize_cue(cue)
-        for cue in original_cues
-    ]
+    prepared = [preclean_cue(cue) for cue in original_cues]
+    cues = [item[0] for item in prepared]
     source_sha = sha256_text(source_text)
     windows: list[CueWindow] = []
     for offset in range(0, len(cues), window_size):
@@ -64,6 +67,12 @@ def build_windows(
                 prompt_policy_sha256=prompt_policy_sha256,
                 original_active_texts=tuple(
                     cue.text for cue in original_cues[offset : offset + window_size]
+                ),
+                active_rules=tuple(
+                    item[1].rules for item in prepared[offset : offset + window_size]
+                ),
+                active_flags=tuple(
+                    item[1].flags for item in prepared[offset : offset + window_size]
                 ),
             )
         )
@@ -89,6 +98,8 @@ def build_manifest_row(window: CueWindow, *, model: str) -> dict[str, Any]:
         "active_indexes": list(window.active_indexes),
         "active_texts": [cue.text for cue in window.active],
         "active_original_texts": list(window.original_active_texts),
+        "active_rules": [list(rules) for rules in window.active_rules],
+        "active_flags": [list(flags) for flags in window.active_flags],
         "window_number": window.window_number,
         "model": model,
         "prompt_policy_sha256": window.prompt_policy_sha256,
@@ -272,28 +283,7 @@ def prefix_artifact_path(output_prefix: Path, suffix: str) -> Path:
     return output_prefix.with_name(output_prefix.name + suffix)
 
 
-def write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("wb") as handle:
-        for row in rows:
-            handle.write(encode_jsonl_row(row))
-
-
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    with path.open("r", encoding="utf-8") as handle:
-        for line_number, line in enumerate(handle, start=1):
-            stripped = line.strip()
-            if not stripped:
-                continue
-            row = json.loads(stripped)
-            if not isinstance(row, dict):
-                raise ValueError(f"{path}:{line_number} is not a JSON object")
-            rows.append(row)
-    return rows
+    """Compatibility import for callers of the original batch helper."""
 
-
-def encode_jsonl_row(row: dict[str, Any]) -> bytes:
-    return (json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n").encode(
-        "utf-8"
-    )
+    return _read_jsonl(path)

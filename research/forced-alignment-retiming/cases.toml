@@ -1,0 +1,13 @@
+schema_version = 1
+
+[[case]]
+name = "arakawa-bridge-09"
+namespace = "anilist"
+series_id = "7647"
+episode = "9"
+
+# The old identity survey selected this Japanese SRT at 0.7673. The same
+# episode also has a bloated bilingual ASS at 0.1485, so it is useful for the
+# later gate as well as being a likely happy path.
+bootstrap_candidate_id = "f42c4cfa-e54d-51c6-afef-4ed8ef2e0d80"
+prior_identity_score = 0.7673179366411957

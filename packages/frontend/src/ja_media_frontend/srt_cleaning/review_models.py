@@ -12,7 +12,7 @@ class ReviewDecision:
 
     kind: str
     text: str | None
-    category: str | None
+    reasons: tuple[str, ...] = ()
     custom_id: str | None = None
     local_id: int | None = None
     window_number: int | None = None
@@ -21,6 +21,7 @@ class ReviewDecision:
     mechanically_changed: bool = False
     mechanical_rules: tuple[str, ...] = ()
     model_text_matches_mechanical: bool | None = None
+    served_model: str | None = None
 
 
 @dataclass(frozen=True)
@@ -68,6 +69,7 @@ class ReviewCue:
 class ReviewSource:
     """One original SRT candidate and its reconstructed review artifacts."""
 
+    anilist_id: int
     subtitle_id: str
     repo_path: str
     filename: str
@@ -109,3 +111,17 @@ class ReviewWorkspace:
             {source.episode_number for source in self.sources if source.episode_number}
         )
         return tuple(values)
+
+    @property
+    def episode_keys(self) -> tuple[tuple[int, int], ...]:
+        """Return every series/episode pair represented by the run."""
+
+        return tuple(
+            sorted(
+                {
+                    (source.anilist_id, source.episode_number)
+                    for source in self.sources
+                    if source.episode_number is not None
+                }
+            )
+        )
