@@ -117,7 +117,13 @@ def test_suspicious_alignment_is_visible_and_part_of_flagged_walk(tmp_path: Path
     assert cue_needs_review(cue)
     console = Console(record=True, width=140)
     console.print(render_cue_panel(cue, playing=False, rule_overlay=False))
-    assert "suspicious" in console.export_text()
+    rendered = console.export_text()
+    assert "Space plays (forced alignment): 00:00.000 -> 00:18.000" in rendered
+    assert "Moved from original: start 10.00s earlier; end 7.00s later" in rendered
+    assert "NEEDS TIMING REVIEW" in rendered
+    assert "1 text piece ends before it starts" in rendered
+    assert "not a confidence result" in rendered
+    assert "zero/reverse/repeat/back" not in rendered
 
 
 def test_workspace_prefers_aligned_source_for_episode(tmp_path: Path) -> None:

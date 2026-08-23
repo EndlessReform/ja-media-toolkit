@@ -92,48 +92,85 @@ def render_cue_panel(
         return Panel("No cue selected.", title="Original vs cleaned")
     original = cue.original
     decision = cue.decision
-    header = Text(
-        f"{original.index}  {format_clock(original.start_s)} -> "
+    header = Text(f"{original.index}\n", style="bold cyan")
+    header.append(
+        f"Original subtitle time: {format_clock(original.start_s)} -> "
         f"{format_clock(original.end_s)}",
-        style="bold cyan",
+        style="cyan",
     )
-    if playing:
-        header.append(" PLAY", style="bold orange3")
     if cue.alignment is not None:
         delta_start = cue.alignment.start_s - original.start_s
         delta_end = cue.alignment.end_s - original.end_s
         header.append(
-            f"\nretimed {format_clock(cue.alignment.start_s)} -> "
-            f"{format_clock(cue.alignment.end_s)}  "
-            f"Δ {delta_start:+.2f}s/{delta_end:+.2f}s  "
-            f"{cue.alignment.token_count} tokens  {cue.alignment.status}",
-            style=(
-                "bold red"
-                if cue.alignment.status != "aligned"
-                else "bold yellow"
-            ),
+            f"\nSpace plays (forced alignment): "
+            f"{format_clock(cue.alignment.start_s)} -> "
+            f"{format_clock(cue.alignment.end_s)}",
+            style="bold yellow",
         )
-        if cue.alignment.window_index is not None:
-            header.append(
-                f"  {cue.alignment.window_kind or 'window'} "
-                f"{cue.alignment.window_index}  "
-                f"chosen from {cue.alignment.candidate_count}",
-                style="cyan",
-            )
+        if playing:
+            header.append("  PLAYING", style="bold orange3")
+        header.append(
+            f"\nMoved from original: start {_movement_phrase(delta_start)}; "
+            f"end {_movement_phrase(delta_end)}",
+            style="white",
+        )
         scores = cue.alignment.score_signals or {}
+        reversed_count = int(scores.get("reversed_token_count", 0))
+        backward_count = int(scores.get("backward_token_count", 0))
+        if cue.alignment.status != "aligned":
+            warning = "The aligner returned text timestamps in a broken order."
+            if reversed_count or backward_count:
+                warning = (
+                    f"{_count_phrase(reversed_count, 'text piece')} "
+                    f"{_verb(reversed_count, 'ends', 'end')} before it starts; "
+                    f"{_count_phrase(backward_count, 'text piece')} "
+                    f"{_verb(backward_count, 'starts', 'start')} before the "
+                    "previous one."
+                )
+            header.append(
+                f"\nNEEDS TIMING REVIEW — {warning} "
+                "This is a timestamp-order warning, not a confidence result.",
+                style="bold red",
+            )
+        else:
+            header.append(
+                "\nTimestamp order looks consistent. This does not confirm that "
+                "the subtitle text is present in the audio.",
+                style="green",
+            )
+        if cue.alignment.window_index is not None:
+            window_description = {
+                "core": "main audio window",
+                "boundary": "second pass around a speech break",
+            }.get(cue.alignment.window_kind or "", "audio window")
+            header.append(
+                f"\nTiming source: {window_description} "
+                f"#{cue.alignment.window_index}; selected from "
+                f"{cue.alignment.candidate_count} candidate timings.",
+                style="magenta",
+            )
         if scores:
             header.append(
-                "\nscore signals  "
-                f"p(min) {scores['min_endpoint_max_probability']:.3f}  "
-                f"margin(min) {scores['min_top_two_probability_margin']:.3f}  "
-                f"entropy(max) {scores['max_normalized_entropy']:.3f}  "
-                f"edge(min) {scores['min_edge_distance_s']:.2f}s  "
-                f"zero/reverse/repeat/back {scores['zero_duration_token_count']}/"
-                f"{scores.get('reversed_token_count', 0)}/"
-                f"{scores['repeated_timestamp_count']}/"
-                f"{scores['backward_token_count']}",
-                style="cyan",
+                "\nExperimental model scores (not pass/fail): "
+                f"weakest chosen-time probability "
+                f"{scores['min_endpoint_max_probability']:.3f}; "
+                f"smallest lead over the next time "
+                f"{scores['min_top_two_probability_margin']:.3f}; "
+                f"widest uncertainty {scores['max_normalized_entropy']:.3f}; "
+                f"closest chosen time to an audio edge "
+                f"{scores['min_edge_distance_s']:.2f}s.",
+                style="dim cyan",
             )
+            header.append(
+                f"\nAligner split: {cue.alignment.token_count} text pieces. "
+                f"Timestamp shape: {scores['zero_duration_token_count']} zero-length; "
+                f"{reversed_count} end-before-start; "
+                f"{scores['repeated_timestamp_count']} reused times; "
+                f"{backward_count} out-of-order starts.",
+                style="dim",
+            )
+    elif playing:
+        header.append("  PLAYING ORIGINAL TIME", style="bold orange3")
     kind = decision.kind if decision else "missing"
     comparison = rule_comparison_diff(cue) if rule_overlay else colored_model_diff(cue)
     body = Group(
@@ -148,6 +185,22 @@ def render_cue_panel(
     )
     title = "Original vs cleaned — rule overlay" if rule_overlay else "Original vs cleaned"
     return Panel(body, title=title, expand=True)
+
+
+def _movement_phrase(delta_s: float) -> str:
+    if abs(delta_s) < 0.005:
+        return "unchanged"
+    direction = "later" if delta_s > 0 else "earlier"
+    return f"{abs(delta_s):.2f}s {direction}"
+
+
+def _count_phrase(count: int, singular: str) -> str:
+    suffix = "" if count == 1 else "s"
+    return f"{count} {singular}{suffix}"
+
+
+def _verb(count: int, singular: str, plural: str) -> str:
+    return singular if count == 1 else plural
 
 
 def rule_comparison_diff(cue: ReviewCue) -> Group:
