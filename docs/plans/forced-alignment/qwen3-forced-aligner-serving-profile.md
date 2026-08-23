@@ -142,8 +142,28 @@ model with `StepPool` using timestamp token ID `151705`. Measure float and binar
 encodings against that endpoint. Add an IO processor only if transferring the
 selected timestamp rows still matters.
 
-Do not replace this with `/completions`. The forced-aligner architecture removes
-the language-model head and applies a 5,000-class timestamp head. Those classes
-are 80 ms time bins, not vocabulary tokens. Completion top-k would score the
-wrong head and introduce an autoregressive API around a model designed to fill
-all timestamp slots in one forward pass.
+## Post-Change Measurements
+
+After enabling `StepPool`, the same 46.35-second fixture produced 248 rows for
+124 text tokens under every encoding. Each row still contains 5,000 timestamp
+classes.
+
+| Encoding | Wire bytes | Request to headers | Body transfer | Client parse |
+| --- | ---: | ---: | ---: | ---: |
+| float JSON | 27,738,449 | 544 ms | 267 ms | 146 ms |
+| base64 fp16 | 3,306,930 | 162 ms | 26 ms | 3.6 ms |
+| raw fp16 bytes | 2,480,000 | 138 ms | 22 ms | under 0.1 ms |
+
+The ordinary adapter also completed all 18 Bronze-backed stability requests.
+A profiled 30-second, one-token request returned two timestamp rows and spent
+37.5 ms waiting for vLLM headers, 2.2 ms parsing its 224 KB float response, and
+78.4 ms in the complete aligner call. These results show that row selection
+alone removes the pathological response. Binary encoding remains available for
+later throughput work but is not required to continue alignment review.
+
+Stock vLLM `/completions` is not a drop-in route for this checkpoint because its
+generation protocol expects the language-model head while the forced-aligner
+architecture exposes a 5,000-class timestamp head. A small custom prefill route
+could run that timestamp head and return its top-k values; that is straightforward
+checkpoint and serving work, but the measured `StepPool` result makes it
+unnecessary for the current spike.
