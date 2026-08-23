@@ -86,11 +86,22 @@ class ReviewCue:
 
         return self.cue_with_timing(use_alignment=True)
 
-    def cue_with_timing(self, *, use_alignment: bool) -> SubtitleCue:
-        """Project this cue onto original or forced-aligned borders."""
+    def cue_for_timing(self, *, use_alignment: bool) -> SubtitleCue | None:
+        """Return this cue on one track, or none when absent from aligned output."""
 
-        if not use_alignment or self.alignment is None:
+        if not use_alignment:
             return self.original
+        if self.alignment is None:
+            return None
+        return self._aligned_cue()
+
+    def cue_with_timing(self, *, use_alignment: bool) -> SubtitleCue:
+        """Project onto a track, falling back to source borders when absent."""
+
+        return self.cue_for_timing(use_alignment=use_alignment) or self.original
+
+    def _aligned_cue(self) -> SubtitleCue:
+        assert self.alignment is not None
         return SubtitleCue(
             source_path=self.original.source_path,
             index=self.original.index,
@@ -134,8 +145,10 @@ class ReviewSource:
 
         return max(
             (
-                cue.cue_with_timing(use_alignment=use_alignment).end_s
+                timed.end_s
                 for cue in self.cues
+                if (timed := cue.cue_for_timing(use_alignment=use_alignment))
+                is not None
             ),
             default=0.0,
         )

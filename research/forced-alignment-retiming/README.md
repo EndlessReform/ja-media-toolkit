@@ -48,9 +48,10 @@ downloaded `audio.relative_path`. Initial load and source or episode changes use
 that prepared local audio. The derived-audio service is only the fallback for a
 source without a prepared alignment; an explicit `--audio` still takes priority.
 `f` and `F` move among cleaning flags and suspicious alignments. F5 starts on
-the borders written to each case's `full-alignment/retimed.srt`; press `t` to
-switch both the timeline and Space playback between those forced-aligned borders
-and the source subtitle borders. The active pair is labelled in the cue panel.
+the cues and borders written to each case's `full-alignment/retimed.srt`; press
+`t` to switch both the timeline and Space playback between that materialized
+subtitle and the source subtitle. A source cue removed before alignment is absent
+from the aligned timeline and is labelled as such in the cue panel.
 
 ## Preparation and concurrency
 

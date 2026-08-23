@@ -212,22 +212,24 @@ class SrtCleaningReviewApp(
             timeline.set_timeline((), start_s=0, duration_s=self.window_s)
         else:
             use_alignment = self.timing_mode == "aligned"
-            timed_cues = tuple(
-                cue.cue_with_timing(use_alignment=use_alignment)
+            timed_rows = tuple(
+                (cue, timed)
                 for cue in source.cues
+                if (timed := cue.cue_for_timing(use_alignment=use_alignment))
+                is not None
             )
+            timed_cues = tuple(timed for _, timed in timed_rows)
+            review_cues = tuple(cue for cue, _ in timed_rows)
             timeline.set_timeline(
                 timed_cues,
                 start_s=self.window_start_s,
                 duration_s=self.window_s,
-                title=f"{source.filename} — {self.timing_mode} borders",
-                active_span=(
-                    timed_cues[self.cue_index(source)] if timed_cues else None
-                ),
+                title=f"{source.filename} — {self.timing_mode} subtitle borders",
+                active_span=self.current_timed_cue(),
                 span_styles=(
-                    rule_timeline_styles(source.cues)
+                    rule_timeline_styles(review_cues)
                     if self.rule_overlay
-                    else timeline_styles(source.cues)
+                    else timeline_styles(review_cues)
                 ),
                 span_legend=(
                     rule_timeline_legend() if self.rule_overlay else timeline_legend()

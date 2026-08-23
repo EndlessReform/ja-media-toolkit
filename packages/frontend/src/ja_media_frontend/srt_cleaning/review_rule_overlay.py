@@ -98,9 +98,9 @@ def render_cue_panel(
     header.append(
         f"Original subtitle borders: {format_clock(original.start_s)} -> "
         f"{format_clock(original.end_s)}",
-        style="bold yellow" if not uses_alignment else "cyan",
+        style="bold yellow" if timing_mode == "original" else "cyan",
     )
-    if not uses_alignment:
+    if timing_mode == "original":
         header.append("  ACTIVE", style="bold yellow")
         if playing:
             header.append(" / PLAYING", style="bold orange3")
@@ -177,6 +177,11 @@ def render_cue_panel(
                 f"{backward_count} out-of-order starts.",
                 style="dim",
             )
+    elif timing_mode == "aligned":
+        header.append(
+            "\nNot present in the materialized aligned subtitle.",
+            style="bold red",
+        )
     kind = decision.kind if decision else "missing"
     comparison = rule_comparison_diff(cue) if rule_overlay else colored_model_diff(cue)
     body = Group(

@@ -193,7 +193,7 @@ class SrtCleaningReviewInteractionMixin:
         cue = self.current_cue
         if cue is None:
             return None
-        return cue.cue_with_timing(use_alignment=self.timing_mode == "aligned")
+        return cue.cue_for_timing(use_alignment=self.timing_mode == "aligned")
 
     def action_toggle_timing(self) -> None:
         """Switch F5 timeline and playback together between timing tracks."""
@@ -215,6 +215,8 @@ class SrtCleaningReviewInteractionMixin:
             return
         cue = self.current_timed_cue()
         if cue is None:
+            self._playback_status = "cue is not in aligned subtitle"
+            self.refresh_view()
             return
         start_s, duration_s = playback_range(cue)
         self._player.play(start_s, duration_s)

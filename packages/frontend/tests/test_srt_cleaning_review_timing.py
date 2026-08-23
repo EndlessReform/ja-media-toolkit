@@ -17,7 +17,9 @@ from srt_cleaning_review_fixtures import prepared_run
 def test_f5_toggles_timeline_and_playback_between_aligned_and_original(
     tmp_path: Path,
 ) -> None:
-    async def run_app() -> tuple[list[tuple[float, float]], tuple[str, float, float]]:
+    async def run_app() -> tuple[
+        list[tuple[float, float]], tuple[str, int, float, float]
+    ]:
         loaded = load_review_workspace(prepared_run(tmp_path))
         original_source = loaded.sources[0]
         aligned_cue = replace(
@@ -44,12 +46,19 @@ def test_f5_toggles_timeline_and_playback_between_aligned_and_original(
             app._player = player  # type: ignore[assignment]
             await pilot.press("space")
             timeline = app.query_one("#timeline", TimelineWidget)
+            assert len(timeline._spans) == 1
             assert timeline._spans[0].start_s == 5.5
+            await pilot.press("l")
+            await pilot.press("space")
+            assert player.calls == [(5.5, 1.25)]
+            assert app.playback_status() == "cue is not in aligned subtitle"
+            await pilot.press("h")
             await pilot.press("t")
             await pilot.press("space")
             timeline = app.query_one("#timeline", TimelineWidget)
             return player.calls, (
                 app.timing_mode,
+                len(timeline._spans),
                 timeline._spans[0].start_s,
                 timeline._spans[0].end_s,
             )
@@ -57,7 +66,7 @@ def test_f5_toggles_timeline_and_playback_between_aligned_and_original(
     calls, final_state = asyncio.run(run_app())
 
     assert calls == [(5.5, 1.25), (1.0, 1.0)]
-    assert final_state == ("original", 1.0, 2.0)
+    assert final_state == ("original", 2, 1.0, 2.0)
 
 
 class _RecordingPlayer:
