@@ -55,7 +55,9 @@ def test_compact_client_preserves_caller_tokens_and_score_metadata() -> None:
     profiled = client.align_crop_profiled(
         audio_id=audio_id, crop_start_s=10, crop_end_s=70, tokens=[token]
     )
-    assert profiled.profile == {
-        "adapter_decode_s": 0.1,
-        "vllm_request_to_headers_s": 0.2,
-    }
+    assert profiled.profile["adapter_decode_s"] == 0.1
+    assert profiled.profile["vllm_request_to_headers_s"] == 0.2
+    assert profiled.profile["adapter_http_to_headers_s"] >= 0
+    assert profiled.profile["adapter_http_body_s"] >= 0
+    assert profiled.profile["adapter_http_json_s"] >= 0
+    assert profiled.profile["adapter_response_bytes"] > 0

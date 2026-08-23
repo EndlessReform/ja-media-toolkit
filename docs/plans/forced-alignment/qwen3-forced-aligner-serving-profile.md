@@ -162,6 +162,26 @@ and distribution reduction took 43.5 ms, and the full raw-LAN call took 407 ms.
 The production adapter uses Docker loopback rather than that physical-LAN body
 transfer, so the adapter-only deployment is the next end-to-end measurement.
 
+The deployed binary adapter then completed the identical 60-second Fumoffu
+request at every tested concurrency with no failures:
+
+| Concurrent requests | Requests/second | Median latency |
+| ---: | ---: | ---: |
+| 1 | 5.81 | 0.172 s |
+| 8 | 26.31 | 0.269 s |
+| 16 | 32.33 | 0.449 s |
+| 24 | 38.82 | 0.531 s |
+| 32 | 34.12 | 0.838 s |
+| 64 | 41.27 | 1.378 s |
+
+At 64, the adapter handler finished in a median 0.757 seconds, but response
+headers reached the client at 1.347 seconds. The 0.590-second gap occurs after
+the synchronous handler returns; the 128 KB body then transfers in 60 ms and
+client JSON parsing takes 0.5 ms. The likely remaining bottleneck is FastAPI's
+single-process response-model serialization and event-loop scheduling, not the
+binary pooling body. Inside the handler, the largest median stages were vLLM
+queue plus execution at 358 ms and NumPy timestamp reduction at 255 ms.
+
 Stock vLLM `/completions` is not a drop-in route for this checkpoint because its
 generation protocol expects the language-model head while the forced-aligner
 architecture exposes a 5,000-class timestamp head. A small custom prefill route

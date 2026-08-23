@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+import time
 from typing import Any
 
 import httpx
@@ -94,7 +95,7 @@ class Qwen3AdapterClient:
                 for token in tokens
             ],
         }
-        result = self._post("/align", payload)
+        result, client_profile = self._post_profiled("/align", payload)
         alignments = []
         returned_ids: set[str] = set()
         for row in result["alignments"]:
@@ -124,7 +125,11 @@ class Qwen3AdapterClient:
         return ProfiledAlignmentCall(
             alignments=alignments,
             profile={
-                key: value for key, value in (result.get("profile") or {}).items()
+                **{
+                    key: value
+                    for key, value in (result.get("profile") or {}).items()
+                },
+                **client_profile,
             },
         )
 
@@ -136,3 +141,27 @@ class Qwen3AdapterClient:
         if not isinstance(result, dict):
             raise RuntimeError("adapter response was not a JSON object")
         return result
+
+    def _post_profiled(
+        self, path: str, payload: dict[str, Any]
+    ) -> tuple[dict[str, Any], dict[str, float | int]]:
+        started = time.perf_counter()
+        with self._client.stream(
+            "POST", f"{self.base_url}{path}", json=payload
+        ) as response:
+            headers_received = time.perf_counter()
+            response.read()
+            body_received = time.perf_counter()
+        if response.status_code != 200:
+            raise RuntimeError(f"adapter HTTP {response.status_code}: {response.text}")
+        parse_started = time.perf_counter()
+        result = response.json()
+        parsed = time.perf_counter()
+        if not isinstance(result, dict):
+            raise RuntimeError("adapter response was not a JSON object")
+        return result, {
+            "adapter_http_to_headers_s": headers_received - started,
+            "adapter_http_body_s": body_received - headers_received,
+            "adapter_http_json_s": parsed - parse_started,
+            "adapter_response_bytes": len(response.content),
+        }
