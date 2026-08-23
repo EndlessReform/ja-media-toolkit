@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import time
 from typing import Callable, Protocol, Sequence
 
 from fastapi import FastAPI, HTTPException, Response
@@ -76,17 +77,35 @@ def create_app(
 
     @app.post("/align", response_model=AlignmentResponse)
     def align(request: AlignmentRequest) -> AlignmentResponse:
+        started = time.perf_counter()
         try:
             source = cache.resolve(request.audio_id)
             tokens = [_token_from_request(token) for token in request.tokens]
+            decode_started = time.perf_counter()
             with decoded_crop(
                 source, start_s=request.crop_start_s, end_s=request.crop_end_s
             ) as crop:
-                results = aligner.align_tokens(audio_path=crop, tokens=tokens)
+                decode_finished = time.perf_counter()
+                profiled_method = getattr(aligner, "align_tokens_profiled", None)
+                if profiled_method is None:
+                    align_started = time.perf_counter()
+                    results = aligner.align_tokens(audio_path=crop, tokens=tokens)
+                    profile: dict[str, float | int] = {
+                        "aligner_total_s": time.perf_counter() - align_started
+                    }
+                else:
+                    profiled = profiled_method(audio_path=crop, tokens=tokens)
+                    results = profiled.alignments
+                    profile = dict(profiled.timings)
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except (OSError, RuntimeError) as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
+        profile = {
+            "adapter_decode_s": decode_finished - decode_started,
+            **profile,
+            "adapter_before_response_s": time.perf_counter() - started,
+        }
         return AlignmentResponse(
             audio_id=request.audio_id,
             crop_start_s=request.crop_start_s,
@@ -101,6 +120,7 @@ def create_app(
                 )
                 for result in results
             ],
+            profile=profile,
         )
 
     return app

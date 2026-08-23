@@ -81,6 +81,7 @@ class AlignmentResponse(_Contract):
     crop_start_s: float
     crop_end_s: float
     alignments: list[TokenAlignmentResponse]
+    profile: dict[str, float | int] = Field(default_factory=dict)
 
 
 class HealthResponse(_Contract):

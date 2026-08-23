@@ -54,13 +54,14 @@ def run_concurrency_sweep(
     client = Qwen3AdapterClient(base_url=base_url)
     audio_id = client.cache_audio(case["audio"])
 
-    def request() -> None:
-        client.align_crop(
+    def request() -> dict[str, float | int]:
+        result = client.align_crop_profiled(
             audio_id=audio_id,
             crop_start_s=crop_start_s,
             crop_end_s=crop_end_s,
             tokens=tokens,
         )
+        return result.profile
 
     request()
     measurements = []
@@ -71,7 +72,7 @@ def run_concurrency_sweep(
             break
     report = {
         "schema_name": "ja-media.forced-alignment.concurrency-sweep",
-        "schema_version": "2.0.0",
+        "schema_version": "3.0.0",
         "case": case["case"],
         "backend": client.name,
         "window_s": window_s,
@@ -104,22 +105,34 @@ def suggest_concurrency(measurements: list[dict[str, Any]]) -> int:
 
 
 def _run_wave(
-    request: Callable[[], None], *, concurrency: int, audio_seconds: float
+    request: Callable[[], dict[str, float | int]],
+    *,
+    concurrency: int,
+    audio_seconds: float,
 ) -> dict[str, Any]:
     started = time.monotonic()
     latencies: list[float] = []
     errors: list[str] = []
+    profiles: list[dict[str, float | int]] = []
 
-    def timed_request() -> float:
+    def timed_request() -> tuple[float, dict[str, float | int]]:
         request_started = time.monotonic()
-        request()
-        return time.monotonic() - request_started
+        profile = request()
+        roundtrip_s = time.monotonic() - request_started
+        profile = {**profile, "client_roundtrip_s": roundtrip_s}
+        if "adapter_before_response_s" in profile:
+            profile["adapter_response_and_lan_s"] = max(
+                0.0, roundtrip_s - float(profile["adapter_before_response_s"])
+            )
+        return roundtrip_s, profile
 
     with ThreadPoolExecutor(max_workers=concurrency) as executor:
         futures = [executor.submit(timed_request) for _ in range(concurrency)]
         for future in as_completed(futures):
             try:
-                latencies.append(future.result())
+                latency, profile = future.result()
+                latencies.append(latency)
+                profiles.append(profile)
             except Exception as exc:  # retain a bounded server/client diagnostic
                 errors.append(f"{type(exc).__name__}: {exc}")
     wall_s = time.monotonic() - started
@@ -133,5 +146,18 @@ def _run_wave(
         "audio_realtime_factor": completed * audio_seconds / wall_s,
         "median_latency_s": median(latencies) if latencies else None,
         "max_latency_s": max(latencies) if latencies else None,
+        "median_profile": _aggregate_profile(profiles, median),
+        "max_profile": _aggregate_profile(profiles, max),
         "errors": errors[:3],
+    }
+
+
+def _aggregate_profile(
+    profiles: list[dict[str, float | int]],
+    aggregate: Callable[[list[float]], float],
+) -> dict[str, float]:
+    keys = sorted({key for profile in profiles for key in profile})
+    return {
+        key: aggregate([float(profile[key]) for profile in profiles if key in profile])
+        for key in keys
     }

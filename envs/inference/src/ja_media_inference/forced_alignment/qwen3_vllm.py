@@ -1,20 +1,22 @@
 from __future__ import annotations
 
-import base64
 import json
 import math
-import mimetypes
 from dataclasses import dataclass
 from pathlib import Path
+import time
 from typing import Any, Literal, Sequence
 
-import httpx
 from huggingface_hub import hf_hub_download
 from transformers import AutoTokenizer
 
 from ja_media_inference.forced_alignment.audio_probe import (
     audio_edge_distance,
     probe_audio_duration,
+)
+from ja_media_inference.forced_alignment.pooling_transport import (
+    build_pooling_payload,
+    post_pooling_profiled,
 )
 from ja_media_inference.forced_alignment.text_units import (
     AlignmentToken,
@@ -24,7 +26,6 @@ from ja_media_inference.forced_alignment.text_units import (
 
 PromptLayout = Literal["after-token", "wrap-token"]
 PROMPT_PREFIX = "<|audio_start|><|audio_pad|><|audio_end|>"
-RAW_CONTENT_CHAT_TEMPLATE = "{{ messages[0]['content'] }}"
 
 
 @dataclass(frozen=True)
@@ -34,6 +35,14 @@ class PromptPlan:
     prompt: str
     tokens: tuple[AlignmentToken, ...]
     layout: PromptLayout
+
+
+@dataclass(frozen=True)
+class ProfiledAlignment:
+    """Token timings plus measured stages for one vLLM request."""
+
+    alignments: list[TokenAlignment]
+    timings: dict[str, float | int]
 
 
 class Qwen3VllmForcedAligner:
@@ -64,6 +73,19 @@ class Qwen3VllmForcedAligner:
         audio_path: str | Path,
         tokens: Sequence[AlignmentToken],
     ) -> list[TokenAlignment]:
+        return self.align_tokens_profiled(
+            audio_path=audio_path, tokens=tokens
+        ).alignments
+
+    def align_tokens_profiled(
+        self,
+        *,
+        audio_path: str | Path,
+        tokens: Sequence[AlignmentToken],
+    ) -> ProfiledAlignment:
+        """Align tokens and measure request construction, vLLM, and reduction."""
+
+        started = time.perf_counter()
         plan = build_prompt_plan(tokens, layout=self.prompt_layout)
         payload = build_pooling_payload(
             model=self.model,
@@ -71,15 +93,30 @@ class Qwen3VllmForcedAligner:
             audio_path=Path(audio_path),
             include_chat_template=self.trust_request_chat_template,
         )
-        response = post_pooling(
+        payload_ready = time.perf_counter()
+        response, upstream_timings = post_pooling_profiled(
             f"{self.base_url}/pooling",
             payload,
             timeout_s=self.timeout_s,
         )
-        return self.extract_token_alignments(
+        upstream_done = time.perf_counter()
+        alignments = self.extract_token_alignments(
             plan=plan,
             pooling_json=response,
             audio_duration_s=probe_audio_duration(Path(audio_path)),
+        )
+        finished = time.perf_counter()
+        logits = response["data"][0]["data"]
+        return ProfiledAlignment(
+            alignments=alignments,
+            timings={
+                "prompt_and_audio_payload_s": payload_ready - started,
+                **upstream_timings,
+                "timestamp_reduction_s": finished - upstream_done,
+                "aligner_total_s": finished - started,
+                "vllm_output_rows": len(logits),
+                "vllm_classes_per_row": len(logits[0]) if logits else 0,
+            },
         )
 
     def extract_token_alignments(
@@ -185,54 +222,6 @@ def build_prompt_plan(
         tokens=tuple(tokens),
         layout=layout,
     )
-
-
-def build_pooling_payload(
-    *,
-    model: str,
-    prompt: str,
-    audio_path: Path,
-    include_chat_template: bool,
-) -> dict[str, Any]:
-    mime_type = mimetypes.guess_type(audio_path)[0] or "audio/wav"
-    audio_b64 = base64.b64encode(audio_path.read_bytes()).decode("ascii")
-    payload: dict[str, Any] = {
-        "model": model,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {
-                        "type": "audio_url",
-                        "audio_url": {
-                            "url": f"data:{mime_type};base64,{audio_b64}",
-                        },
-                    },
-                ],
-            }
-        ],
-        "task": "token_classify",
-    }
-    if include_chat_template:
-        payload["chat_template"] = RAW_CONTENT_CHAT_TEMPLATE
-    return payload
-
-
-def post_pooling(
-    url: str,
-    payload: dict[str, Any],
-    *,
-    timeout_s: float,
-) -> dict[str, Any]:
-    with httpx.Client(timeout=timeout_s) as client:
-        response = client.post(url, json=payload)
-    if response.status_code != 200:
-        raise RuntimeError(f"vLLM HTTP {response.status_code}: {response.text}")
-    result = response.json()
-    if "data" not in result:
-        raise RuntimeError(f"vLLM response did not include data: {result}")
-    return result
 
 
 def load_timestamp_config(model: str) -> tuple[int, float]:

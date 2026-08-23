@@ -49,7 +49,8 @@ def test_adapter_caches_ac3_crops_pcm_and_returns_compact_timings(
     assert first.json()["cached"] is False
     assert second.json()["cached"] is True
     assert aligned.status_code == 200
-    assert aligned.json()["alignments"] == [
+    payload = aligned.json()
+    assert payload["alignments"] == [
         {
             "token_id": "token:1",
             "start_s": 0.16,
@@ -58,6 +59,9 @@ def test_adapter_caches_ac3_crops_pcm_and_returns_compact_timings(
             "metadata": {"max_probability": 0.75},
         }
     ]
+    assert payload["profile"]["adapter_decode_s"] >= 0
+    assert payload["profile"]["aligner_total_s"] >= 0
+    assert payload["profile"]["adapter_before_response_s"] >= 0
     assert aligner.observed_sample_rate == 16000
     assert aligner.observed_channels == 1
     assert 1.20 <= aligner.observed_duration_s <= 1.30

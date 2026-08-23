@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -11,6 +12,14 @@ from ja_media_inference.forced_alignment.text_units import (
     AlignmentToken,
     TokenAlignment,
 )
+
+
+@dataclass(frozen=True)
+class ProfiledAlignmentCall:
+    """One compact adapter result with server-measured stage timings."""
+
+    alignments: list[TokenAlignment]
+    profile: dict[str, float | int]
 
 
 class Qwen3AdapterClient:
@@ -49,7 +58,24 @@ class Qwen3AdapterClient:
         crop_end_s: float,
         tokens: Sequence[AlignmentToken],
     ) -> list[TokenAlignment]:
-        """Align an episode crop while keeping the raw tensor on the server."""
+        """Align an episode crop while keeping the raw model output on the server."""
+
+        return self.align_crop_profiled(
+            audio_id=audio_id,
+            crop_start_s=crop_start_s,
+            crop_end_s=crop_end_s,
+            tokens=tokens,
+        ).alignments
+
+    def align_crop_profiled(
+        self,
+        *,
+        audio_id: str,
+        crop_start_s: float,
+        crop_end_s: float,
+        tokens: Sequence[AlignmentToken],
+    ) -> ProfiledAlignmentCall:
+        """Align a crop and return the adapter's measured stage timings."""
 
         by_id = {token.id: token for token in tokens}
         payload = {
@@ -95,7 +121,12 @@ class Qwen3AdapterClient:
             raise RuntimeError(
                 f"adapter returned {len(alignments)} of {len(tokens)} token alignments"
             )
-        return alignments
+        return ProfiledAlignmentCall(
+            alignments=alignments,
+            profile={
+                key: value for key, value in (result.get("profile") or {}).items()
+            },
+        )
 
     def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         response = self._client.post(f"{self.base_url}{path}", json=payload)

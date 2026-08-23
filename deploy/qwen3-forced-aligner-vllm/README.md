@@ -1,8 +1,8 @@
 # Qwen3 Forced Aligner vLLM Deployment
 
 This folder runs `Qwen/Qwen3-ForcedAligner-0.6B` behind stock vLLM plus a thin
-FastAPI adapter. The adapter keeps vLLM's large `/pooling` tensor on the GPU
-host and returns compact token timings to LAN clients.
+FastAPI adapter. The adapter reduces vLLM's per-token classification rows on
+the GPU host and returns compact token timings to LAN clients.
 
 It is intentionally separate from the root `compose.yaml`, which is the local
 ja-media service stack. The adapter image is built from the repository checkout
@@ -53,6 +53,7 @@ Key settings:
 - `SERVER_PORT`: host port mapped to the compact adapter
 - `HF_HOME`: host cache directory for model weights
 - `MAX_NUM_BATCHED_TOKENS`: optional per-iteration token budget
+- `EXTRA_VLLM_ARGS`: optional vLLM flags, including profiling flags used below
 - `packages/data/config.local.toml`: the existing Bronze endpoint, bucket,
   prefix, and addressing style
 - `packages/data/.env.local`: the existing read-only Bronze credentials
@@ -65,6 +66,38 @@ SoundFile are present when `/pooling` receives an audio item.
 If the selected vLLM base image does not contain
 `Qwen3ASRForcedAlignerForTokenClassification`, pin `VLLM_BASE_IMAGE` and
 `VLLM_AUDIO_EXTRA_VERSION` to a vLLM release that does.
+
+## Profile Before Tuning
+
+The stress report records the median and maximum of these stages for every
+concurrency level:
+
+- AC-3 crop decode;
+- prompt construction and WAV base64 encoding;
+- adapter-to-vLLM request through response headers;
+- vLLM response-body transfer and JSON parsing;
+- timestamp-row reduction;
+- complete adapter time; and
+- the remaining response serialization plus LAN time seen by the Mac.
+
+It also records the exact vLLM request bytes, response bytes, returned row
+count, and classes per row. These measurements establish whether transport,
+CPU work, queueing, or model execution is limiting the sweep.
+
+vLLM 0.24 also has built-in OpenTelemetry spans for queue, scheduler, model
+forward, and model execute time. The optional Compose profile runs Jaeger for
+one profiling session:
+
+```bash
+COMPOSE_PROFILES=profiling \
+EXTRA_VLLM_ARGS='--otlp-traces-endpoint http://jaeger:4318/v1/traces --collect-detailed-traces model,worker' \
+./scripts/start-compose.sh
+```
+
+Run the stress sweep, then open `http://SERVER_HOST:16686`, select
+`qwen3-forced-aligner-vllm`, and inspect the requests from that run. Remove the
+two settings and restart when profiling is finished; detailed traces have
+nonzero overhead and are not a serving default.
 
 ## Start With Compose
 

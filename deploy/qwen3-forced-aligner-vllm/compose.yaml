@@ -16,6 +16,8 @@ services:
       MODEL_ID: ${MODEL_ID:-Qwen/Qwen3-ForcedAligner-0.6B}
       MAX_NUM_BATCHED_TOKENS: ${MAX_NUM_BATCHED_TOKENS:-}
       EXTRA_VLLM_ARGS: ${EXTRA_VLLM_ARGS:-}
+      OTEL_SERVICE_NAME: qwen3-forced-aligner-vllm
+      OTEL_EXPORTER_OTLP_TRACES_PROTOCOL: http/protobuf
     volumes:
       - ${HF_HOME:-/var/lib/qwen3-forced-aligner/huggingface}:/root/.cache/huggingface
       - ./config:/config:ro
@@ -38,6 +40,15 @@ services:
       timeout: 10s
       retries: 10
       start_period: 5m
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.57
+    profiles: [profiling]
+    restart: unless-stopped
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "${JAEGER_UI_PORT:-16686}:16686"
 
   adapter:
     image: ${ALIGNER_ADAPTER_IMAGE:-qwen3-forced-aligner-adapter:local}

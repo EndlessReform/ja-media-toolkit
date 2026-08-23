@@ -17,6 +17,10 @@ def test_compact_client_preserves_caller_tokens_and_score_metadata() -> None:
         return httpx.Response(
             200,
             json={
+                "profile": {
+                    "adapter_decode_s": 0.1,
+                    "vllm_request_to_headers_s": 0.2,
+                },
                 "alignments": [
                     {
                         "token_id": "token:1",
@@ -25,7 +29,7 @@ def test_compact_client_preserves_caller_tokens_and_score_metadata() -> None:
                         "confidence": 0.6,
                         "metadata": {"normalized_entropy": 0.2},
                     }
-                ]
+                ],
             },
         )
 
@@ -47,3 +51,11 @@ def test_compact_client_preserves_caller_tokens_and_score_metadata() -> None:
     assert results[0].token is token
     assert results[0].start_s == 1.2
     assert results[0].metadata == {"normalized_entropy": 0.2}
+
+    profiled = client.align_crop_profiled(
+        audio_id=audio_id, crop_start_s=10, crop_end_s=70, tokens=[token]
+    )
+    assert profiled.profile == {
+        "adapter_decode_s": 0.1,
+        "vllm_request_to_headers_s": 0.2,
+    }
