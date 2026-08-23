@@ -162,8 +162,8 @@ and distribution reduction took 43.5 ms, and the full raw-LAN call took 407 ms.
 The production adapter uses Docker loopback rather than that physical-LAN body
 transfer, so the adapter-only deployment is the next end-to-end measurement.
 
-The deployed binary adapter then completed the identical 60-second Fumoffu
-request at every tested concurrency with no failures:
+The first concurrency sweep repeated one identical 60-second Fumoffu request.
+It completed every tested level with no failures:
 
 | Concurrent requests | Requests/second | Median latency |
 | ---: | ---: | ---: |
@@ -181,6 +181,33 @@ client JSON parsing takes 0.5 ms. The likely remaining bottleneck is FastAPI's
 single-process response-model serialization and event-loop scheduling, not the
 binary pooling body. Inside the handler, the largest median stages were vLLM
 queue plus execution at 358 ms and NumPy timestamp reduction at 255 ms.
+
+That sweep was warm-cache traffic, not a production throughput measurement.
+The vLLM metrics after the run reported zero prefix-cache queries and hits, and
+prefix caching was disabled. They also reported 225 multimodal-cache hits.
+vLLM 0.24 hashes each audio item and can reuse both its processed tensors and
+its encoder embeddings across requests. Repeating the exact crop therefore
+skipped work that ordinary episode windows must perform.
+
+The stress harness now uses distinct, evenly spaced episode crops by default;
+`--stress-audio-pattern repeated` remains available to measure the deliberately
+warm case. A 64-way run with 65 distinct crops—one warmup plus 64 measured
+requests—added zero multimodal-cache hits and zero prefix-cache hits:
+
+| 64-way input | Requests/second | Median latency | Audio throughput |
+| --- | ---: | ---: | ---: |
+| Repeated crop | 41.27 | 1.378 s | 2,476x realtime |
+| Distinct crops | 30.66 | 1.874 s | 1,839x realtime |
+
+The repeated-input cache inflated request throughput by about 35% relative to
+the distinct-crop run (`41.27 / 30.66 - 1`). The distinct-crop number is the
+valid 64-way result. It does not by itself locate the concurrency knee; that
+requires running the distinct-crop sweep at several levels.
+
+vLLM 0.24 source anchors for the two separate multimodal caches:
+
+- [processed multimodal input cache](https://github.com/vllm-project/vllm/blob/v0.24.0/vllm/multimodal/cache.py)
+- [multimodal encoder embedding cache](https://github.com/vllm-project/vllm/blob/v0.24.0/vllm/v1/core/encoder_cache_manager.py)
 
 Stock vLLM `/completions` is not a drop-in route for this checkpoint because its
 generation protocol expects the language-model head while the forced-aligner

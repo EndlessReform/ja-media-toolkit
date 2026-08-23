@@ -12,7 +12,10 @@ from ja_media_inference.forced_alignment.stability_runner import (
     select_lexical_targets,
     summarize_stability,
 )
-from ja_media_inference.forced_alignment.stress_runner import suggest_concurrency
+from ja_media_inference.forced_alignment.stress_runner import (
+    _evenly_spaced_crop_starts,
+    suggest_concurrency,
+)
 from ja_media_inference.forced_alignment.text_units import TokenAlignment
 
 
@@ -86,6 +89,14 @@ def test_stress_suggestion_picks_smallest_level_near_peak_throughput() -> None:
     ]
 
     assert suggest_concurrency(measurements) == 16
+
+
+def test_stress_crops_are_unique_full_length_and_span_episode() -> None:
+    starts = _evenly_spaced_crop_starts(duration_s=300, window_s=60, count=4)
+
+    assert starts == [30.0, 90.0, 150.0, 210.0]
+    assert len(set(starts)) == 4
+    assert starts[-1] + 60 <= 300
 
 
 def test_stability_runner_writes_a_new_result_directory(

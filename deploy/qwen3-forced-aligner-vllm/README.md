@@ -86,6 +86,11 @@ It also records the exact vLLM request bytes, response bytes, returned row
 count, and classes per row. These measurements establish whether transport,
 CPU work, queueing, or model execution is limiting the sweep.
 
+The stress command uses different episode crops for every request by default.
+This prevents vLLM's multimodal processor and encoder caches from turning the
+run into a repeated-audio microbenchmark. Use `--stress-audio-pattern repeated`
+only when intentionally measuring that warm-cache case.
+
 The measured result, OpenTelemetry keys, and vLLM extension options are in
 [Qwen3 Forced Aligner Serving Profile](../../docs/plans/forced-alignment/qwen3-forced-aligner-serving-profile.md).
 

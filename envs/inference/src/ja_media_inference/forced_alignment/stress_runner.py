@@ -27,11 +27,14 @@ def run_concurrency_sweep(
     levels: tuple[int, ...] = (1, 2, 4, 8, 16, 32),
     window_s: float = 60.0,
     text_field: str = "alignment_text",
+    audio_pattern: str = "unique",
 ) -> Path:
-    """Run one identical compact alignment wave at each client concurrency."""
+    """Measure concurrency with unique episode crops or a warm repeated crop."""
 
     if not levels or any(level <= 0 for level in levels):
         raise ValueError("concurrency levels must be positive")
+    if audio_pattern not in {"unique", "repeated"}:
+        raise ValueError("audio_pattern must be 'unique' or 'repeated'")
     case_root = case_manifest.parent
     case = json.loads(case_manifest.read_text(encoding="utf-8"))
     duration_s = float(case["audio"]["duration_s"])
@@ -44,8 +47,11 @@ def run_concurrency_sweep(
         positions=(("middle", 0.5),),
     )[0]
     crop_start_s = _midpoint(target) - window_s / 2
-    crop_end_s = crop_start_s + window_s
-    members = [row for row in records if crop_start_s <= _midpoint(row) < crop_end_s]
+    members = [
+        row
+        for row in records
+        if crop_start_s <= _midpoint(row) < crop_start_s + window_s
+    ]
     groups = [
         AlignmentTextGroup(id=str(row["cue_id"]), text=str(row[text_field]))
         for row in members
@@ -54,30 +60,47 @@ def run_concurrency_sweep(
     client = Qwen3AdapterClient(base_url=base_url)
     audio_id = client.cache_audio(case["audio"])
 
-    def request() -> dict[str, float | int]:
+    def request(start_s: float) -> dict[str, float | int]:
         result = client.align_crop_profiled(
             audio_id=audio_id,
-            crop_start_s=crop_start_s,
-            crop_end_s=crop_end_s,
+            crop_start_s=start_s,
+            crop_end_s=start_s + window_s,
             tokens=tokens,
         )
         return result.profile
 
-    request()
+    request_count = 1 + sum(levels)
+    if audio_pattern == "unique":
+        crop_starts = _evenly_spaced_crop_starts(
+            duration_s=duration_s,
+            window_s=window_s,
+            count=request_count,
+        )
+    else:
+        crop_starts = [crop_start_s] * request_count
+    request(crop_starts[0])
     measurements = []
+    next_crop = 1
     for level in levels:
-        measurement = _run_wave(request, concurrency=level, audio_seconds=window_s)
+        wave_starts = crop_starts[next_crop : next_crop + level]
+        next_crop += level
+        measurement = _run_wave(
+            [lambda start_s=start_s: request(start_s) for start_s in wave_starts],
+            audio_seconds=window_s,
+        )
         measurements.append(measurement)
         if measurement["failed_requests"]:
             break
     report = {
         "schema_name": "ja-media.forced-alignment.concurrency-sweep",
-        "schema_version": "3.0.0",
+        "schema_version": "4.0.0",
         "case": case["case"],
         "backend": client.name,
         "window_s": window_s,
         "cue_count": len(groups),
         "token_count": len(tokens),
+        "audio_pattern": audio_pattern,
+        "distinct_crop_count": len(set(crop_starts)),
         "levels": measurements,
         "suggested_concurrency": suggest_concurrency(measurements),
     }
@@ -105,17 +128,19 @@ def suggest_concurrency(measurements: list[dict[str, Any]]) -> int:
 
 
 def _run_wave(
-    request: Callable[[], dict[str, float | int]],
+    requests: list[Callable[[], dict[str, float | int]]],
     *,
-    concurrency: int,
     audio_seconds: float,
 ) -> dict[str, Any]:
+    concurrency = len(requests)
     started = time.monotonic()
     latencies: list[float] = []
     errors: list[str] = []
     profiles: list[dict[str, float | int]] = []
 
-    def timed_request() -> tuple[float, dict[str, float | int]]:
+    def timed_request(
+        request: Callable[[], dict[str, float | int]],
+    ) -> tuple[float, dict[str, float | int]]:
         request_started = time.monotonic()
         profile = request()
         roundtrip_s = time.monotonic() - request_started
@@ -127,7 +152,7 @@ def _run_wave(
         return roundtrip_s, profile
 
     with ThreadPoolExecutor(max_workers=concurrency) as executor:
-        futures = [executor.submit(timed_request) for _ in range(concurrency)]
+        futures = [executor.submit(timed_request, request) for request in requests]
         for future in as_completed(futures):
             try:
                 latency, profile = future.result()
@@ -150,6 +175,20 @@ def _run_wave(
         "max_profile": _aggregate_profile(profiles, max),
         "errors": errors[:3],
     }
+
+
+def _evenly_spaced_crop_starts(
+    *, duration_s: float, window_s: float, count: int
+) -> list[float]:
+    """Return distinct full-length crops spread across an episode."""
+
+    if count <= 0:
+        raise ValueError("crop count must be positive")
+    available_s = duration_s - window_s
+    if available_s <= 0:
+        raise ValueError("audio duration must be longer than the stress window")
+    step_s = available_s / count
+    return [(index + 0.5) * step_s for index in range(count)]
 
 
 def _aggregate_profile(

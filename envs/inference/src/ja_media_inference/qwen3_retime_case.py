@@ -65,6 +65,12 @@ def main() -> None:
         default="1,2,4,8,16,32",
         help="Comma-separated concurrency sweep levels.",
     )
+    parser.add_argument(
+        "--stress-audio-pattern",
+        choices=("unique", "repeated"),
+        default="unique",
+        help="Use production-like unique crops or a deliberately warm repeated crop.",
+    )
     args = parser.parse_args()
     manifest = args.case_manifest.expanduser().resolve()
     text_field = {
@@ -113,6 +119,7 @@ def main() -> None:
             base_url=args.base_url,
             levels=levels,
             text_field=text_field,
+            audio_pattern=args.stress_audio_pattern,
         )
         print(f"stress={result}")
 
