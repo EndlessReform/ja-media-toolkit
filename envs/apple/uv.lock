@@ -609,11 +609,13 @@ dependencies = [
     { name = "fastapi" },
     { name = "httpx" },
     { name = "ja-media-core", extra = ["audio"] },
+    { name = "ja-media-media", extra = ["playback"] },
     { name = "numpy" },
     { name = "parse-torrent-title" },
     { name = "pydantic" },
     { name = "python-dotenv" },
     { name = "sounddevice" },
+    { name = "tenacity" },
     { name = "textual" },
     { name = "uvicorn" },
 ]
@@ -624,11 +626,13 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.28,<1" },
     { name = "ja-media-apple", marker = "extra == 'apple'", editable = "." },
     { name = "ja-media-core", extras = ["audio"], editable = "../../packages/core" },
+    { name = "ja-media-media", extras = ["playback"], editable = "../../packages/media" },
     { name = "numpy" },
     { name = "parse-torrent-title", specifier = ">=2.8.2" },
     { name = "pydantic", specifier = ">=2.13.4" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "sounddevice", specifier = ">=0.5.5" },
+    { name = "tenacity", specifier = ">=9.1.4" },
     { name = "textual", specifier = ">=8.2.7" },
     { name = "uvicorn", specifier = ">=0.49.0" },
 ]
@@ -641,6 +645,23 @@ dev = [{ name = "pytest", specifier = ">=9.1.0" }]
 name = "ja-media-media"
 version = "0.1.0"
 source = { editable = "../../packages/media" }
+dependencies = [
+    { name = "ja-media-core" },
+]
+
+[package.optional-dependencies]
+playback = [
+    { name = "numpy" },
+    { name = "sounddevice" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "ja-media-core", editable = "../../packages/core" },
+    { name = "numpy", marker = "extra == 'playback'", specifier = ">=2.4.4" },
+    { name = "sounddevice", marker = "extra == 'playback'", specifier = ">=0.5.5" },
+]
+provides-extras = ["playback"]
 
 [[package]]
 name = "jinja2"
@@ -1812,6 +1833,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/83/d3/803453b36afefb7c2bb238361cd4ae6125a569b4db67cd9e79846ba2d68c/sympy-1.14.0.tar.gz", hash = "sha256:d3d3fe8df1e5a0b42f0e7bdf50541697dbe7d23746e894990c030e2b05e72517", size = 7793921, upload-time = "2025-04-27T18:05:01.611Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a2/09/77d55d46fd61b4a135c444fc97158ef34a095e5681d0a6c10b75bf356191/sympy-1.14.0-py3-none-any.whl", hash = "sha256:e091cc3e99d2141a0ba2847328f5479b05d94a6635cb96148ccb3f34671bd8f5", size = 6299353, upload-time = "2025-04-27T18:04:59.103Z" },
+]
+
+[[package]]
+name = "tenacity"
+version = "9.1.4"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/47/c6/ee486fd809e357697ee8a44d3d69222b344920433d3b6666ccd9b374630c/tenacity-9.1.4.tar.gz", hash = "sha256:adb31d4c263f2bd041081ab33b498309a57c77f9acf2db65aadf0898179cf93a", size = 49413, upload-time = "2026-02-07T10:45:33.841Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d7/c1/eb8f9debc45d3b7918a32ab756658a0904732f75e555402972246b0b8e71/tenacity-9.1.4-py3-none-any.whl", hash = "sha256:6095a360c919085f28c6527de529e76a06ad89b23659fa881ae0649b867a9d55", size = 28926, upload-time = "2026-02-07T10:45:32.24Z" },
 ]
 
 [[package]]

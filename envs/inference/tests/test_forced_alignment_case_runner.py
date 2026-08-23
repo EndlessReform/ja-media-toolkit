@@ -2,7 +2,6 @@
 
 from ja_media_inference.forced_alignment.case_runner import (
     _retimed_cues,
-    _window_starts,
     select_targets,
 )
 
@@ -20,10 +19,6 @@ def test_selects_same_fixed_cues_for_window_comparison() -> None:
     targets = select_targets(records, 100.0)
 
     assert [row["cue_id"] for row in targets.values()] == ["cue:2", "cue:5", "cue:8"]
-
-
-def test_full_windows_are_consecutive_and_unpadded() -> None:
-    assert _window_starts(370.0, 180.0) == [0.0, 180.0, 360.0]
 
 
 def test_retimed_srt_uses_the_text_that_was_aligned() -> None:

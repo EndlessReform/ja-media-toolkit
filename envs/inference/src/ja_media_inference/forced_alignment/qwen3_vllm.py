@@ -12,6 +12,10 @@ import httpx
 from huggingface_hub import hf_hub_download
 from transformers import AutoTokenizer
 
+from ja_media_inference.forced_alignment.audio_probe import (
+    audio_edge_distance,
+    probe_audio_duration,
+)
 from ja_media_inference.forced_alignment.text_units import (
     AlignmentToken,
     TokenAlignment,
@@ -72,13 +76,18 @@ class Qwen3VllmForcedAligner:
             payload,
             timeout_s=self.timeout_s,
         )
-        return self.extract_token_alignments(plan=plan, pooling_json=response)
+        return self.extract_token_alignments(
+            plan=plan,
+            pooling_json=response,
+            audio_duration_s=probe_audio_duration(Path(audio_path)),
+        )
 
     def extract_token_alignments(
         self,
         *,
         plan: PromptPlan,
         pooling_json: dict[str, Any],
+        audio_duration_s: float,
     ) -> list[TokenAlignment]:
         tokenizer = self._load_tokenizer()
         timestamp_token_id, timestamp_segment_time = self._load_timestamp_config()
@@ -111,18 +120,20 @@ class Qwen3VllmForcedAligner:
                     f"Timestamp row {server_i} is outside logits length {len(logits)}"
                 )
             row_metrics = _distribution_metrics(logits[server_i])
+            time_s = row_metrics["argmax_index"] * timestamp_segment_time / 1000
             timestamp_predictions.append(
                 {
                     **row_metrics,
-                    "time_s": row_metrics["argmax_index"]
-                    * timestamp_segment_time
-                    / 1000,
-                    "edge_distance_s": min(
+                    "time_s": time_s,
+                    "distribution_edge_distance_s": min(
                         row_metrics["argmax_index"],
                         len(logits[server_i]) - 1 - row_metrics["argmax_index"],
                     )
                     * timestamp_segment_time
                     / 1000,
+                    "edge_distance_s": audio_edge_distance(
+                        time_s, audio_duration_s
+                    ),
                 }
             )
 

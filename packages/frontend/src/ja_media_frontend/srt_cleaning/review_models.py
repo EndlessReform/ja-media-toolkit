@@ -34,6 +34,9 @@ class ReviewAlignment:
     status: str
     token_count: int = 0
     score_signals: dict[str, Any] | None = None
+    window_index: int | None = None
+    window_kind: str | None = None
+    candidate_count: int = 1
 
 
 @dataclass(frozen=True)

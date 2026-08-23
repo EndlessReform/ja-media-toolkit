@@ -22,8 +22,12 @@ def main() -> None:
         help="Comma-separated comparison windows in seconds.",
     )
     parser.add_argument(
-        "--full-window-size", type=float, default=180.0,
-        help="Window size in seconds for the full-episode run.",
+        "--vad-plan", type=Path,
+        help="JSON output from ja-media vad-local --split-every-minutes.",
+    )
+    parser.add_argument(
+        "--boundary-radius-s", type=float, default=30.0,
+        help="Audio on each side of a VAD cut; 30s keeps probes 60s long.",
     )
     parser.add_argument(
         "--output", type=Path,
@@ -50,10 +54,13 @@ def main() -> None:
         )
         print(f"window_comparison={result}")
     elif args.command == "full":
+        if args.vad_plan is None:
+            parser.error("full requires --vad-plan")
         result = align_full_case(
             manifest,
             base_url=args.base_url,
-            window_s=args.full_window_size,
+            vad_plan_path=args.vad_plan.expanduser().resolve(),
+            boundary_radius_s=args.boundary_radius_s,
             text_field=text_field,
         )
         print(f"full_alignment={result}")

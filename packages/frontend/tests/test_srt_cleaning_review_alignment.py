@@ -42,6 +42,9 @@ def test_alignment_case_links_source_index_and_changes_playback_clock(
                                 "aligned_end_s": 14.0,
                                 "status": "aligned",
                                 "token_count": 3,
+                                "alignment_window_index": 4,
+                                "alignment_window_kind": "boundary",
+                                "alignment_candidate_count": 2,
                             }
                         ]
                     }
@@ -63,6 +66,9 @@ def test_alignment_case_links_source_index_and_changes_playback_clock(
     assert loaded["source_sha256"] == "abc123"
     assert cue.playback_cue.start_s == 12.5
     assert cue.playback_cue.end_s == 14.0
+    assert alignment.window_index == 4
+    assert alignment.window_kind == "boundary"
+    assert alignment.candidate_count == 2
 
 
 def test_suspicious_alignment_is_visible_and_part_of_flagged_walk(tmp_path: Path) -> None:

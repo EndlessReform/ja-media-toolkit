@@ -20,7 +20,9 @@ def read_alignment_case(case_path: Path | None) -> dict[str, Any] | None:
     if not results_path.is_file():
         raise FileNotFoundError(f"Missing full alignment results: {results_path}")
     results = json.loads(results_path.read_text(encoding="utf-8"))
-    cues = [cue for window in results["windows"] for cue in window["cues"]]
+    cues = results.get("selected_cues") or [
+        cue for window in results["windows"] for cue in window["cues"]
+    ]
     return {
         "source_sha256": case["cleaned_subtitle"]["source_sha256"],
         "results_path": results_path,
@@ -31,6 +33,13 @@ def read_alignment_case(case_path: Path | None) -> dict[str, Any] | None:
                 status=str(cue["status"]),
                 token_count=int(cue.get("token_count", 0)),
                 score_signals=dict(cue.get("score_signals") or {}),
+                window_index=(
+                    int(cue["alignment_window_index"])
+                    if cue.get("alignment_window_index") is not None
+                    else None
+                ),
+                window_kind=cue.get("alignment_window_kind"),
+                candidate_count=int(cue.get("alignment_candidate_count", 1)),
             )
             for cue in cues
         },

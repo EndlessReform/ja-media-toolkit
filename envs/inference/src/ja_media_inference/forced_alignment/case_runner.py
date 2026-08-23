@@ -16,13 +16,15 @@ from ja_media_inference.forced_alignment.text_units import (
     merge_token_alignments_by_group,
     segment_group_with_nagisa,
 )
+from ja_media_inference.forced_alignment.window_planner import (
+    plan_alignment_windows,
+    records_for_window,
+    select_alignment_candidates,
+)
 
 
 WINDOW_SIZES_S = (30.0, 60.0, 180.0)
 TARGET_FRACTIONS = (0.2, 0.5, 0.8)
-FULL_WINDOW_S = 180.0
-
-
 def compare_case_windows(
     case_manifest: Path,
     *,
@@ -89,63 +91,66 @@ def align_full_case(
     case_manifest: Path,
     *,
     base_url: str,
-    window_s: float = FULL_WINDOW_S,
+    vad_plan_path: Path,
+    boundary_radius_s: float = 30.0,
     text_field: str = "alignment_text",
 ) -> Path:
-    """Align every prepared cue once and write an episode-clock candidate SRT."""
+    """Align VAD-windowed audio and reconcile duplicate boundary cues."""
 
     case_root = case_manifest.parent
     case = json.loads(case_manifest.read_text(encoding="utf-8"))
     audio_path = case_root / case["audio"]["relative_path"]
     records = _read_jsonl(case_root / case["cleaned_subtitle"]["input_cues"])
     duration_s = float(case["audio"]["duration_s"])
+    vad_payload = json.loads(vad_plan_path.read_text(encoding="utf-8"))
     aligner = Qwen3VllmForcedAligner(base_url=base_url)
     run_root = case_root / "full-alignment"
     audio_dir = run_root / "audio"
     audio_dir.mkdir(parents=True, exist_ok=True)
     window_results = []
-    for window_index, crop_start_s in enumerate(
-        _window_starts(duration_s, window_s), start=1
-    ):
-        crop_end_s = min(duration_s, crop_start_s + window_s)
-        members = [
-            row for row in records
-            if crop_start_s <= _midpoint(row) < crop_end_s
-        ]
+    planned_windows = plan_alignment_windows(
+        vad_payload, duration_s=duration_s, boundary_radius_s=boundary_radius_s
+    )
+    for window in planned_windows:
+        members = records_for_window(records, window)
         if not members:
             continue
-        crop_path = audio_dir / f"window-{window_index:04d}.wav"
-        extract_audio_window(audio_path, crop_path, crop_start_s, crop_end_s)
-        window_results.append(
-            align_window(
-                aligner,
-                crop_path,
-                members,
-                target_id=None,
-                target_name=f"window-{window_index:04d}",
-                crop_start_s=crop_start_s,
-                crop_end_s=crop_end_s,
-                text_field=text_field,
-            )
+        crop_path = audio_dir / f"{window.kind}-{window.index:04d}.wav"
+        extract_audio_window(audio_path, crop_path, window.crop_start_s, window.crop_end_s)
+        result = align_window(
+            aligner,
+            crop_path,
+            members,
+            target_id=None,
+            target_name=f"window-{window.index:04d}",
+            crop_start_s=window.crop_start_s,
+            crop_end_s=window.crop_end_s,
+            text_field=text_field,
         )
-    aligned_by_id = {
-        cue["cue_id"]: cue
-        for window in window_results
-        for cue in window["cues"]
-    }
-    if set(aligned_by_id) != {row["cue_id"] for row in records}:
-        raise RuntimeError("full alignment did not return every prepared cue exactly once")
+        result.update(
+            window_index=window.index,
+            window_kind=window.kind,
+            core_start_s=window.core_start_s,
+            core_end_s=window.core_end_s,
+            boundary_s=window.boundary_s,
+        )
+        window_results.append(result)
+    selected_cues = select_alignment_candidates(records, window_results)
+    aligned_by_id = {cue["cue_id"]: cue for cue in selected_cues}
     output_srt = run_root / "retimed.srt"
     output_srt.write_text(format_srt(_retimed_cues(records, aligned_by_id)))
     report_path = run_root / "results.json"
     report = {
         "schema_name": "ja-media.forced-alignment.full-result",
-        "schema_version": "1.0.0",
+        "schema_version": "1.1.0",
         "case": case["case"],
         "backend": {"type": "qwen3-vllm", "model": aligner.model},
-        "window_duration_s": window_s,
+        "window_policy": "vad-core-plus-boundary-probe-v1",
+        "boundary_radius_s": boundary_radius_s,
+        "vad_plan": str(vad_plan_path),
         "text_field": text_field,
         "retimed_srt": output_srt.relative_to(case_root).as_posix(),
+        "selected_cues": selected_cues,
         "windows": window_results,
     }
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
@@ -263,12 +268,6 @@ def _midpoint(row: dict[str, Any]) -> float:
 
 def _global_time(value: float | None, crop_start_s: float) -> float | None:
     return None if value is None else value + crop_start_s
-
-
-def _window_starts(duration_s: float, window_s: float) -> list[float]:
-    if window_s <= 0 or window_s > 180:
-        raise ValueError("full alignment window must be greater than 0 and at most 180s")
-    return [float(start) for start in range(0, int(duration_s) + 1, int(window_s))]
 
 
 def _retimed_cues(records, aligned_by_id) -> list[SubtitleCue]:

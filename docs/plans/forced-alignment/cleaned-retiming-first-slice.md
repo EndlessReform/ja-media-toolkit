@@ -1,7 +1,7 @@
 # Cleaned Subtitle Forced Alignment: First Episode
 
-Status: working first slice; implementation and full BECK run are complete. Human
-listening review is the remaining gate before choosing a follow-up episode.
+Status: working first slice; the full BECK run now uses audio-derived VAD cores and
+60-second boundary-centered comparison requests. Human listening is the final gate.
 
 ## Outcome
 
@@ -15,9 +15,12 @@ This slice answers four immediate questions:
    the join format? Yes. Stable JSONL records carry both text bases and source cue
    identity.
 2. Can Qwen results be reconstructed into episode-clock cues? Yes. The client maps
-   word buckets to cue IDs, adds the crop start, and writes 329 retimed cues.
-3. Which unpadded window works for this episode? Use 60 seconds. The 180-second arm
-   produced severe timestamp failures in two of three comparison regions.
+   word buckets to cue IDs, reconciles duplicate boundary results, adds the crop
+   start, and writes 329 retimed cues.
+3. Which window works for this episode? Use roughly 60-second VAD cores plus a
+   60-second request centered on each populated boundary. A 24-second boundary
+   probe lacked context, while padding every core to 84 seconds broke previously
+   clean cues. The 180-second arm also failed badly in two regions.
 4. Does Qwen expose a direct probability that text exists in the audio? No. Its
    endpoint distributions and invalid timestamp geometry provide review signals,
    but this first control set does not justify automatic rejection.
@@ -30,10 +33,14 @@ cleaning manifest + decisions + reconstructed cleaned SRT
   -> client writes 329 retained cue records + 81 exclusions
   -> client resolves the pinned canonical episode row
   -> client reads and hashes the exact Bronze audio object
-  -> client cuts consecutive, unpadded mono 16 kHz windows
+  -> Silero chooses contiguous audio cuts near each 60-second target
+  -> client keeps those VAD cores unpadded
+  -> client adds 60-second requests centered on populated VAD boundaries
+  -> every cue is aligned in its core and at least one boundary request
   -> vLLM/Qwen returns a probability vector for each requested token boundary
   -> client selects timestamp buckets and records probability/margin/entropy
-  -> client joins tokens to stable cue IDs and adds each window's episode offset
+  -> client ranks duplicate results by timing geometry, then model scores
+  -> client joins tokens to stable cue IDs and adds each crop's episode offset
   -> client writes episode-clock JSON + retimed SRT
   -> cleaning review joins candidates back to the 410-cue source and plays audio
 ```
@@ -80,6 +87,7 @@ case.json
 inputs/input-cues.jsonl
 inputs/excluded-cues.jsonl
 inputs/cleaned.srt
+inputs/vad-plan.json
 audio/bd048df5037de583286b1ffa8f7a8a9dfb44c1ce3aadb28bd2a487b4218b1190.ac3
 window-comparison/results.json
 window-comparison/results-180.json
@@ -87,6 +95,24 @@ full-alignment/results.json
 full-alignment/retimed.srt
 confidence-controls/results.json
 summary.md
+```
+
+The experiment remains two explicit runtime steps because VAD runs on the Mac and
+Qwen runs on the inference server:
+
+```sh
+cd envs/apple
+uv run ja-media vad-local \
+  ../../research/forced-alignment-retiming/output/beck-01-netflix-cleaned/audio/bd048df5037de583286b1ffa8f7a8a9dfb44c1ce3aadb28bd2a487b4218b1190.ac3 \
+  --split-every-minutes 1 --split-radius-s 12 --prefer-before-target \
+  --format json > ../../research/forced-alignment-retiming/output/beck-01-netflix-cleaned/inputs/vad-plan.json
+
+cd ../inference
+uv run -m ja_media_inference.qwen3_retime_case full \
+  ../../research/forced-alignment-retiming/output/beck-01-netflix-cleaned/case.json \
+  --base-url "$QWEN_ALIGNER_BASE_URL" \
+  --vad-plan ../../research/forced-alignment-retiming/output/beck-01-netflix-cleaned/inputs/vad-plan.json \
+  --boundary-radius-s 30 --text-base cleaned
 ```
 
 ## Completed Checklist
@@ -99,7 +125,10 @@ summary.md
 - [x] Cache and hash the Japanese AC3 locally without writing to DEV or Bronze.
 - [x] Cut exact, unpadded 30-, 60-, and 180-second mono 16 kHz crops.
 - [x] Run the same early, middle, and late cue identities through all three arms.
-- [x] Run every retained cue across the episode at the selected 60-second size.
+- [x] Generate a 25-core Silero VAD plan with no fallback cuts.
+- [x] Align every retained cue in an unpadded VAD core and a 60-second
+  boundary-centered request.
+- [x] Reconcile 320 two-candidate cues and 9 three-candidate cues.
 - [x] Convert local Qwen buckets to episode time and reconstruct cue envelopes.
 - [x] Write a 329-cue retimed SRT from final cleaned text.
 - [x] Join candidates to the original 410-cue source in the cleaning review UI.
@@ -124,22 +153,28 @@ opening or ending music-only region.
 - The late cue fails in every arm. The 30- and 60-second spans are 17.12 and 15.28
   seconds; the 180-second span is 79.28 seconds and touches the crop edge.
 
-The full 60-second run covers all 329 retained cues in 22 populated windows. Empty
-music/SFX windows are skipped because there is no spoken text to align. Failures
-occur throughout ordinary dialogue, not only songs or credits:
+The original full run used a fixed 60-second grid and assigned text by subtitle
+midpoint. That was invalid because ten cues crossed an audio cut. The replacement
+run uses 25 VAD cores; several cuts remain exact minute marks because those marks
+fall inside detected acoustic gaps. Other cuts move to times such as 479.996,
+659.484, 721.892, 778.172, 899.036, and 1019.708 seconds.
+
+The final run makes 44 requests: 22 populated VAD cores and 22 populated
+boundary-centered windows. The selected full-episode results are:
 
 ```text
-aligned: 174
-suspicious: 155
-contains reversed token: 124
-contains backward token order: 113
-touches crop edge: 80
-aligned span over 15 seconds: 66
+aligned: 220
+suspicious: 109
+contains reversed token: 83
+contains backward token order: 82
+touches the actual audio-crop edge: 30
+aligned span over 15 seconds: 25
 ```
 
-For contrast, the 540-600 second window aligned 18/18 cues and the 1320-1380
-second window aligned 7/7. The ordinary-dialogue windows from 960-1080 seconds
-flagged 24/32 cues.
+The SRT still has 38 cue starts earlier than the preceding cue. Those cues remain
+review targets rather than being silently forced into source order. Cue 87 has no
+plausible candidate in either request, so multi-window comparison cannot repair
+every Qwen failure.
 
 ## Absent-Text Findings
 
@@ -149,10 +184,10 @@ entropy is 0.492 for the present control and 0.615-0.760 for the wrong arms.
 
 Those observations do not produce a calibrated absent-text probability:
 
-- reversed-token review would queue 124/329 episode cues;
-- entropy >= 0.60 would queue 144/329 cues;
-- any structural suspicious status would queue 155/329 cues; and
-- minimum endpoint probability below 0.04 would queue 135/329 cues and misses the
+- reversed-token review would queue 83/329 episode cues;
+- entropy >= 0.60 would queue 102/329 cues;
+- any structural suspicious status would queue 109/329 cues; and
+- minimum endpoint probability below 0.04 would queue 91/329 cues and misses the
   nonspoken-label control.
 
 Use structural status first and the probability fields to order human review. Do

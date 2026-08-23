@@ -113,6 +113,13 @@ def render_cue_panel(
                 else "bold yellow"
             ),
         )
+        if cue.alignment.window_index is not None:
+            header.append(
+                f"  {cue.alignment.window_kind or 'window'} "
+                f"{cue.alignment.window_index}  "
+                f"chosen from {cue.alignment.candidate_count}",
+                style="cyan",
+            )
         scores = cue.alignment.score_signals or {}
         if scores:
             header.append(
