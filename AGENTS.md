@@ -211,6 +211,13 @@ The services are typically deployed as a suite of containers coordinated by `com
   Keep these calls limited to the documented API behavior under test, and do
   not treat API access as permission to inspect or operate the remote host
   itself.
+- **User-requested LAN inference runs are allowed.** When the user asks to run
+  an ASR, alignment, or other model experiment against a configured or
+  user-specified LAN inference endpoint, that request authorizes the client to
+  send the selected in-scope local media and accompanying text to that API and
+  receive its results. This is application data-plane work, even when the API
+  uses `POST`; it does not authorize SSH, container inspection, deployment,
+  service restarts, host administration, or unrelated media uploads.
 - **Configured data-plane reads are allowed.** Agents may use repository clients
   and configured credentials to perform non-mutating reads against development
   or production application data services when relevant to the task. This

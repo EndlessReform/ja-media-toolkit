@@ -5,6 +5,6 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 cd "${ROOT_DIR}"
 
-docker compose build --pull vllm
+docker compose build --pull
 ./scripts/smoke-image-audio.sh
 docker compose up -d

@@ -111,9 +111,7 @@ class Qwen3VllmForcedAligner:
             if token_id != timestamp_token_id:
                 continue
             server_i = (
-                local_i + audio_token_shift
-                if local_i > audio_pad_index
-                else local_i
+                local_i + audio_token_shift if local_i > audio_pad_index else local_i
             )
             if server_i < 0 or server_i >= len(logits):
                 raise RuntimeError(
@@ -131,9 +129,7 @@ class Qwen3VllmForcedAligner:
                     )
                     * timestamp_segment_time
                     / 1000,
-                    "edge_distance_s": audio_edge_distance(
-                        time_s, audio_duration_s
-                    ),
+                    "edge_distance_s": audio_edge_distance(time_s, audio_duration_s),
                 }
             )
 
@@ -268,9 +264,8 @@ def _distribution_metrics(values: Sequence[float]) -> dict[str, Any]:
     best_i = _argmax(values)
     best = float(values[best_i])
     total_input = sum(float(value) for value in values)
-    already_probabilities = (
-        all(float(value) >= 0 for value in values)
-        and math.isclose(total_input, 1.0, rel_tol=1e-3, abs_tol=1e-3)
+    already_probabilities = all(float(value) >= 0 for value in values) and math.isclose(
+        total_input, 1.0, rel_tol=1e-3, abs_tol=1e-3
     )
     if already_probabilities:
         probabilities = [float(value) / total_input for value in values]
@@ -293,5 +288,7 @@ def _distribution_metrics(values: Sequence[float]) -> dict[str, Any]:
             if len(sorted_probabilities) > 1
             else sorted_probabilities[0]
         ),
-        "normalized_entropy": entropy / math.log(len(values)) if len(values) > 1 else 0.0,
+        "normalized_entropy": entropy / math.log(len(values))
+        if len(values) > 1
+        else 0.0,
     }

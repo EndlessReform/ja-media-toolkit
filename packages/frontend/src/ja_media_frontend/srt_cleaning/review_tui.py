@@ -3,18 +3,17 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable
 
-from rich.panel import Panel
-from rich.table import Table
-from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.widgets import ContentSwitcher, Footer, Header, Label, Static
 
 from ja_media_frontend.audio import MaterializedAudioPlayer
 from ja_media_frontend.srt_cleaning.review_audio import ReviewAudio
+from ja_media_frontend.srt_cleaning.review_blind_alignment import (
+    BlindAlignmentReviewMixin,
+)
 from ja_media_frontend.srt_cleaning.review_dialogs import (
     EpisodeSelectModal,
-    ReasonStatsModal,
 )
 from ja_media_frontend.srt_cleaning.review_formatting import (
     timeline_legend,
@@ -36,18 +35,18 @@ from ja_media_frontend.srt_cleaning.review_rule_comparison import (
 )
 from ja_media_frontend.srt_cleaning.review_rule_overlay import (
     RuleOverlayMixin,
-    render_cue_panel,
-)
-from ja_media_frontend.srt_cleaning.review_stats import (
-    render_reason_stats,
-    summarize_reasons,
 )
 from ja_media_frontend.srt_cleaning.review_tabs import ReviewTabMixin
-from ja_media_frontend.widgets.timeline import TimelineWidget, format_clock
+from ja_media_frontend.srt_cleaning.review_view_rendering import (
+    ReviewViewRenderingMixin,
+)
+from ja_media_frontend.widgets.timeline import TimelineWidget
 
 
 class SrtCleaningReviewApp(
     ReviewTabMixin,
+    BlindAlignmentReviewMixin,
+    ReviewViewRenderingMixin,
     RuleOverlayMixin,
     SrtCleaningReviewInteractionMixin,
     App[None],
@@ -58,6 +57,7 @@ class SrtCleaningReviewApp(
         ("f1", "help", "Help"),
         ("f5", "show_cue_review", "Cue review"),
         ("f6", "show_reason_pivot", "Reason pivot"),
+        ("f7", "show_alignment_ab", "Blind alignment A/B"),
         ("e", "select_episode", "Episode"),
         ("s", "show_stats", "Stats"),
         ("r", "toggle_rule_overlay", "Rule overlay"),
@@ -91,6 +91,7 @@ class SrtCleaningReviewApp(
         audio_profile: str,
         manual_audio: Path | None,
         initial_audio: ReviewAudio,
+        alignment_eval_path: Path | None = None,
         initial_anilist_id: int | None = None,
         audio_loader: Callable[[int], ReviewAudio] | None = None,
     ) -> None:
@@ -102,6 +103,7 @@ class SrtCleaningReviewApp(
         self.audio_profile = audio_profile
         self.manual_audio = manual_audio
         self._audio_loader = audio_loader
+        self.alignment_eval_path = alignment_eval_path
         self._audio = initial_audio.materialized
         self._audio_status = initial_audio.status
         self._player = (
@@ -145,7 +147,9 @@ class SrtCleaningReviewApp(
                 with Vertical(id="main"):
                     yield Static(id="source")
                     yield Static(id="candidates")
-                    yield TimelineWidget(id="timeline", empty_message="No SRTs for episode.")
+                    yield TimelineWidget(
+                        id="timeline", empty_message="No SRTs for episode."
+                    )
                     yield Static(id="diff")
                     yield Static(id="help")
             yield ReasonPivotExplorer(self.workspace, id="reason-pivot")
@@ -171,9 +175,7 @@ class SrtCleaningReviewApp(
 
     @property
     def episode_sources(self) -> tuple[ReviewSource, ...]:
-        return self.workspace.sources_for_episode(
-            self.anilist_id, self.episode_number
-        )
+        return self.workspace.sources_for_episode(self.anilist_id, self.episode_number)
 
     @property
     def source(self) -> ReviewSource | None:
@@ -219,82 +221,8 @@ class SrtCleaningReviewApp(
                     else timeline_styles(source.cues)
                 ),
                 span_legend=(
-                    rule_timeline_legend()
-                    if self.rule_overlay
-                    else timeline_legend()
+                    rule_timeline_legend() if self.rule_overlay else timeline_legend()
                 ),
             )
         self.query_one("#diff", Static).update(self.render_diff())
         self.query_one("#help", Static).update(self.render_help())
-
-    def render_source(self) -> Text:
-        text = Text()
-        text.append("AniList: ", style="bold")
-        text.append(str(self.anilist_id), style="cyan")
-        text.append(f"  run: {self.workspace.run_id}")
-        text.append(f"  episode: {self.episode_number}", style="bold")
-        text.append("  ")
-        text.append(self._audio_status, style="dim")
-        if self.playback_status():
-            text.append("  ")
-            text.append(self.playback_status(), style="orange3")
-        if self._clipboard_status:
-            text.append("  ")
-            text.append(self._clipboard_status, style="dim")
-        if self.rule_overlay:
-            text.append("  rule overlay on", style="bold cyan")
-        return text
-
-    def render_candidates(self) -> Table:
-        table = Table(expand=True, box=None, show_edge=False, pad_edge=False)
-        table.add_column("", width=1)
-        table.add_column("source", ratio=1, overflow="ellipsis", no_wrap=True)
-        table.add_column("cue", justify="right", no_wrap=True)
-        table.add_column("changed", justify="right", no_wrap=True)
-        table.add_column("span", justify="right", no_wrap=True)
-        for index, source in enumerate(self.episode_sources):
-            selected = index == self.source_index
-            cue_label = f"{self.cue_index(source) + 1}/{len(source.cues)}"
-            table.add_row(
-                Text(">" if selected else " ", style="bold yellow" if selected else "dim"),
-                Text(source.label, style="bold cyan" if selected else ""),
-                Text(cue_label, style="bold" if selected else ""),
-                str(source.changed_count),
-                format_clock(source.end_s),
-            )
-        if not table.rows:
-            table.add_row(" ", f"No reviewable SRTs for episode {self.episode_number}", "-", "0", "-")
-        return table
-
-    def render_diff(self) -> Panel:
-        return render_cue_panel(
-            self.current_cue,
-            playing=self.is_playing(),
-            rule_overlay=self.rule_overlay,
-        )
-
-    def render_help(self) -> str:
-        return (
-            "space play  c copy JSON  h/l cue  n/N next/previous non-accept  "
-            "j/k source  bracket keys series/episode  e episode jump  "
-            "r rule overlay  R rule scores  s reason stats  Ctrl-f/b page  "
-            "f/F next/previous flag  "
-            "Ctrl-d/u half-page  +/- zoom  q quit"
-        )
-
-    def action_show_stats(self) -> None:
-        source = self.source
-        current_sources = (source,) if source is not None else ()
-        current_title = f"Current track: {source.filename}" if source else "Current track"
-        self.push_screen(
-            ReasonStatsModal(
-                render_reason_stats(
-                    current_title,
-                    summarize_reasons(current_sources),
-                ),
-                render_reason_stats(
-                    f"Whole run: {self.workspace.run_id}",
-                    summarize_reasons(self.workspace.sources),
-                ),
-            )
-        )

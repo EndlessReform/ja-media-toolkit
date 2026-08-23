@@ -9,11 +9,10 @@ import re
 from ja_media_inference.forced_alignment.case_runner import (
     _midpoint,
     _read_jsonl,
-    align_window,
-    extract_audio_window,
     select_targets,
 )
-from ja_media_inference.forced_alignment.qwen3_vllm import Qwen3VllmForcedAligner
+from ja_media_inference.forced_alignment.qwen3_adapter_client import Qwen3AdapterClient
+from ja_media_inference.forced_alignment.window_execution import align_remote_window
 
 
 ABSENT_TEXT = "量子色彩の宇宙船が透明な砂漠を泳いでいる"
@@ -24,7 +23,6 @@ def run_absent_text_controls(case_manifest: Path, *, base_url: str) -> Path:
 
     case_root = case_manifest.parent
     case = json.loads(case_manifest.read_text(encoding="utf-8"))
-    audio_path = case_root / case["audio"]["relative_path"]
     records = _read_jsonl(case_root / case["cleaned_subtitle"]["input_cues"])
     excluded = _read_jsonl(case_root / case["cleaned_subtitle"]["excluded_cues"])
     duration_s = float(case["audio"]["duration_s"])
@@ -32,45 +30,62 @@ def run_absent_text_controls(case_manifest: Path, *, base_url: str) -> Path:
     crop_start_s = max(0.0, min(_midpoint(target) - 30.0, duration_s - 60.0))
     crop_end_s = crop_start_s + 60.0
     members = [row for row in records if crop_start_s <= _midpoint(row) < crop_end_s]
-    aligner = Qwen3VllmForcedAligner(base_url=base_url)
-    audio_dir = case_root / "confidence-controls" / "audio"
-    audio_dir.mkdir(parents=True, exist_ok=True)
+    aligner = Qwen3AdapterClient(base_url=base_url)
+    audio_id = aligner.cache_audio(case["audio"])
 
     arms = []
-    baseline_audio = audio_dir / "present.wav"
-    extract_audio_window(audio_path, baseline_audio, crop_start_s, crop_end_s)
     arms.append(
         _run_arm(
-            aligner, baseline_audio, members, target, "present", True,
-            crop_start_s, crop_end_s,
+            aligner,
+            audio_id,
+            members,
+            target,
+            "present",
+            True,
+            crop_start_s,
+            crop_end_s,
         )
     )
     shifted_start = min(duration_s - 60.0, crop_start_s + 45.0)
-    shifted_audio = audio_dir / "shifted-audio.wav"
-    extract_audio_window(audio_path, shifted_audio, shifted_start, shifted_start + 60.0)
     arms.append(
         _run_arm(
-            aligner, shifted_audio, members, target, "shifted_audio", False,
-            shifted_start, shifted_start + 60.0,
+            aligner,
+            audio_id,
+            members,
+            target,
+            "shifted_audio",
+            False,
+            shifted_start,
+            shifted_start + 60.0,
         )
     )
     distant = max(records, key=lambda row: abs(_midpoint(row) - _midpoint(target)))
     arms.append(
         _run_arm(
-            aligner, baseline_audio, _replace_target(members, target, distant["alignment_text"]),
-            target, "unrelated_substitution", False, crop_start_s, crop_end_s,
+            aligner,
+            audio_id,
+            _replace_target(members, target, distant["alignment_text"]),
+            target,
+            "unrelated_substitution",
+            False,
+            crop_start_s,
+            crop_end_s,
         )
     )
     arms.append(
         _run_arm(
-            aligner, baseline_audio, _replace_target(members, target, ABSENT_TEXT),
-            target, "inserted_absent_phrase", False, crop_start_s, crop_end_s,
+            aligner,
+            audio_id,
+            _replace_target(members, target, ABSENT_TEXT),
+            target,
+            "inserted_absent_phrase",
+            False,
+            crop_start_s,
+            crop_end_s,
         )
     )
     nonspoken = _nonspoken_control(excluded, duration_s)
     sfx_start = max(0.0, min(_midpoint(nonspoken) - 15.0, duration_s - 30.0))
-    sfx_audio = audio_dir / "nonspoken.wav"
-    extract_audio_window(audio_path, sfx_audio, sfx_start, sfx_start + 30.0)
     sfx_record = {
         **nonspoken,
         "cleaned_index": 0,
@@ -78,8 +93,14 @@ def run_absent_text_controls(case_manifest: Path, *, base_url: str) -> Path:
     }
     arms.append(
         _run_arm(
-            aligner, sfx_audio, [sfx_record], sfx_record, "nonspoken_label", False,
-            sfx_start, sfx_start + 30.0,
+            aligner,
+            audio_id,
+            [sfx_record],
+            sfx_record,
+            "nonspoken_label",
+            False,
+            sfx_start,
+            sfx_start + 30.0,
         )
     )
     destination = case_root / "confidence-controls" / "results.json"
@@ -100,7 +121,7 @@ def run_absent_text_controls(case_manifest: Path, *, base_url: str) -> Path:
 
 
 def _run_arm(aligner, audio, records, target, label, text_present, start_s, end_s):
-    result = align_window(
+    result = align_remote_window(
         aligner,
         audio,
         records,
@@ -127,7 +148,8 @@ def _replace_target(records, target, text):
 
 def _nonspoken_control(excluded, duration_s):
     candidates = [
-        row for row in excluded
+        row
+        for row in excluded
         if re.search(r"音|声|演奏|音楽|チャイム|鳴き", str(row["original_text"]))
     ]
     if not candidates:

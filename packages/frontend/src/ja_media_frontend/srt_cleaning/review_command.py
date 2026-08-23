@@ -73,6 +73,11 @@ def run_review(args: argparse.Namespace) -> None:
         audio_profile=args.audio_profile,
         manual_audio=manual_audio,
         initial_audio=initial_audio,
+        alignment_eval_path=(
+            alignment_case.parent / "stability" / "results.json"
+            if alignment_case is not None
+            else None
+        ),
     )
     app.run()
 

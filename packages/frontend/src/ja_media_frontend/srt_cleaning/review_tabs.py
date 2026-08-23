@@ -19,6 +19,7 @@ class ReviewTabMixin:
             " F6 Reason Pivot ",
             style="bold reverse" if active == "reason-pivot" else "bold",
         )
+        text.append("   F7 Blind Alignment A/B ", style="bold")
         return text
 
     def action_show_cue_review(self) -> None:
@@ -28,5 +29,7 @@ class ReviewTabMixin:
     def action_show_reason_pivot(self) -> None:
         self.stop_playback()
         self.query_one("#review-views", ContentSwitcher).current = "reason-pivot"
-        self.query_one("#review-tabs", Static).update(self.render_tab_bar("reason-pivot"))
+        self.query_one("#review-tabs", Static).update(
+            self.render_tab_bar("reason-pivot")
+        )
         self.query_one("#reason-pivot-table", DataTable).focus()

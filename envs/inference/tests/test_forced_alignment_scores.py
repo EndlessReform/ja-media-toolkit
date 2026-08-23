@@ -1,7 +1,10 @@
 """Cue-level score reduction checks."""
 
 from ja_media_inference.forced_alignment.alignment_scores import summarize_token_scores
-from ja_media_inference.forced_alignment.text_units import AlignmentToken, TokenAlignment
+from ja_media_inference.forced_alignment.text_units import (
+    AlignmentToken,
+    TokenAlignment,
+)
 
 
 def test_summarizes_distribution_and_structural_signals() -> None:

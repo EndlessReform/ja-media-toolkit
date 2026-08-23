@@ -14,6 +14,5 @@ fi
 SERVER_PORT="${SERVER_PORT:-8000}"
 BASE_URL="${BASE_URL:-http://127.0.0.1:${SERVER_PORT}}"
 
-curl --fail --silent --show-error "${BASE_URL}/health" >/dev/null
-curl --fail --silent --show-error "${BASE_URL}/v1/models"
+curl --fail --silent --show-error "${BASE_URL}/healthz"
 printf '\n'
