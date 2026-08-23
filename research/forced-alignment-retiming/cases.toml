@@ -10,6 +10,33 @@ subtitle_source_sha256 = "f9769b7926c8cf41607064df5c373d8cd4c0457248c5a54bfc8bb7
 cleaning_reconstruct = "output/srt-clean/corpus-slice-2026-08-22/luna-openrouter.reconstruct"
 
 [[case]]
+name = "fumoffu-01-netflix-cleaned"
+namespace = "anilist"
+series_id = "72"
+episode = "1"
+subtitle_id = "c8ca7207-c63a-5327-9736-7a985ec5c274"
+subtitle_source_sha256 = "10cf4104bd62c45722b215ab94b2c2e7384f0e1f9542850e9cd1cd29eb21f43d"
+cleaning_reconstruct = "output/srt-clean/corpus-slice-2026-08-22/luna-openrouter.reconstruct"
+
+[[case]]
+name = "shinsekai-yori-01-animekaizoku-cleaned"
+namespace = "anilist"
+series_id = "13125"
+episode = "1"
+subtitle_id = "5a64e5b0-b19a-5548-aa55-ac8090621a7a"
+subtitle_source_sha256 = "a4a348f73c918328c7e8f760e1eabe8cbc4fe044ea14ab87c33f3149f9566b28"
+cleaning_reconstruct = "output/srt-clean/corpus-slice-2026-08-22/luna-openrouter.reconstruct"
+
+[[case]]
+name = "girls-und-panzer-01-netflix-cleaned"
+namespace = "anilist"
+series_id = "14131"
+episode = "1"
+subtitle_id = "aed1560b-f9c9-59f8-918f-7843beb6e536"
+subtitle_source_sha256 = "4ef20b524df9dd575527cb8aad0ec1b4c3a55b8f898254e3730a6e737a400f7e"
+cleaning_reconstruct = "output/srt-clean/corpus-slice-2026-08-22/luna-openrouter.reconstruct"
+
+[[case]]
 name = "arakawa-bridge-09"
 namespace = "anilist"
 series_id = "7647"
