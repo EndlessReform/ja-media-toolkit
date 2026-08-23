@@ -21,6 +21,7 @@ def load_review_audio(
     episode_number: int,
     manual_audio: Path | None,
     audio_profile: str,
+    manual_audio_status: str = "using manually assigned audio",
 ) -> ReviewAudio:
     """Resolve and decode audio for a review episode, tolerating misses."""
 
@@ -28,10 +29,10 @@ def load_review_audio(
         try:
             return ReviewAudio(
                 materialize_audio(manual_audio.expanduser().resolve()),
-                "using manually assigned audio",
+                manual_audio_status,
             )
         except RuntimeError as exc:
-            return ReviewAudio(None, f"manual audio decode unavailable: {exc}")
+            return ReviewAudio(None, f"audio decode unavailable: {exc}")
 
     try:
         selection = resolve_subsync_audio(

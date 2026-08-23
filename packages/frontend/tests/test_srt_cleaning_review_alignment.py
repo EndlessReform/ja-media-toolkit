@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 from rich.console import Console
 
 from ja_media_core.transcripts import SubtitleCue
+from ja_media_frontend.srt_cleaning.review_audio import ReviewAudio
 from ja_media_frontend.srt_cleaning.review_alignment import (
     read_alignment_case,
     read_alignment_cases,
@@ -18,15 +21,21 @@ from ja_media_frontend.srt_cleaning.review_models import (
     ReviewSource,
     ReviewWorkspace,
 )
+from ja_media_frontend.srt_cleaning.review_loader import load_review_workspace
 from ja_media_frontend.srt_cleaning.review_rule_overlay import (
     cue_needs_review,
     render_cue_panel,
 )
+from ja_media_frontend.srt_cleaning.review_tui import SrtCleaningReviewApp
+from srt_cleaning_review_fixtures import prepared_run
 
 
 def test_alignment_case_links_source_index_and_changes_playback_clock(
     tmp_path: Path,
 ) -> None:
+    audio = tmp_path / "audio" / "source.ac3"
+    audio.parent.mkdir()
+    audio.write_bytes(b"prepared audio")
     case = tmp_path / "case.json"
     case.write_text(
         json.dumps(
@@ -34,7 +43,8 @@ def test_alignment_case_links_source_index_and_changes_playback_clock(
                 "cleaned_subtitle": {
                     "source_subtitle_id": "sub-1",
                     "source_sha256": "abc123",
-                }
+                },
+                "audio": {"relative_path": "audio/source.ac3"},
             }
         )
     )
@@ -74,6 +84,7 @@ def test_alignment_case_links_source_index_and_changes_playback_clock(
     )
 
     assert loaded["source_sha256"] == "abc123"
+    assert loaded["audio_path"] == audio
     assert cue.playback_cue.start_s == 12.5
     assert cue.playback_cue.end_s == 14.0
     assert alignment.window_index == 4
@@ -82,6 +93,9 @@ def test_alignment_case_links_source_index_and_changes_playback_clock(
 
 
 def test_suspicious_alignment_is_visible_and_part_of_flagged_walk(tmp_path: Path) -> None:
+    audio = tmp_path / "audio" / "source.ac3"
+    audio.parent.mkdir()
+    audio.write_bytes(b"prepared audio")
     case = tmp_path / "case.json"
     case.write_text(
         json.dumps(
@@ -89,7 +103,8 @@ def test_suspicious_alignment_is_visible_and_part_of_flagged_walk(tmp_path: Path
                 "cleaned_subtitle": {
                     "source_subtitle_id": "sub-1",
                     "source_sha256": "abc123",
-                }
+                },
+                "audio": {"relative_path": "audio/source.ac3"},
             }
         )
     )
@@ -180,11 +195,64 @@ def test_workspace_prefers_aligned_source_for_episode(tmp_path: Path) -> None:
     assert workspace.preferred_cue_indices() == {"sub-1": 1}
 
 
+def test_review_selects_each_source_prepared_audio_without_service_lookup(
+    tmp_path: Path,
+) -> None:
+    loaded = load_review_workspace(prepared_run(tmp_path))
+    first_audio = tmp_path / "first.ac3"
+    second_audio = tmp_path / "second.ac3"
+    first = replace(
+        loaded.sources[0],
+        alignment_path=tmp_path / "first-results.json",
+        alignment_audio_path=first_audio,
+    )
+    second = replace(
+        loaded.sources[0],
+        subtitle_id="second-candidate",
+        alignment_path=tmp_path / "second-results.json",
+        alignment_audio_path=second_audio,
+    )
+    workspace = ReviewWorkspace(
+        anilist_id=101,
+        run_id="prepared-audio",
+        run_dir=tmp_path,
+        sources=(first, second),
+    )
+    app = SrtCleaningReviewApp(
+        workspace=workspace,
+        series_label="Test Series",
+        initial_episode=1,
+        audio_profile="portable-aac-v1",
+        manual_audio=None,
+        initial_audio=ReviewAudio(None, "not loaded"),
+    )
+
+    with patch(
+        "ja_media_frontend.srt_cleaning.review_interaction.load_review_audio",
+        return_value=ReviewAudio(None, "loaded prepared audio"),
+    ) as load_audio:
+        app._default_audio_loader(1)
+        app.source_index = 1
+        app._default_audio_loader(1)
+
+    assert [call.kwargs["manual_audio"] for call in load_audio.call_args_list] == [
+        first_audio,
+        second_audio,
+    ]
+    assert all(
+        call.kwargs["manual_audio_status"] == "using prepared alignment audio"
+        for call in load_audio.call_args_list
+    )
+
+
 def test_alignment_slice_loads_each_case_by_catalog_identity(tmp_path: Path) -> None:
     cases = []
     for index in (1, 2):
         root = tmp_path / f"case-{index}"
         root.mkdir()
+        audio = root / "audio" / "source.ac3"
+        audio.parent.mkdir()
+        audio.write_bytes(f"prepared audio {index}".encode())
         case = root / "case.json"
         case.write_text(
             json.dumps(
@@ -192,7 +260,8 @@ def test_alignment_slice_loads_each_case_by_catalog_identity(tmp_path: Path) -> 
                     "cleaned_subtitle": {
                         "source_subtitle_id": f"sub-{index}",
                         "source_sha256": f"hash-{index}",
-                    }
+                    },
+                    "audio": {"relative_path": "audio/source.ac3"},
                 }
             )
         )
@@ -213,3 +282,9 @@ def test_alignment_slice_loads_each_case_by_catalog_identity(tmp_path: Path) -> 
     loaded = read_alignment_cases(slice_path)
 
     assert set(loaded) == {("sub-1", "hash-1"), ("sub-2", "hash-2")}
+    assert loaded[("sub-1", "hash-1")]["audio_path"] == (
+        tmp_path / "case-1" / "audio" / "source.ac3"
+    )
+    assert loaded[("sub-2", "hash-2")]["audio_path"] == (
+        tmp_path / "case-2" / "audio" / "source.ac3"
+    )

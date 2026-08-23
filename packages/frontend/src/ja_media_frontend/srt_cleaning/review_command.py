@@ -64,13 +64,26 @@ def run_review(args: argparse.Namespace) -> None:
         alignment_payload
         and alignment_payload.get("schema_name") == "ja-media.forced-alignment.case"
     )
-    if manual_audio is None and alignment_case is not None and single_alignment_case:
-        manual_audio = alignment_case.parent / alignment_payload["audio"]["relative_path"]
+    initial_sources = workspace.sources_for_episode(initial_anilist_id, episode)
+    initial_source_index = workspace.preferred_source_index(
+        initial_anilist_id, episode
+    )
+    prepared_audio = (
+        initial_sources[initial_source_index].alignment_audio_path
+        if initial_sources
+        else None
+    )
+    selected_audio = manual_audio or prepared_audio
     initial_audio = load_review_audio(
         anilist_id=initial_anilist_id,
         episode_number=episode,
-        manual_audio=manual_audio,
+        manual_audio=selected_audio,
         audio_profile=args.audio_profile,
+        manual_audio_status=(
+            "using manually assigned audio"
+            if manual_audio is not None
+            else "using prepared alignment audio"
+        ),
     )
     app = SrtCleaningReviewApp(
         workspace=workspace,

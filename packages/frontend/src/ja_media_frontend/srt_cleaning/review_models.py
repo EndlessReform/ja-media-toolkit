@@ -110,6 +110,7 @@ class ReviewSource:
     source_sha256: str
     cues: tuple[ReviewCue, ...]
     alignment_path: Path | None = None
+    alignment_audio_path: Path | None = None
 
     @property
     def label(self) -> str:

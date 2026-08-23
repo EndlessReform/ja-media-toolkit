@@ -43,9 +43,12 @@ uv run ja-media-srt-clean review \
   --episode 1
 ```
 
-The slice maps each review source to its own forced-alignment result. Audio is
-resolved for the selected AniList series and episode. `f` and `F` move among
-cleaning flags and suspicious alignments; cue playback uses the retimed borders.
+The slice maps each review source to its own forced-alignment result and its
+downloaded `audio.relative_path`. Initial load and source or episode changes use
+that prepared local audio. The derived-audio service is only the fallback for a
+source without a prepared alignment; an explicit `--audio` still takes priority.
+`f` and `F` move among cleaning flags and suspicious alignments; cue playback
+uses the retimed borders.
 
 ## Preparation and concurrency
 

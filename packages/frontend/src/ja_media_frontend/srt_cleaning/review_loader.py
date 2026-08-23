@@ -229,6 +229,7 @@ def _load_source(
         source_sha256=str(first["source_sha256"]),
         cues=review_cues,
         alignment_path=alignment["results_path"] if alignment else None,
+        alignment_audio_path=alignment["audio_path"] if alignment else None,
     )
 
 

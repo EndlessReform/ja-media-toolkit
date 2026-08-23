@@ -104,6 +104,7 @@ class SrtCleaningReviewInteractionMixin:
             return
         self.stop_playback()
         self.source_index = (self.source_index + delta) % len(sources)
+        self._load_episode_audio()
         self.ensure_cue_visible()
         self.refresh_view()
 
@@ -226,15 +227,33 @@ class SrtCleaningReviewInteractionMixin:
         )
 
     def _default_audio_loader(self, episode: int) -> ReviewAudio:
+        current_source = self.source
+        prepared_audio = (
+            current_source.alignment_audio_path if current_source is not None else None
+        ) or next(
+            (
+                source.alignment_audio_path
+                for source in self.episode_sources
+                if source.alignment_audio_path is not None
+            ),
+            None,
+        )
         return load_review_audio(
             anilist_id=self.anilist_id,
             episode_number=episode,
-            manual_audio=self.manual_audio,
+            manual_audio=self.manual_audio or prepared_audio,
             audio_profile=self.audio_profile,
+            manual_audio_status=(
+                "using manually assigned audio"
+                if self.manual_audio is not None
+                else "using prepared alignment audio"
+            ),
         )
 
     def _prefetch_neighbors(self) -> None:
-        if self.manual_audio is not None:
+        if self.manual_audio is not None or any(
+            source.alignment_audio_path is not None for source in self.episode_sources
+        ):
             return
         prefetch_neighbor_audio(
             anilist_id=self.anilist_id,

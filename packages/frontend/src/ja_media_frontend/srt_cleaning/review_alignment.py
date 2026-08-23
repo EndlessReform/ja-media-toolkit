@@ -20,6 +20,9 @@ def read_alignment_case(case_path: Path | None) -> dict[str, Any] | None:
     if not results_path.is_file():
         raise FileNotFoundError(f"Missing full alignment results: {results_path}")
     results = json.loads(results_path.read_text(encoding="utf-8"))
+    audio_path = case_path.parent / case["audio"]["relative_path"]
+    if not audio_path.is_file():
+        raise FileNotFoundError(f"Missing prepared alignment audio: {audio_path}")
     cues = results.get("selected_cues") or [
         cue for window in results["windows"] for cue in window["cues"]
     ]
@@ -27,6 +30,7 @@ def read_alignment_case(case_path: Path | None) -> dict[str, Any] | None:
         "source_subtitle_id": case["cleaned_subtitle"]["source_subtitle_id"],
         "source_sha256": case["cleaned_subtitle"]["source_sha256"],
         "results_path": results_path,
+        "audio_path": audio_path,
         "by_source_index": {
             int(cue["source_index"]): ReviewAlignment(
                 start_s=float(cue["aligned_start_s"]),
