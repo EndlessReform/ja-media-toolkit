@@ -36,6 +36,8 @@ services:
       - ${MAX_NUM_SEQS:-1}
       - --gpu-memory-utilization
       - ${GPU_MEMORY_UTILIZATION:-0.90}
+      - --max-num-batched-tokens
+      - ${MAX_NUM_BATCHED_TOKENS:-4096}
     deploy:
       resources:
         reservations:

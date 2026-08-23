@@ -103,8 +103,16 @@ The startup command is equivalent to:
 vllm serve Qwen/Qwen3-ForcedAligner-0.6B \
   --runner pooling \
   --chat-template /config/raw_content_chat_template.jinja \
-  --hf-overrides '{"architectures":["Qwen3ASRForcedAlignerForTokenClassification"]}'
+  --hf-overrides '{"architectures":["Qwen3ASRForcedAlignerForTokenClassification"]}' \
+  --max-num-batched-tokens 4096
 ```
+
+vLLM 0.24 sizes its multimodal encoder cache from `max-num-batched-tokens`.
+The BECK 180-second arm measured 2,340 audio embedding tokens, above the default
+2,048-token scheduler budget. The 4,096-token setting keeps the intended
+180-second Qwen input available without changing the audio or prompt. Set
+`MAX_NUM_BATCHED_TOKENS` only if a later vLLM or processor revision changes this
+measured requirement.
 
 `--enforce-eager` is not part of the known forced-aligner contract. Add it only
 as a troubleshooting flag if vLLM CUDA graph capture or compilation behavior
