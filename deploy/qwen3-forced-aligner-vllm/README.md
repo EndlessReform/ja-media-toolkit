@@ -84,6 +84,9 @@ It also records the exact vLLM request bytes, response bytes, returned row
 count, and classes per row. These measurements establish whether transport,
 CPU work, queueing, or model execution is limiting the sweep.
 
+The measured result, OpenTelemetry keys, and vLLM extension options are in
+[Qwen3 Forced Aligner Serving Profile](../../docs/plans/forced-alignment/qwen3-forced-aligner-serving-profile.md).
+
 vLLM 0.24 also has built-in OpenTelemetry spans for queue, scheduler, model
 forward, and model execute time. The optional Compose profile runs Jaeger for
 one profiling session:

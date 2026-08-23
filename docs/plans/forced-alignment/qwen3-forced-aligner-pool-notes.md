@@ -3,6 +3,10 @@
 These notes summarize the current plan for using
 `Qwen/Qwen3-ForcedAligner-0.6B` through vLLM's `/pooling` endpoint.
 
+The measured serving bottleneck, trace keys, tensor shapes, and supported
+GPU-side reduction options are recorded in
+[Qwen3 Forced Aligner Serving Profile](qwen3-forced-aligner-serving-profile.md).
+
 ## Timestamp Placement
 
 - The application/consumer chooses the alignment units and inserts
