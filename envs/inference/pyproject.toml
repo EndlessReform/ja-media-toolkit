@@ -16,6 +16,7 @@ dependencies = [
 
 [project.scripts]
 qwen3-align-smoke = "ja_media_inference.qwen3_align_smoke:main"
+qwen3-retime-case = "ja_media_inference.qwen3_retime_case:main"
 
 [build-system]
 requires = ["hatchling"]
