@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import math
 from dataclasses import dataclass
 from pathlib import Path
 import time
@@ -16,9 +15,12 @@ from ja_media_inference.forced_alignment.audio_probe import (
 )
 from ja_media_inference.forced_alignment.pooling_transport import (
     build_pooling_payload,
-    post_pooling_profiled,
+    post_pooling_binary_profiled,
 )
 from ja_media_inference.forced_alignment.pooling_rows import select_timestamp_rows
+from ja_media_inference.forced_alignment.timestamp_metrics import (
+    summarize_distribution_rows,
+)
 from ja_media_inference.forced_alignment.text_units import (
     AlignmentToken,
     TokenAlignment,
@@ -93,9 +95,10 @@ class Qwen3VllmForcedAligner:
             prompt=plan.prompt,
             audio_path=Path(audio_path),
             include_chat_template=self.trust_request_chat_template,
+            encoding_format="bytes",
         )
         payload_ready = time.perf_counter()
-        response, upstream_timings = post_pooling_profiled(
+        pooling_output, upstream_timings = post_pooling_binary_profiled(
             f"{self.base_url}/pooling",
             payload,
             timeout_s=self.timeout_s,
@@ -103,11 +106,10 @@ class Qwen3VllmForcedAligner:
         upstream_done = time.perf_counter()
         alignments = self.extract_token_alignments(
             plan=plan,
-            pooling_json=response,
+            pooling_output=pooling_output,
             audio_duration_s=probe_audio_duration(Path(audio_path)),
         )
         finished = time.perf_counter()
-        logits = response["data"][0]["data"]
         return ProfiledAlignment(
             alignments=alignments,
             timings={
@@ -115,8 +117,8 @@ class Qwen3VllmForcedAligner:
                 **upstream_timings,
                 "timestamp_reduction_s": finished - upstream_done,
                 "aligner_total_s": finished - started,
-                "vllm_output_rows": len(logits),
-                "vllm_classes_per_row": len(logits[0]) if logits else 0,
+                "vllm_output_rows": pooling_output.shape[0],
+                "vllm_classes_per_row": pooling_output.shape[1],
             },
         )
 
@@ -124,24 +126,23 @@ class Qwen3VllmForcedAligner:
         self,
         *,
         plan: PromptPlan,
-        pooling_json: dict[str, Any],
+        pooling_output: Any,
         audio_duration_s: float,
     ) -> list[TokenAlignment]:
         tokenizer = self._load_tokenizer()
         timestamp_token_id, timestamp_segment_time = self._load_timestamp_config()
-        logits = pooling_json["data"][0]["data"]
         local_ids = tokenizer(plan.prompt, add_special_tokens=False)["input_ids"]
         audio_pad_token_id = tokenizer.convert_tokens_to_ids("<|audio_pad|>")
         timestamp_rows = select_timestamp_rows(
-            logits=logits,
+            logits=pooling_output,
             local_ids=local_ids,
             timestamp_token_id=timestamp_token_id,
             audio_pad_token_id=audio_pad_token_id,
         )
 
         timestamp_predictions: list[dict[str, float]] = []
-        for row in timestamp_rows:
-            row_metrics = _distribution_metrics(row)
+        row_metrics_list = summarize_distribution_rows(timestamp_rows)
+        for row, row_metrics in zip(timestamp_rows, row_metrics_list, strict=True):
             time_s = row_metrics["argmax_index"] * timestamp_segment_time / 1000
             timestamp_predictions.append(
                 {
@@ -220,51 +221,3 @@ def load_timestamp_config(model: str) -> tuple[int, float]:
     )
     config = json.loads(config_path.read_text(encoding="utf-8"))
     return config["timestamp_token_id"], config["timestamp_segment_time"]
-
-
-def _argmax(values: Sequence[float]) -> int:
-    best_i = 0
-    best_value = values[0]
-    for index, value in enumerate(values[1:], start=1):
-        if value > best_value:
-            best_i = index
-            best_value = value
-    return best_i
-
-
-def _distribution_metrics(values: Sequence[float]) -> dict[str, Any]:
-    """Summarize one timestamp distribution without claiming model calibration."""
-
-    if not values:
-        raise ValueError("timestamp logit row is empty")
-    best_i = _argmax(values)
-    best = float(values[best_i])
-    total_input = sum(float(value) for value in values)
-    already_probabilities = all(float(value) >= 0 for value in values) and math.isclose(
-        total_input, 1.0, rel_tol=1e-3, abs_tol=1e-3
-    )
-    if already_probabilities:
-        probabilities = [float(value) / total_input for value in values]
-    else:
-        weights = [math.exp(float(value) - best) for value in values]
-        total = sum(weights)
-        probabilities = [weight / total for weight in weights]
-    sorted_probabilities = sorted(probabilities, reverse=True)
-    entropy = -sum(
-        probability * math.log(probability)
-        for probability in probabilities
-        if probability > 0
-    )
-    return {
-        "argmax_index": float(best_i),
-        "distribution_kind": "probabilities" if already_probabilities else "logits",
-        "max_probability": probabilities[best_i],
-        "top_two_probability_margin": (
-            sorted_probabilities[0] - sorted_probabilities[1]
-            if len(sorted_probabilities) > 1
-            else sorted_probabilities[0]
-        ),
-        "normalized_entropy": entropy / math.log(len(values))
-        if len(values) > 1
-        else 0.0,
-    }

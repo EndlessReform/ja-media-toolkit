@@ -458,6 +458,7 @@ dependencies = [
     { name = "huggingface-hub" },
     { name = "ja-media-core" },
     { name = "nagisa" },
+    { name = "numpy" },
     { name = "transformers" },
     { name = "uvicorn" },
 ]
@@ -475,6 +476,7 @@ requires-dist = [
     { name = "huggingface-hub", specifier = ">=1.21.0" },
     { name = "ja-media-core", editable = "../../packages/core" },
     { name = "nagisa", specifier = ">=0.2.12" },
+    { name = "numpy", specifier = ">=2.4.0" },
     { name = "transformers", specifier = ">=5.12.1" },
     { name = "uvicorn", specifier = ">=0.52.4" },
 ]

@@ -18,6 +18,8 @@ because it reuses the tested Qwen prompt and timestamp-decoding code.
   multimodal user message, which is required by the client-side timestamp-row
   extraction strategy
 - `scripts/run-docker.sh`: plain Docker fallback for hosts without Compose
+- `scripts/restart-adapter.sh`: rebuild only the CPU adapter without restarting
+  vLLM or reloading the model
 - `scripts/serve-vllm.sh`: adds scheduler flags only when explicitly configured
 - `scripts/start-compose.sh`: build, audio-smoke, and start via Compose
 - `scripts/smoke-image-audio.sh`: import check for vLLM's optional audio deps
@@ -167,9 +169,11 @@ LAN clients call the adapter's `/audio/cache` and `/align` routes on port 8000.
 Raw vLLM `/pooling` is exposed on port 8001 for this spike so binary encodings
 and pooling behavior can be measured without adding adapter routes. The adapter
 downloads the pinned AC-3 once, decodes each requested crop to mono 16 kHz PCM,
-calls `/pooling` on the private Docker network, and reduces the raw tensor to
-token timings and distribution metrics. The Mac still owns cue/window selection,
-episode-clock offsets, cue reconstruction, SRT output, and review artifacts.
+calls `/pooling` on the private Docker network, and requests little-endian fp16
+bytes. It views that body as a NumPy matrix without creating Python float
+objects, then vectorizes the token timings and distribution metrics. The Mac
+still owns cue/window selection, episode-clock offsets, cue reconstruction, SRT
+output, and review artifacts.
 
 The upstream Qwen/vLLM example treats forced alignment as word-level timestamp
 classification. The expected prompt body is a sequence of client-chosen text
