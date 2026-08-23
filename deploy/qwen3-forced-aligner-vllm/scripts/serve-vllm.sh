@@ -8,6 +8,7 @@ args=(
   --runner pooling
   --chat-template /config/raw_content_chat_template.jinja
   --hf-overrides '{"architectures":["Qwen3ASRForcedAlignerForTokenClassification"]}'
+  --pooler-config '{"tok_pooling_type":"STEP","step_tag_id":151705}'
 )
 
 if [[ -n "${MAX_NUM_BATCHED_TOKENS:-}" ]]; then

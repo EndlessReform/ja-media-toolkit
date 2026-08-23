@@ -22,6 +22,8 @@ services:
       - ${HF_HOME:-/var/lib/qwen3-forced-aligner/huggingface}:/root/.cache/huggingface
       - ./config:/config:ro
     ipc: host
+    ports:
+      - "8001:8000"
     entrypoint: ["/usr/local/bin/serve-vllm"]
     deploy:
       resources:

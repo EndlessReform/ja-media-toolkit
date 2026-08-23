@@ -137,9 +137,10 @@ image remains pinned to 0.24.
 
 ## Recommendation
 
-First run binary `/pooling` as a one-change baseline. Then use `StepPool` plus a
-small out-of-tree IO processor if the spike continues. Implement a custom GPU
-summary pooler only if transferring the selected timestamp rows still matters.
+The spike deployment now exposes raw `/pooling` on LAN port 8001 and starts the
+model with `StepPool` using timestamp token ID `151705`. Measure float and binary
+encodings against that endpoint. Add an IO processor only if transferring the
+selected timestamp rows still matters.
 
 Do not replace this with `/completions`. The forced-aligner architecture removes
 the language-model head and applies a 5,000-class timestamp head. Those classes

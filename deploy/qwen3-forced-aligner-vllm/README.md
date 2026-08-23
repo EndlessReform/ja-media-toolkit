@@ -163,7 +163,9 @@ token budgets and concurrency before putting either scheduler value in `.env`.
 as a troubleshooting flag if vLLM CUDA graph capture or compilation behavior
 breaks this model/image combination.
 
-LAN clients call the adapter's `/audio/cache` and `/align` routes. The adapter
+LAN clients call the adapter's `/audio/cache` and `/align` routes on port 8000.
+Raw vLLM `/pooling` is exposed on port 8001 for this spike so binary encodings
+and pooling behavior can be measured without adding adapter routes. The adapter
 downloads the pinned AC-3 once, decodes each requested crop to mono 16 kHz PCM,
 calls `/pooling` on the private Docker network, and reduces the raw tensor to
 token timings and distribution metrics. The Mac still owns cue/window selection,
@@ -190,6 +192,7 @@ must not be rendered into the textual prompt.
 
 ## Security Boundary
 
-Compose exposes only the unauthenticated compact adapter. Raw vLLM is reachable
-only on the private Docker network. Bind the adapter only to a trusted LAN or
-VPN and do not put it directly on the public internet.
+Compose exposes both the unauthenticated compact adapter on port 8000 and raw
+vLLM on port 8001. These are deliberate experiment escape hatches. Bind the GPU
+host only to a trusted LAN or VPN and do not put either port on the public
+internet.

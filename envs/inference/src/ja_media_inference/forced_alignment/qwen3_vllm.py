@@ -18,6 +18,7 @@ from ja_media_inference.forced_alignment.pooling_transport import (
     build_pooling_payload,
     post_pooling_profiled,
 )
+from ja_media_inference.forced_alignment.pooling_rows import select_timestamp_rows
 from ja_media_inference.forced_alignment.text_units import (
     AlignmentToken,
     TokenAlignment,
@@ -131,30 +132,16 @@ class Qwen3VllmForcedAligner:
         logits = pooling_json["data"][0]["data"]
         local_ids = tokenizer(plan.prompt, add_special_tokens=False)["input_ids"]
         audio_pad_token_id = tokenizer.convert_tokens_to_ids("<|audio_pad|>")
-        try:
-            audio_pad_index = local_ids.index(audio_pad_token_id)
-        except ValueError as exc:
-            raise RuntimeError("Prompt does not contain the audio pad token") from exc
-
-        audio_token_shift = len(logits) - len(local_ids)
-        if audio_token_shift < 0:
-            raise RuntimeError(
-                "vLLM returned fewer logit rows than local prompt tokens; "
-                "check the server chat template."
-            )
+        timestamp_rows = select_timestamp_rows(
+            logits=logits,
+            local_ids=local_ids,
+            timestamp_token_id=timestamp_token_id,
+            audio_pad_token_id=audio_pad_token_id,
+        )
 
         timestamp_predictions: list[dict[str, float]] = []
-        for local_i, token_id in enumerate(local_ids):
-            if token_id != timestamp_token_id:
-                continue
-            server_i = (
-                local_i + audio_token_shift if local_i > audio_pad_index else local_i
-            )
-            if server_i < 0 or server_i >= len(logits):
-                raise RuntimeError(
-                    f"Timestamp row {server_i} is outside logits length {len(logits)}"
-                )
-            row_metrics = _distribution_metrics(logits[server_i])
+        for row in timestamp_rows:
+            row_metrics = _distribution_metrics(row)
             time_s = row_metrics["argmax_index"] * timestamp_segment_time / 1000
             timestamp_predictions.append(
                 {
@@ -162,7 +149,7 @@ class Qwen3VllmForcedAligner:
                     "time_s": time_s,
                     "distribution_edge_distance_s": min(
                         row_metrics["argmax_index"],
-                        len(logits[server_i]) - 1 - row_metrics["argmax_index"],
+                        len(row) - 1 - row_metrics["argmax_index"],
                     )
                     * timestamp_segment_time
                     / 1000,

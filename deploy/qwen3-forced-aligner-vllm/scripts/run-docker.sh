@@ -52,6 +52,7 @@ trap cleanup EXIT INT TERM
 docker run --detach \
   --name "${VLLM_CONTAINER}" \
   --network "${NETWORK}" \
+  -p 8001:8000 \
   --gpus all \
   --ipc=host \
   -e HF_HOME=/root/.cache/huggingface \
