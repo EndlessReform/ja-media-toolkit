@@ -12,8 +12,8 @@ if [[ -f "${ENV_FILE}" ]]; then
   set +a
 fi
 
-: "${ALIGNER_BRONZE_ENDPOINT_URL:?set in deploy/qwen3-forced-aligner-vllm/.env}"
-: "${ALIGNER_BRONZE_BUCKET:?set in deploy/qwen3-forced-aligner-vllm/.env}"
+# shellcheck source=load-data-config.sh
+source "${ROOT_DIR}/scripts/load-data-config.sh"
 
 SERVER_PORT="${SERVER_PORT:-8000}"
 VLLM_BASE_IMAGE="${VLLM_BASE_IMAGE:-vllm/vllm-openai:v0.24.0}"
@@ -57,8 +57,6 @@ docker run --detach \
   -e HF_HOME=/root/.cache/huggingface \
   -e HUGGING_FACE_HUB_TOKEN="${HF_TOKEN:-}" \
   -e MODEL_ID="${MODEL_ID:-Qwen/Qwen3-ForcedAligner-0.6B}" \
-  -e GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-}" \
-  -e MAX_NUM_SEQS="${MAX_NUM_SEQS:-}" \
   -e MAX_NUM_BATCHED_TOKENS="${MAX_NUM_BATCHED_TOKENS:-}" \
   -e EXTRA_VLLM_ARGS="${EXTRA_VLLM_ARGS:-}" \
   -v "${HF_HOME}:/root/.cache/huggingface" \
@@ -73,12 +71,10 @@ docker run --rm \
   -e HF_HOME=/root/.cache/huggingface \
   -e ALIGNER_VLLM_BASE_URL="http://${VLLM_CONTAINER}:8000" \
   -e ALIGNER_AUDIO_CACHE_DIR=/var/cache/ja-media/audio \
-  -e ALIGNER_BRONZE_ENDPOINT_URL \
-  -e ALIGNER_BRONZE_BUCKET \
-  -e ALIGNER_BRONZE_PREFIX="${ALIGNER_BRONZE_PREFIX:-audio/anime/bronze-v2}" \
-  -e ALIGNER_BRONZE_ADDRESSING_STYLE="${ALIGNER_BRONZE_ADDRESSING_STYLE:-path}" \
-  -e ALIGNER_BRONZE_ACCESS_KEY_ID="${ALIGNER_BRONZE_ACCESS_KEY_ID:-}" \
-  -e ALIGNER_BRONZE_SECRET_ACCESS_KEY="${ALIGNER_BRONZE_SECRET_ACCESS_KEY:-}" \
+  -e JA_MEDIA_DATA_CONFIG=/etc/ja-media/data.toml \
+  -e JA_MEDIA_BRONZE__ACCESS_KEY_ID \
+  -e JA_MEDIA_BRONZE__SECRET_ACCESS_KEY \
   -v "${HF_HOME}:/root/.cache/huggingface" \
   -v "${AUDIO_CACHE}:/var/cache/ja-media/audio" \
+  -v "${JA_MEDIA_DATA_CONFIG_HOST}:/etc/ja-media/data.toml:ro" \
   "${ADAPTER_IMAGE}"

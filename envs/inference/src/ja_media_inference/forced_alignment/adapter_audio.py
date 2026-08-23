@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import tomllib
 from typing import Iterator, Protocol
 
 import boto3
@@ -39,18 +40,16 @@ class AdapterSettings:
 
     @classmethod
     def from_environment(cls) -> AdapterSettings:
-        """Load settings without reading or printing a dotenv file."""
+        """Read the repository's standard data TOML and Bronze overrides."""
 
-        required = {
-            "ALIGNER_BRONZE_ENDPOINT_URL": os.environ.get(
-                "ALIGNER_BRONZE_ENDPOINT_URL"
-            ),
-            "ALIGNER_BRONZE_BUCKET": os.environ.get("ALIGNER_BRONZE_BUCKET"),
-            "ALIGNER_BRONZE_PREFIX": os.environ.get("ALIGNER_BRONZE_PREFIX"),
-        }
-        missing = [name for name, value in required.items() if not value]
-        if missing:
-            raise RuntimeError(f"missing adapter settings: {', '.join(missing)}")
+        config_path = Path(
+            os.environ.get("JA_MEDIA_DATA_CONFIG", "/etc/ja-media/data.toml")
+        )
+        if not config_path.is_file():
+            raise RuntimeError(f"data config not found: {config_path}")
+        bronze = tomllib.loads(config_path.read_text(encoding="utf-8")).get("bronze")
+        if not isinstance(bronze, dict):
+            raise RuntimeError(f"data config has no [bronze] section: {config_path}")
         return cls(
             vllm_base_url=os.environ.get(
                 "ALIGNER_VLLM_BASE_URL", "http://vllm:8000"
@@ -58,15 +57,17 @@ class AdapterSettings:
             audio_cache_dir=Path(
                 os.environ.get("ALIGNER_AUDIO_CACHE_DIR", "/var/cache/ja-media/audio")
             ),
-            bronze_endpoint_url=str(required["ALIGNER_BRONZE_ENDPOINT_URL"]),
-            bronze_bucket=str(required["ALIGNER_BRONZE_BUCKET"]),
-            bronze_prefix=str(required["ALIGNER_BRONZE_PREFIX"]).strip("/"),
-            bronze_addressing_style=os.environ.get(
-                "ALIGNER_BRONZE_ADDRESSING_STYLE", "path"
+            bronze_endpoint_url=_bronze_value(bronze, "endpoint_url"),
+            bronze_bucket=_bronze_value(bronze, "bucket"),
+            bronze_prefix=_bronze_value(bronze, "prefix", allow_empty=True).strip("/"),
+            bronze_addressing_style=_bronze_value(
+                bronze, "addressing_style", default="path"
             ),
-            bronze_access_key_id=_optional_environment("ALIGNER_BRONZE_ACCESS_KEY_ID"),
+            bronze_access_key_id=_optional_environment(
+                "JA_MEDIA_BRONZE__ACCESS_KEY_ID"
+            ),
             bronze_secret_access_key=_optional_environment(
-                "ALIGNER_BRONZE_SECRET_ACCESS_KEY"
+                "JA_MEDIA_BRONZE__SECRET_ACCESS_KEY"
             ),
         )
 
@@ -111,13 +112,15 @@ class AudioCache:
     ) -> None:
         self.root = root
         self.allowed_bucket = allowed_bucket
-        self.allowed_prefix = f"{allowed_prefix.strip('/')}/"
+        self.allowed_prefix = allowed_prefix.strip("/")
         self.store = store
 
     def ensure(self, request: AudioCacheRequest) -> tuple[Path, bool]:
         if request.object_bucket != self.allowed_bucket:
             raise ValueError("audio object bucket does not match configured Bronze")
-        if not request.object_key.startswith(self.allowed_prefix):
+        if self.allowed_prefix and not request.object_key.startswith(
+            f"{self.allowed_prefix}/"
+        ):
             raise ValueError("audio object key is outside the configured Bronze prefix")
         self.root.mkdir(parents=True, exist_ok=True)
         destination = self.root / f"{request.sha256}.{request.codec}"
@@ -196,3 +199,17 @@ def _sha256(path: Path) -> str:
 def _optional_environment(name: str) -> str | None:
     value = os.environ.get(name)
     return value if value else None
+
+
+def _bronze_value(
+    bronze: dict[str, object],
+    key: str,
+    *,
+    default: str | None = None,
+    allow_empty: bool = False,
+) -> str:
+    environment_name = f"JA_MEDIA_BRONZE__{key.upper()}"
+    raw = os.environ.get(environment_name, bronze.get(key, default))
+    if raw is None or (not allow_empty and not str(raw)):
+        raise RuntimeError(f"missing Bronze setting: {key}")
+    return str(raw)

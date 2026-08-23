@@ -14,8 +14,6 @@ services:
       HF_HOME: /root/.cache/huggingface
       HUGGING_FACE_HUB_TOKEN: ${HF_TOKEN:-}
       MODEL_ID: ${MODEL_ID:-Qwen/Qwen3-ForcedAligner-0.6B}
-      GPU_MEMORY_UTILIZATION: ${GPU_MEMORY_UTILIZATION:-}
-      MAX_NUM_SEQS: ${MAX_NUM_SEQS:-}
       MAX_NUM_BATCHED_TOKENS: ${MAX_NUM_BATCHED_TOKENS:-}
       EXTRA_VLLM_ARGS: ${EXTRA_VLLM_ARGS:-}
     volumes:
@@ -56,15 +54,13 @@ services:
       HF_HOME: /root/.cache/huggingface
       ALIGNER_VLLM_BASE_URL: http://vllm:8000
       ALIGNER_AUDIO_CACHE_DIR: /var/cache/ja-media/audio
-      ALIGNER_BRONZE_ENDPOINT_URL: ${ALIGNER_BRONZE_ENDPOINT_URL:?set in .env}
-      ALIGNER_BRONZE_BUCKET: ${ALIGNER_BRONZE_BUCKET:?set in .env}
-      ALIGNER_BRONZE_PREFIX: ${ALIGNER_BRONZE_PREFIX:-audio/anime/bronze-v2}
-      ALIGNER_BRONZE_ADDRESSING_STYLE: ${ALIGNER_BRONZE_ADDRESSING_STYLE:-path}
-      ALIGNER_BRONZE_ACCESS_KEY_ID: ${ALIGNER_BRONZE_ACCESS_KEY_ID:-}
-      ALIGNER_BRONZE_SECRET_ACCESS_KEY: ${ALIGNER_BRONZE_SECRET_ACCESS_KEY:-}
+      JA_MEDIA_DATA_CONFIG: /etc/ja-media/data.toml
+      JA_MEDIA_BRONZE__ACCESS_KEY_ID: ${JA_MEDIA_BRONZE__ACCESS_KEY_ID:-}
+      JA_MEDIA_BRONZE__SECRET_ACCESS_KEY: ${JA_MEDIA_BRONZE__SECRET_ACCESS_KEY:-}
     volumes:
       - ${HF_HOME:-/var/lib/qwen3-forced-aligner/huggingface}:/root/.cache/huggingface
       - ${ALIGNER_AUDIO_CACHE:-/var/lib/qwen3-forced-aligner/audio}:/var/cache/ja-media/audio
+      - ${JA_MEDIA_DATA_CONFIG_HOST:?set by start-compose.sh}:/etc/ja-media/data.toml:ro
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8000/healthz"]
       interval: 15s

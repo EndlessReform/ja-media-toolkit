@@ -10,12 +10,6 @@ args=(
   --hf-overrides '{"architectures":["Qwen3ASRForcedAlignerForTokenClassification"]}'
 )
 
-if [[ -n "${GPU_MEMORY_UTILIZATION:-}" ]]; then
-  args+=(--gpu-memory-utilization "${GPU_MEMORY_UTILIZATION}")
-fi
-if [[ -n "${MAX_NUM_SEQS:-}" ]]; then
-  args+=(--max-num-seqs "${MAX_NUM_SEQS}")
-fi
 if [[ -n "${MAX_NUM_BATCHED_TOKENS:-}" ]]; then
   args+=(--max-num-batched-tokens "${MAX_NUM_BATCHED_TOKENS}")
 fi

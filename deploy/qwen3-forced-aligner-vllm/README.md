@@ -52,12 +52,10 @@ Key settings:
   `qwen3-forced-aligner-vllm:0.24.0-audio`
 - `SERVER_PORT`: host port mapped to the compact adapter
 - `HF_HOME`: host cache directory for model weights
-- `MAX_NUM_SEQS`: optional vLLM scheduler limit; empty uses vLLM's normal value
 - `MAX_NUM_BATCHED_TOKENS`: optional per-iteration token budget
-- `GPU_MEMORY_UTILIZATION`: optional vLLM memory fraction; empty uses vLLM's
-  normal value
-- `ALIGNER_BRONZE_*`: read-only S3-compatible Bronze connection used to cache
-  the pinned compressed episode audio
+- `packages/data/config.local.toml`: the existing Bronze endpoint, bucket,
+  prefix, and addressing style
+- `packages/data/.env.local`: the existing read-only Bronze credentials
 - `ALIGNER_AUDIO_CACHE`: host directory for verified episode audio
 
 vLLM's official OpenAI images do not include optional audio dependencies. The
@@ -76,7 +74,13 @@ If the selected vLLM base image does not contain
 
 Docker Compose automatically reads `.env` when it runs from this deployment
 directory. The wrapper changes into this directory before calling Compose so the
-same command works even if you launch it from another path.
+same command works even if you launch it from another path. It also reads the
+existing `packages/data/config.local.toml` and adjacent `.env.local`; no Bronze
+values are copied into this deployment's `.env`.
+
+To select a different existing data configuration, set
+`JA_MEDIA_DATA_CONFIG_HOST` to its host path before running the wrapper. Its
+adjacent secret file follows the normal `.env.<environment>` naming rule.
 
 In another shell:
 
