@@ -57,7 +57,7 @@ class SrtCleaningReviewApp(
         ("f1", "help", "Help"),
         ("f5", "show_cue_review", "Cue review"),
         ("f6", "show_reason_pivot", "Reason pivot"),
-        ("f7", "show_alignment_ab", "Blind alignment A/B"),
+        ("f7", "show_alignment_ab", "Alignment comparison"),
         ("e", "select_episode", "Episode"),
         ("s", "show_stats", "Stats"),
         ("r", "toggle_rule_overlay", "Rule overlay"),

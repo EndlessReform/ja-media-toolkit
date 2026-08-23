@@ -76,3 +76,85 @@ Original subtitle cues beyond the canonical audio duration are sent with the
 final audio core rather than dropped. This lets the model produce edge, entropy,
 repetition, and ordering metrics for likely edition mismatches or text absent
 from the audio.
+
+## Crop-edge experiment
+
+The 2026-08-23 experiment asks a narrow question: does moving the same dialogue
+near the beginning or end of the audio sent to Qwen change its predicted cue
+borders? It uses 36 cues:
+
+- 12 human-reviewed ordinary-dialogue cues whose saved interior candidate had
+  broken timestamp order;
+- 12 ordinary-dialogue cues with clean saved timings, matched by source when
+  possible and then by text/cue duration; and
+- 12 selector conflicts where the saved winner had broken timestamp order but
+  another saved candidate was ordered. Full Metal Panic cue 81 is included.
+
+Every cue is sent in six test versions: 60 and 180 seconds, with the complete
+source cue placed 2 seconds from the beginning, centered, or 2 seconds from the
+end. That produces 216 requests. Preparation also writes a row for every saved
+candidate timing, so the corpus-wide audio-edge and text-list-edge rates can be
+checked separately from the controlled placements.
+
+Prepare the input-pinned inventory and 36-cue target manifest without calling
+the aligner:
+
+```sh
+cd envs/inference
+uv run qwen3-retime-case edge \
+  ../../research/forced-alignment-retiming/output/corpus-slice-2026-08-22/slice.json \
+  --reviewed-targets ../../research/forced-alignment-retiming/edge-dialogue-targets.json \
+  --edge-stage prepare
+```
+
+Run the 216 requests. `--base-url` may be omitted when a default
+`[forced_alignment]` backend is present in the normal toolkit config:
+
+```sh
+uv run qwen3-retime-case edge \
+  ../../research/forced-alignment-retiming/output/corpus-slice-2026-08-22/slice.json \
+  --reviewed-targets ../../research/forced-alignment-retiming/edge-dialogue-targets.json \
+  --edge-stage run \
+  --concurrency 32 \
+  --base-url <forced-alignment-adapter-url>
+```
+
+The aggregate results, paired beginning/end-versus-middle comparisons, target
+manifest, candidate inventory, and compact inventory summary live under
+`edge-experiment/`. Each participating case also gets
+`stability/results.json`, which is what the review UI reads.
+
+Start the review UI with the full slice using the earlier command, move to a
+participating subtitle source with `j`/`k`, and press `F7`. The comparison shows
+the six exact playback intervals, movement from the same-length middle result,
+timestamp-order status, and the closest predicted border to the crop edge.
+Press `1`–`6` to hear a test version, `o` to hear the original subtitle borders,
+and `j`/`k` inside the dialog to move through that source's tested cues.
+
+### Current findings
+
+The corpus inventory contains 17,493 saved candidate timings. Among strict
+ordinary-dialogue candidates, broken timestamp order falls from 85.1% within
+0.2 seconds of a predicted crop edge to 24.3% more than 10 seconds away. That is
+an uncontrolled corpus association; the six-placement test checks the same cue
+under controlled crop changes.
+
+Two input-identical passes of the 216-request placement test found:
+
+- among 70–72 beginning/end results whose same-length middle result was
+  ordered, 22–25 became broken and 35–38 either became broken or moved a border
+  by more than 0.5 seconds;
+- beginning placement was worse than end placement: 14–15 versus 8–10 newly
+  broken results;
+- 180-second tests produced 29 border shifts over 10 seconds, versus 13 for
+  60-second tests; and
+- seven returned cue intervals extended beyond the audio sent to the aligner.
+
+The input-identical repeat changed an exact cue border in 4 of 216 results, with
+3 moving by more than 0.16 seconds, and changed timestamp-order status in 2.
+That jitter changes a few threshold counts but is much smaller than the crop
+placement effect. These findings establish that crop position affects this
+aligner and that 2 seconds is unsafe as a production clearance. They do not, by
+themselves, establish that 60 seconds is universally better than 180 seconds;
+they do show substantially more extreme movement in the tested 180-second
+placements.

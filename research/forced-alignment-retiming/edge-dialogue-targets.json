@@ -1,0 +1,19 @@
+{
+  "schema_name": "ja-media.forced-alignment.reviewed-edge-targets",
+  "schema_version": "1.0.0",
+  "review_policy": "ordinary lexical dialogue; content not judged to explain the saved timestamp-order failure",
+  "targets": [
+    {"case": "anilist-13125-e01-a4a348f73c91", "source_index": 148},
+    {"case": "anilist-14131-e01-098c58ebea10", "source_index": 246},
+    {"case": "anilist-14131-e01-e29c7688ff8f", "source_index": 293},
+    {"case": "anilist-14967-e01-b7a7493c8c9d", "source_index": 300},
+    {"case": "anilist-1575-e01-c0601a43342b", "source_index": 305},
+    {"case": "anilist-2904-e01-c5abf64607a4", "source_index": 368},
+    {"case": "anilist-57-e01-f9769b7926c8", "source_index": 378},
+    {"case": "anilist-71-e01-1ca403895485", "source_index": 125},
+    {"case": "anilist-72-e01-10cf4104bd62", "source_index": 210},
+    {"case": "anilist-73-e01-ea471bcfad57", "source_index": 302},
+    {"case": "anilist-75-e01-0dffdb25d666", "source_index": 160},
+    {"case": "anilist-9074-e01-dad6bca633a1", "source_index": 258}
+  ]
+}

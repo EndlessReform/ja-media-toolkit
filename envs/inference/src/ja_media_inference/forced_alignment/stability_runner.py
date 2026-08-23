@@ -3,18 +3,25 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-import hashlib
 import json
 from pathlib import Path
 import re
-from statistics import median
-from typing import Any, Iterable
+from typing import Any
 
 from ja_media_inference.forced_alignment.case_runner import (
     _midpoint,
     _read_jsonl,
 )
 from ja_media_inference.forced_alignment.qwen3_adapter_client import Qwen3AdapterClient
+from ja_media_inference.forced_alignment.stability_placements import (
+    EDGE_POSITION_NAMES,
+    compare_positions,
+    edge_clearance_crop,
+)
+from ja_media_inference.forced_alignment.stability_reporting import (
+    build_blind_pairs,
+    summarize_stability,
+)
 from ja_media_inference.forced_alignment.window_execution import align_remote_window
 
 
@@ -33,6 +40,8 @@ def run_stability_case(
     positions: tuple[tuple[str, float], ...] = DEFAULT_POSITIONS,
     text_field: str = "alignment_text",
     concurrency: int = 1,
+    targets: list[dict[str, Any]] | None = None,
+    edge_clearance_s: float | None = None,
 ) -> Path:
     """Run the same lexical cues at three positions in each requested duration."""
 
@@ -40,13 +49,15 @@ def run_stability_case(
     case = json.loads(case_manifest.read_text(encoding="utf-8"))
     duration_s = float(case["audio"]["duration_s"])
     records = _read_jsonl(case_root / case["cleaned_subtitle"]["input_cues"])
-    targets = select_lexical_targets(
+    targets = targets or select_lexical_targets(
         records,
         duration_s=duration_s,
         sample_count=sample_count,
         max_window_s=max(window_sizes_s),
         positions=positions,
     )
+    if edge_clearance_s is not None:
+        positions = tuple((name, 0.5) for name in EDGE_POSITION_NAMES)
     aligner = Qwen3AdapterClient(base_url=base_url)
     audio_id = aligner.cache_audio(case["audio"])
     output_root = case_root / "stability"
@@ -62,7 +73,7 @@ def run_stability_case(
 
     def run_job(job: tuple[dict[str, Any], float, str, float]) -> dict[str, Any]:
         target, window_s, position_name, position = job
-        return _run_arm(
+        return _run_placement(
             aligner,
             audio_id,
             records,
@@ -72,6 +83,7 @@ def run_stability_case(
             position_name=position_name,
             position=position,
             text_field=text_field,
+            edge_clearance_s=edge_clearance_s,
         )
 
     # Warm the server-side tokenizer/config caches before concurrent requests.
@@ -100,9 +112,18 @@ def run_stability_case(
         "positions": [
             {"name": name, "fraction": fraction} for name, fraction in positions
         ],
+        "placement_policy": (
+            {
+                "name": "explicit-source-cue-edge-clearance-v1",
+                "edge_clearance_s": edge_clearance_s,
+            }
+            if edge_clearance_s is not None
+            else {"name": "fractional-cue-midpoint-v1"}
+        ),
         "targets": targets,
         "results": results,
         "stability_summary": summarize_stability(results),
+        "position_comparisons": compare_positions(results),
         "blind_pairs": build_blind_pairs(results),
     }
     destination = output_root / "results.json"
@@ -118,7 +139,7 @@ def select_lexical_targets(
     max_window_s: float,
     positions: tuple[tuple[str, float], ...] = DEFAULT_POSITIONS,
 ) -> list[dict[str, Any]]:
-    """Select evenly distributed, unflagged dialogue cues that fit every arm."""
+    """Select evenly distributed, unflagged dialogue cues that fit every placement."""
 
     if sample_count <= 0:
         raise ValueError("sample_count must be positive")
@@ -133,7 +154,7 @@ def select_lexical_targets(
     ]
     if len(candidates) < sample_count:
         raise ValueError(
-            f"only {len(candidates)} lexical cues fit all stability arms; "
+            f"only {len(candidates)} lexical cues fit all stability placements; "
             f"requested {sample_count}"
         )
     indexes = [
@@ -158,88 +179,7 @@ def is_lexical_review_cue(row: dict[str, Any]) -> bool:
     )
 
 
-def summarize_stability(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Aggregate within-cue border movement for each window duration."""
-
-    summaries = []
-    for window_s in sorted({float(row["window_size_s"]) for row in results}):
-        arms = [row for row in results if float(row["window_size_s"]) == window_s]
-        jitters = []
-        for cue_id in sorted({str(row["target_cue_id"]) for row in arms}):
-            cue_arms = [row for row in arms if str(row["target_cue_id"]) == cue_id]
-            starts = [
-                float(row["target_result"]["aligned_start_s"]) for row in cue_arms
-            ]
-            ends = [float(row["target_result"]["aligned_end_s"]) for row in cue_arms]
-            jitters.append(
-                {
-                    "target_cue_id": cue_id,
-                    "source_index": cue_arms[0]["target_result"]["source_index"],
-                    "start_range_s": max(starts) - min(starts),
-                    "end_range_s": max(ends) - min(ends),
-                    "max_border_range_s": max(
-                        max(starts) - min(starts), max(ends) - min(ends)
-                    ),
-                }
-            )
-        border_ranges = [float(row["max_border_range_s"]) for row in jitters]
-        summaries.append(
-            {
-                "window_size_s": window_s,
-                "target_count": len(jitters),
-                "median_max_border_range_s": median(border_ranges),
-                "p90_max_border_range_s": _percentile(border_ranges, 0.9),
-                "within_0_16_s_count": sum(
-                    value <= 0.16 + 1e-9 for value in border_ranges
-                ),
-                "broken_order_arm_count": sum(
-                    row["target_result"]["status"] != "aligned" for row in arms
-                ),
-                "edge_arm_count": sum(
-                    float(row["target_result"]["score_signals"]["min_edge_distance_s"])
-                    <= 0.2
-                    for row in arms
-                ),
-                "targets": jitters,
-            }
-        )
-    return summaries
-
-
-def build_blind_pairs(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Build deterministic randomized labels from middle-position candidates."""
-
-    middle = [row for row in results if row["position_name"] == "middle"]
-    pairs = []
-    for cue_id in sorted({str(row["target_cue_id"]) for row in middle}):
-        arms = sorted(
-            (row for row in middle if str(row["target_cue_id"]) == cue_id),
-            key=lambda row: float(row["window_size_s"]),
-        )
-        if len(arms) != 2:
-            continue
-        if hashlib.sha256(cue_id.encode()).digest()[0] % 2:
-            arms.reverse()
-        target = arms[0]["target_result"]
-        pairs.append(
-            {
-                "target_cue_id": cue_id,
-                "source_index": target["source_index"],
-                "text": target["text"],
-                "candidates": {
-                    label: {
-                        "window_size_s": arm["window_size_s"],
-                        "start_s": arm["target_result"]["aligned_start_s"],
-                        "end_s": arm["target_result"]["aligned_end_s"],
-                    }
-                    for label, arm in zip(("A", "B"), arms, strict=True)
-                },
-            }
-        )
-    return pairs
-
-
-def _run_arm(
+def _run_placement(
     aligner: Qwen3AdapterClient,
     audio_id: str,
     records: list[dict[str, Any]],
@@ -250,17 +190,28 @@ def _run_arm(
     position_name: str,
     position: float,
     text_field: str,
+    edge_clearance_s: float | None = None,
 ) -> dict[str, Any]:
-    center_s = _midpoint(target)
-    crop_start_s = center_s - position * window_s
-    crop_end_s = crop_start_s + window_s
-    if crop_start_s < -1e-6 or crop_end_s > duration_s + 1e-6:
-        raise ValueError(
-            f"target {target['cue_id']} does not fit {window_s}s/{position_name}: "
-            f"crop={crop_start_s:.6f}-{crop_end_s:.6f}, audio=0-{duration_s:.6f}"
+    if edge_clearance_s is None:
+        center_s = _midpoint(target)
+        crop_start_s = center_s - position * window_s
+        crop_end_s = crop_start_s + window_s
+        if crop_start_s < -1e-6 or crop_end_s > duration_s + 1e-6:
+            raise ValueError(
+                f"target {target['cue_id']} does not fit {window_s}s/{position_name}: "
+                f"crop={crop_start_s:.6f}-{crop_end_s:.6f}, "
+                f"audio=0-{duration_s:.6f}"
+            )
+        crop_start_s = max(0.0, crop_start_s)
+        crop_end_s = min(duration_s, crop_end_s)
+    else:
+        crop_start_s, crop_end_s = edge_clearance_crop(
+            target,
+            duration_s=duration_s,
+            window_s=window_s,
+            position_name=position_name,
+            edge_clearance_s=edge_clearance_s,
         )
-    crop_start_s = max(0.0, crop_start_s)
-    crop_end_s = min(duration_s, crop_end_s)
     members = [row for row in records if crop_start_s <= _midpoint(row) < crop_end_s]
     result = align_remote_window(
         aligner,
@@ -277,9 +228,3 @@ def _run_arm(
         "position_name": position_name,
         "position": position,
     }
-
-
-def _percentile(values: Iterable[float], fraction: float) -> float:
-    ordered = sorted(values)
-    index = min(len(ordered) - 1, max(0, round((len(ordered) - 1) * fraction)))
-    return ordered[index]

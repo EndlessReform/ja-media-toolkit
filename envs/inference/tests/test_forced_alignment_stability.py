@@ -12,6 +12,10 @@ from ja_media_inference.forced_alignment.stability_runner import (
     select_lexical_targets,
     summarize_stability,
 )
+from ja_media_inference.forced_alignment.stability_placements import (
+    compare_positions,
+    edge_clearance_crop,
+)
 from ja_media_inference.forced_alignment.stress_runner import (
     _evenly_spaced_crop_starts,
     suggest_concurrency,
@@ -59,7 +63,60 @@ def test_summary_measures_within_cue_movement_not_source_delta() -> None:
     assert summary[0]["median_max_border_range_s"] == pytest.approx(0.16)
     assert summary[0]["within_0_16_s_count"] == 1
     assert summary[1]["median_max_border_range_s"] == 2.0
-    assert summary[1]["broken_order_arm_count"] == 1
+    assert summary[1]["broken_order_request_count"] == 1
+
+
+def test_explicit_edge_clearance_places_the_complete_source_cue() -> None:
+    target = _record(10, "これは普通の台詞です")
+
+    assert edge_clearance_crop(
+        target,
+        duration_s=600,
+        window_s=60,
+        position_name="beginning",
+        edge_clearance_s=2,
+    ) == (298.0, 358.0)
+    assert edge_clearance_crop(
+        target,
+        duration_s=600,
+        window_s=60,
+        position_name="middle",
+        edge_clearance_s=2,
+    ) == (271.0, 331.0)
+    assert edge_clearance_crop(
+        target,
+        duration_s=600,
+        window_s=60,
+        position_name="end",
+        edge_clearance_s=2,
+    ) == (244.0, 304.0)
+
+
+def test_position_comparison_spells_out_edge_damage() -> None:
+    results = [
+        _arm("cue:1", 1, 60, "beginning", 8.0, 9.0, status="suspicious"),
+        _arm("cue:1", 1, 60, "middle", 10.0, 11.0),
+        _arm("cue:1", 1, 60, "end", 10.1, 11.1),
+    ]
+
+    comparisons = compare_positions(results)
+
+    assert comparisons[0]["became_broken_at_edge"]
+    assert comparisons[0]["edge_damaged"]
+    assert comparisons[0]["max_border_shift_from_middle_s"] == 2.0
+    assert not comparisons[1]["edge_damaged"]
+
+
+def test_position_comparison_marks_a_timing_outside_its_audio_crop() -> None:
+    beginning = _arm("cue:1", 1, 60, "beginning", 9.0, 71.0)
+    beginning |= {"crop_start_s": 10.0, "crop_end_s": 70.0}
+    middle = _arm("cue:1", 1, 60, "middle", 10.0, 11.0)
+    middle |= {"crop_start_s": 0.0, "crop_end_s": 60.0}
+
+    comparison = compare_positions([beginning, middle])[0]
+
+    assert comparison["outside_audio_crop"]
+    assert comparison["edge_damaged"]
 
 
 def test_blind_pairs_use_only_middle_arms_and_hide_duration_behind_labels() -> None:
@@ -166,6 +223,8 @@ def _arm(
         "target_cue_id": cue_id,
         "window_size_s": window_s,
         "position_name": position,
+        "crop_start_s": 0.0,
+        "crop_end_s": 1000.0,
         "target_result": {
             "source_index": source_index,
             "text": "これは普通の台詞です",

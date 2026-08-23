@@ -19,7 +19,7 @@ class ReviewTabMixin:
             " F6 Reason Pivot ",
             style="bold reverse" if active == "reason-pivot" else "bold",
         )
-        text.append("   F7 Blind Alignment A/B ", style="bold")
+        text.append("   F7 Alignment Comparison ", style="bold")
         return text
 
     def action_show_cue_review(self) -> None:

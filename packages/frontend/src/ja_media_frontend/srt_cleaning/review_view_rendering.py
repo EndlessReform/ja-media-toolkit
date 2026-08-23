@@ -73,7 +73,7 @@ class ReviewViewRenderingMixin:
         return (
             "space play  c copy JSON  h/l cue  n/N next/previous non-accept  "
             "j/k source  bracket keys series/episode  e episode jump  "
-            "F7 blind alignment A/B  r rule overlay  R rule scores  "
+            "F7 alignment comparison  r rule overlay  R rule scores  "
             "s reason stats  Ctrl-f/b page  f/F next/previous flag  "
             "Ctrl-d/u half-page  +/- zoom  q quit"
         )

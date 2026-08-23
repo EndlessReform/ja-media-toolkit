@@ -15,6 +15,9 @@ from textual.screen import ModalScreen
 from textual.widgets import Static
 
 from ja_media_frontend.audio import MaterializedAudioPlayer
+from ja_media_frontend.srt_cleaning.review_shift_alignment import (
+    ShiftAlignmentReviewScreen,
+)
 
 
 CHOICES = {
@@ -168,10 +171,18 @@ class BlindAlignmentReviewMixin:
     """Open the stability artifact as an F7 blind review window."""
 
     def action_show_alignment_ab(self) -> None:
-        path = self.alignment_eval_path
+        source = self.source
+        prepared_path = (
+            source.alignment_path.parent.parent / "stability" / "results.json"
+            if source is not None and source.alignment_path is not None
+            else None
+        )
+        path = self.alignment_eval_path or prepared_path
         if path is None or not path.is_file():
             self.notify(
-                "No stability results found for this alignment case", severity="warning"
+                "No crop-edge comparison was run for this subtitle source; "
+                "press j/k to try another source",
+                severity="warning",
             )
             return
         try:
@@ -180,6 +191,11 @@ class BlindAlignmentReviewMixin:
             self.notify(str(exc), severity="error")
             return
         self.stop_playback()
+        if report.get("experiment_kind") == "explicit-edge-position":
+            self.push_screen(
+                ShiftAlignmentReviewScreen(report, player=self._player)
+            )
+            return
         self.push_screen(
             BlindAlignmentReviewScreen(
                 report,
