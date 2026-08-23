@@ -1,6 +1,10 @@
 """Window planning checks for the prepared-case runner."""
 
+from threading import Lock
+import time
+
 from ja_media_inference.forced_alignment.case_runner import (
+    _map_concurrently_in_order,
     _retimed_cues,
     select_targets,
 )
@@ -34,6 +38,29 @@ def test_retimed_srt_uses_the_text_that_was_aligned() -> None:
     }
 
     assert _retimed_cues(records, aligned)[0].text == "deterministic"
+
+
+def test_window_jobs_run_concurrently_but_return_in_planner_order() -> None:
+    lock = Lock()
+    active = 0
+    peak_active = 0
+
+    def run(job: int) -> int:
+        nonlocal active, peak_active
+        with lock:
+            active += 1
+            peak_active = max(peak_active, active)
+        time.sleep((4 - job) * 0.005)
+        with lock:
+            active -= 1
+        return job
+
+    results = _map_concurrently_in_order(
+        [1, 2, 3], concurrency=3, operation=run
+    )
+
+    assert peak_active == 3
+    assert results == [1, 2, 3]
 
 
 def test_remote_window_projects_crop_local_tokens_to_episode_clock() -> None:

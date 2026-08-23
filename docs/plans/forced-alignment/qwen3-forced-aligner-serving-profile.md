@@ -209,6 +209,37 @@ vLLM 0.24 source anchors for the two separate multimodal caches:
 - [processed multimodal input cache](https://github.com/vllm-project/vllm/blob/v0.24.0/vllm/multimodal/cache.py)
 - [multimodal encoder embedding cache](https://github.com/vllm-project/vllm/blob/v0.24.0/vllm/v1/core/encoder_cache_manager.py)
 
+The full-episode runner now tokenizes all windows serially—Nagisa's DyNet model
+uses a process-global computation graph—then sends the prepared requests
+concurrently and restores planner order before cue selection. On Fumoffu's 47
+windows, the measured end-to-end results were:
+
+| Concurrency | Episode wall time |
+| ---: | ---: |
+| 1 | 9.75 s |
+| 2 | 4.95 s |
+| 4 | 3.13 s |
+| 8 | 2.39 s |
+| 16 | 1.95 s |
+
+The first reconciliation pass let small batch-dependent token diagnostics swap
+several cues between their owning core and a boundary probe. Across 969 paired
+window candidates, only 12 borders changed between serial and concurrency 16,
+but the old ranking amplified those changes by preferring entropy, token order,
+and edge distance before core ownership.
+
+Reconciliation now keeps a geometrically plausible owning core. A boundary
+probe replaces it only when the core is edge-bound or catastrophically long
+and the probe is plausible. After that correction, concurrency 16 produced no
+core/boundary selection swaps. The model itself still changed the selected
+border for 6 of 484 cues, with a largest shift of 3.12 seconds. Those six cues
+are batch-sensitivity review targets; throttling the runner would hide rather
+than explain them.
+
+Concurrency 16 is the default and cuts this episode's wall time by about 80%.
+The run records its concurrency, and `--concurrency 1` remains the explicit
+serial reproduction control.
+
 Stock vLLM `/completions` is not a drop-in route for this checkpoint because its
 generation protocol expects the language-model head while the forced-aligner
 architecture exposes a 5,000-class timestamp head. A small custom prefill route

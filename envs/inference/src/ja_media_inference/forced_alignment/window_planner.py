@@ -146,6 +146,7 @@ def _candidate_rank(cue: dict[str, Any]) -> tuple[float, ...]:
     )
     return (
         float(plausible_envelope),
+        float(owns_source_midpoint),
         float(ordered_tokens),
         float(cue.get("status") == "aligned"),
         -float(anomaly_count),
@@ -153,7 +154,6 @@ def _candidate_rank(cue: dict[str, Any]) -> tuple[float, ...]:
         -float(signals.get("aligned_duration_s") or 0.0),
         -float(signals.get("max_normalized_entropy") or 1.0),
         float(signals.get("min_endpoint_max_probability") or 0.0),
-        float(owns_source_midpoint),
         -float(cue["alignment_window_index"]),
     )
 

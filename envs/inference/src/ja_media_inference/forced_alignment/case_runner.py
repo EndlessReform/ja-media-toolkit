@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 import json
 from pathlib import Path
 import subprocess
-from typing import Any
+from typing import Any, TypeVar
 
 from ja_media_core.transcripts import SubtitleCue, format_srt
 from ja_media_inference.forced_alignment.qwen3_adapter_client import Qwen3AdapterClient
-from ja_media_inference.forced_alignment.window_execution import align_remote_window
+from ja_media_inference.forced_alignment.window_execution import (
+    align_prepared_remote_window,
+    align_remote_window,
+    prepare_alignment_window,
+)
 from ja_media_inference.forced_alignment.window_planner import (
     plan_alignment_windows,
     records_for_window,
@@ -19,6 +25,8 @@ from ja_media_inference.forced_alignment.window_planner import (
 
 WINDOW_SIZES_S = (30.0, 60.0, 180.0)
 TARGET_FRACTIONS = (0.2, 0.5, 0.8)
+_WindowJob = TypeVar("_WindowJob")
+_WindowResult = TypeVar("_WindowResult")
 
 
 def compare_case_windows(
@@ -84,9 +92,12 @@ def align_full_case(
     vad_plan_path: Path,
     boundary_radius_s: float = 30.0,
     text_field: str = "alignment_text",
+    concurrency: int = 16,
 ) -> Path:
     """Align VAD-windowed audio and reconcile duplicate boundary cues."""
 
+    if concurrency <= 0:
+        raise ValueError("alignment concurrency must be positive")
     case_root = case_manifest.parent
     case = json.loads(case_manifest.read_text(encoding="utf-8"))
     records = _read_jsonl(case_root / case["cleaned_subtitle"]["input_cues"])
@@ -95,23 +106,26 @@ def align_full_case(
     aligner = Qwen3AdapterClient(base_url=base_url)
     audio_id = aligner.cache_audio(case["audio"])
     run_root = case_root / "full-alignment"
-    window_results = []
     planned_windows = plan_alignment_windows(
         vad_payload, duration_s=duration_s, boundary_radius_s=boundary_radius_s
     )
+    jobs = []
     for window in planned_windows:
         members = records_for_window(records, window)
         if not members:
             continue
-        result = align_remote_window(
+        jobs.append((window, prepare_alignment_window(members, text_field)))
+
+    def align_window(job):  # type: ignore[no-untyped-def]
+        window, prepared = job
+        result = align_prepared_remote_window(
             aligner,
             audio_id,
-            members,
+            prepared,
             target_id=None,
             target_name=f"window-{window.index:04d}",
             crop_start_s=window.crop_start_s,
             crop_end_s=window.crop_end_s,
-            text_field=text_field,
         )
         result.update(
             window_index=window.index,
@@ -120,7 +134,13 @@ def align_full_case(
             core_end_s=window.core_end_s,
             boundary_s=window.boundary_s,
         )
-        window_results.append(result)
+        return result
+
+    window_results = _map_concurrently_in_order(
+        jobs,
+        concurrency=concurrency,
+        operation=align_window,
+    )
     selected_cues = select_alignment_candidates(records, window_results)
     aligned_by_id = {cue["cue_id"]: cue for cue in selected_cues}
     output_srt = run_root / "retimed.srt"
@@ -133,6 +153,7 @@ def align_full_case(
         "backend": {"type": aligner.name, "model": aligner.model},
         "window_policy": "vad-core-plus-boundary-probe-v1",
         "boundary_radius_s": boundary_radius_s,
+        "concurrency": concurrency,
         "vad_plan": str(vad_plan_path),
         "text_field": text_field,
         "retimed_srt": output_srt.relative_to(case_root).as_posix(),
@@ -141,6 +162,22 @@ def align_full_case(
     }
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
     return report_path
+
+
+def _map_concurrently_in_order(
+    jobs: list[_WindowJob],
+    *,
+    concurrency: int,
+    operation: Callable[[_WindowJob], _WindowResult],
+) -> list[_WindowResult]:
+    """Run independent window calls concurrently while preserving planner order."""
+
+    if concurrency <= 0:
+        raise ValueError("alignment concurrency must be positive")
+    if concurrency == 1:
+        return [operation(job) for job in jobs]
+    with ThreadPoolExecutor(max_workers=concurrency) as executor:
+        return list(executor.map(operation, jobs))
 
 
 def select_targets(

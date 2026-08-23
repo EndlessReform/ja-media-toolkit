@@ -57,8 +57,8 @@ def main() -> None:
     parser.add_argument(
         "--concurrency",
         type=int,
-        default=1,
-        help="Maximum simultaneous stability requests.",
+        default=16,
+        help="Maximum simultaneous full-alignment or stability requests.",
     )
     parser.add_argument(
         "--concurrency-levels",
@@ -96,6 +96,7 @@ def main() -> None:
             vad_plan_path=args.vad_plan.expanduser().resolve(),
             boundary_radius_s=args.boundary_radius_s,
             text_field=text_field,
+            concurrency=args.concurrency,
         )
         print(f"full_alignment={result}")
     elif args.command == "controls":

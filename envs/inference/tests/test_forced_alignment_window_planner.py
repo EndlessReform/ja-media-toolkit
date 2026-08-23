@@ -38,14 +38,14 @@ def test_boundary_cue_is_context_in_both_requests() -> None:
     ]
 
 
-def test_reconciliation_prefers_clean_geometry_then_distance_from_edge() -> None:
+def test_reconciliation_keeps_plausible_owning_core_despite_token_diagnostics() -> None:
     records = [_cue("bridge", 57, 61)]
     first = _window_result(1, 0, 60, _result("bridge", "suspicious", edge=20))
     second = _window_result(2, 60, 120, _result("bridge", "aligned", edge=8))
 
     selected = select_alignment_candidates(records, [first, second])
 
-    assert selected[0]["alignment_window_index"] == 2
+    assert selected[0]["alignment_window_index"] == 1
     assert selected[0]["alignment_candidate_count"] == 2
 
 
@@ -56,6 +56,29 @@ def test_reconciliation_rejects_edge_bound_catastrophe_before_status() -> None:
     catastrophic["cues"][0]["score_signals"]["aligned_duration_s"] = 34.0
 
     selected = select_alignment_candidates(records, [plausible, catastrophic])
+
+    assert selected[0]["alignment_window_index"] == 1
+
+
+def test_boundary_probe_replaces_geometrically_broken_owning_core() -> None:
+    records = [_cue("bridge", 57, 61)]
+    core = _window_result(1, 0, 60, _result("bridge", "aligned", edge=0))
+    core["cues"][0]["score_signals"]["aligned_duration_s"] = 34.0
+    boundary = _window_result(2, 0, 60, _result("bridge", "aligned", edge=8))
+    boundary["window_kind"] = "boundary"
+
+    selected = select_alignment_candidates(records, [core, boundary])
+
+    assert selected[0]["alignment_window_index"] == 2
+
+
+def test_reconciliation_keeps_owning_core_when_candidates_are_equally_healthy() -> None:
+    records = [_cue("bridge", 57, 61)]
+    core = _window_result(1, 0, 60, _result("bridge", "aligned", edge=2))
+    boundary = _window_result(2, 0, 60, _result("bridge", "aligned", edge=20))
+    boundary["window_kind"] = "boundary"
+
+    selected = select_alignment_candidates(records, [core, boundary])
 
     assert selected[0]["alignment_window_index"] == 1
 

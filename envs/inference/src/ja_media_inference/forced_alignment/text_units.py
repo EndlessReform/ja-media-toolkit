@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from threading import Lock
 from typing import Any, Iterable
 
 from ja_media_core.forced_alignment import (
@@ -11,6 +12,9 @@ from ja_media_core.forced_alignment import (
     source_cue_ref_from_cue,
 )
 from ja_media_core.transcripts import SubtitleCue
+
+
+_NAGISA_LOCK = Lock()
 
 
 @dataclass(frozen=True)
@@ -185,10 +189,15 @@ def segment_group_with_nagisa(
             "nagisa is required for Japanese alignment tokenization"
         ) from exc
 
-    tagged = nagisa.tagging(group.text)
+    # Nagisa's shared DyNet tagger renews a process-global computation graph.
+    # Materialize both fields under one lock before another thread can renew it.
+    with _NAGISA_LOCK:
+        tagged = nagisa.tagging(group.text)
+        tagged_words = tuple(tagged.words)
+        tagged_postags = tuple(tagged.postags)
     tagged_items = [
         (word, postag)
-        for word, postag in zip(tagged.words, tagged.postags, strict=True)
+        for word, postag in zip(tagged_words, tagged_postags, strict=True)
         if word.strip() and postag not in exclude_postags
     ]
     words = [word for word, _postag in tagged_items]

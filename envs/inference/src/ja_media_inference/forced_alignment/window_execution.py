@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 import time
 from typing import Any
@@ -13,10 +14,21 @@ from ja_media_inference.forced_alignment.qwen3_adapter_client import (
 from ja_media_inference.forced_alignment.qwen3_vllm import Qwen3VllmForcedAligner
 from ja_media_inference.forced_alignment.text_units import (
     AlignmentTextGroup,
+    AlignmentToken,
     TokenAlignment,
     merge_token_alignments_by_group,
     segment_group_with_nagisa,
 )
+
+
+@dataclass(frozen=True)
+class PreparedAlignmentWindow:
+    """Caller-owned cues and tokens prepared before concurrent HTTP execution."""
+
+    records: list[dict[str, Any]]
+    groups: list[AlignmentTextGroup]
+    tokens: list[AlignmentToken]
+    text_field: str
 
 
 def align_local_window(
@@ -47,26 +59,59 @@ def align_remote_window(
 ) -> dict[str, Any]:
     """Run a source-clock crop through the compact colocated adapter."""
 
-    groups, tokens = _prepare(records, options.get("text_field", "alignment_text"))
+    prepared = prepare_alignment_window(
+        records, options.get("text_field", "alignment_text")
+    )
+    return align_prepared_remote_window(
+        aligner,
+        audio_id,
+        prepared,
+        **options,
+    )
+
+
+def prepare_alignment_window(
+    records: list[dict[str, Any]], text_field: str
+) -> PreparedAlignmentWindow:
+    """Tokenize one window before its request enters the concurrent worker pool."""
+
+    groups, tokens = _prepare(records, text_field)
+    return PreparedAlignmentWindow(
+        records=records,
+        groups=groups,
+        tokens=tokens,
+        text_field=text_field,
+    )
+
+
+def align_prepared_remote_window(
+    aligner: Qwen3AdapterClient,
+    audio_id: str,
+    prepared: PreparedAlignmentWindow,
+    **options: Any,
+) -> dict[str, Any]:
+    """Send one already-tokenized window through the compact adapter."""
+
     started = time.monotonic()
     alignments = aligner.align_crop(
         audio_id=audio_id,
         crop_start_s=float(options["crop_start_s"]),
         crop_end_s=float(options["crop_end_s"]),
-        tokens=tokens,
+        tokens=prepared.tokens,
     )
+    project_options = {**options, "text_field": prepared.text_field}
     return _project(
-        records,
-        groups,
+        prepared.records,
+        prepared.groups,
         alignments,
         elapsed_s=time.monotonic() - started,
-        **options,
+        **project_options,
     )
 
 
 def _prepare(
     records: list[dict[str, Any]], text_field: str
-) -> tuple[list[AlignmentTextGroup], list]:
+) -> tuple[list[AlignmentTextGroup], list[AlignmentToken]]:
     groups = [
         AlignmentTextGroup(
             id=str(row["cue_id"]),

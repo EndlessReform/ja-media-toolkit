@@ -128,6 +128,8 @@ uv run -m ja_media_inference.qwen3_retime_case full \
 - [x] Generate a 25-core Silero VAD plan with no fallback cuts.
 - [x] Align every retained cue in an unpadded VAD core and a 60-second
   boundary-centered request.
+- [x] Tokenize windows serially, then send alignment requests concurrently while
+  preserving planner order; default to 16 with a serial reproduction control.
 - [x] Reconcile 320 two-candidate cues and 9 three-candidate cues.
 - [x] Convert local Qwen buckets to episode time and reconstruct cue envelopes.
 - [x] Write a 329-cue retimed SRT from final cleaned text.
