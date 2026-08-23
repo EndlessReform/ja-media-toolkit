@@ -8,9 +8,11 @@ args=(
   --runner pooling
   --chat-template /config/raw_content_chat_template.jinja
   --hf-overrides '{"architectures":["Qwen3ASRForcedAlignerForTokenClassification"]}'
-  --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION:-0.90}"
 )
 
+if [[ -n "${GPU_MEMORY_UTILIZATION:-}" ]]; then
+  args+=(--gpu-memory-utilization "${GPU_MEMORY_UTILIZATION}")
+fi
 if [[ -n "${MAX_NUM_SEQS:-}" ]]; then
   args+=(--max-num-seqs "${MAX_NUM_SEQS}")
 fi

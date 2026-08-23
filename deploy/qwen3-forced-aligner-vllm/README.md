@@ -54,6 +54,8 @@ Key settings:
 - `HF_HOME`: host cache directory for model weights
 - `MAX_NUM_SEQS`: optional vLLM scheduler limit; empty uses vLLM's normal value
 - `MAX_NUM_BATCHED_TOKENS`: optional per-iteration token budget
+- `GPU_MEMORY_UTILIZATION`: optional vLLM memory fraction; empty uses vLLM's
+  normal value
 - `ALIGNER_BRONZE_*`: read-only S3-compatible Bronze connection used to cache
   the pinned compressed episode audio
 - `ALIGNER_AUDIO_CACHE`: host directory for verified episode audio

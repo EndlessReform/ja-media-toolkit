@@ -57,7 +57,7 @@ docker run --detach \
   -e HF_HOME=/root/.cache/huggingface \
   -e HUGGING_FACE_HUB_TOKEN="${HF_TOKEN:-}" \
   -e MODEL_ID="${MODEL_ID:-Qwen/Qwen3-ForcedAligner-0.6B}" \
-  -e GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.90}" \
+  -e GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-}" \
   -e MAX_NUM_SEQS="${MAX_NUM_SEQS:-}" \
   -e MAX_NUM_BATCHED_TOKENS="${MAX_NUM_BATCHED_TOKENS:-}" \
   -e EXTRA_VLLM_ARGS="${EXTRA_VLLM_ARGS:-}" \
