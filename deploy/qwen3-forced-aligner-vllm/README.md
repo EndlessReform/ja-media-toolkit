@@ -90,7 +90,7 @@ one profiling session:
 
 ```bash
 COMPOSE_PROFILES=profiling \
-EXTRA_VLLM_ARGS='--otlp-traces-endpoint http://jaeger:4318/v1/traces --collect-detailed-traces model,worker' \
+EXTRA_VLLM_ARGS='--otlp-traces-endpoint http://jaeger:4318/v1/traces --collect-detailed-traces all' \
 ./scripts/start-compose.sh
 ```
 
