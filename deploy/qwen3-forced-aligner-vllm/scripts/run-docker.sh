@@ -48,4 +48,5 @@ docker run --rm \
   --hf-overrides '{"architectures":["Qwen3ASRForcedAlignerForTokenClassification"]}' \
   --max-num-seqs "${MAX_NUM_SEQS}" \
   --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION}" \
+  --max-num-batched-tokens "${MAX_NUM_BATCHED_TOKENS:-4096}" \
   ${EXTRA_VLLM_ARGS:-}
