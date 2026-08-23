@@ -59,8 +59,8 @@ Key settings:
 - `ALIGNER_AUDIO_CACHE`: host directory for verified episode audio
 
 vLLM's official OpenAI images do not include optional audio dependencies. The
-Dockerfile installs `vllm[audio]` at the matching vLLM version so PyAV, librosa,
-and soundfile are present when `/pooling` receives an audio item.
+Dockerfile installs `vllm[audio]` at the matching vLLM version so PyAV and
+SoundFile are present when `/pooling` receives an audio item.
 
 If the selected vLLM base image does not contain
 `Qwen3ASRForcedAlignerForTokenClassification`, pin `VLLM_BASE_IMAGE` and
