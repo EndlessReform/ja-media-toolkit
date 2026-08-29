@@ -9,6 +9,13 @@ The current first implementation slice is
 the work to cheap candidate gating and ALASS-derived ranking, reviewed cleanup,
 and full-episode retiming of one selected candidate.
 
+The proposed follow-up for inspecting raw timestamp uncertainty, building a
+server-side research review workbench, and comparing repeated-prediction
+aggregation families is
+[`distribution-review-and-consensus.md`](distribution-review-and-consensus.md).
+Its source-controlled server and workbench startup commands are in
+[`distribution-review-runbook.md`](distribution-review-runbook.md).
+
 Supporting notes:
 
 - [`srt-cleaning-batch-design.md`](../../implemented/srt-cleaning-batch-design.md):
