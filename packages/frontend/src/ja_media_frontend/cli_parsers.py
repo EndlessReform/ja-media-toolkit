@@ -13,6 +13,9 @@ def register_subsync_parser(subparsers: argparse._SubParsersAction) -> None:
         help="Subtitle synchronization review and repair tools",
     )
     commands = parser.add_subparsers(dest="subsync_command")
+    from ja_media_frontend.subsync.series_cli import register_get_series_parser
+
+    register_get_series_parser(commands)
     reader = commands.add_parser(
         "reader",
         help="Open a browser reader for one media file and subtitle sidecar",

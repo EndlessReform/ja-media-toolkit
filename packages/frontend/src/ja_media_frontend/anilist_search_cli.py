@@ -40,33 +40,7 @@ def register_get_id_parser(subparsers: argparse._SubParsersAction) -> None:
         help="Search query (title, romaji, or keywords)",
     )
     search_parser.add_argument("-f", "--file", help="Parse query from file path")
-    search_parser.add_argument(
-        "-k",
-        "--top-k",
-        type=int,
-        default=3,
-        help="Number of results to return. Defaults to 3.",
-    )
-    search_parser.add_argument(
-        "--include-movies",
-        action="store_true",
-        help="Include movies in search results.",
-    )
-    search_parser.add_argument(
-        "--include-ova",
-        action="store_true",
-        help="Include OVA entries in search results.",
-    )
-    search_parser.add_argument(
-        "--all-formats",
-        action="store_true",
-        help="Include all anime formats (specials, music, etc.).",
-    )
-    search_parser.add_argument(
-        "--force-anilist",
-        action="store_true",
-        help="Query AniList directly instead of the local BM25 mirror.",
-    )
+    add_title_search_options(search_parser)
     search_parser.add_argument(
         "--field",
         action="append",
@@ -81,6 +55,38 @@ def register_get_id_parser(subparsers: argparse._SubParsersAction) -> None:
         choices=("table", "json"),
         default="table",
         help="Output format. Defaults to table.",
+    )
+
+
+def add_title_search_options(parser: argparse.ArgumentParser) -> None:
+    """Share title matching controls between ID lookup and subtitle inspection."""
+
+    parser.add_argument(
+        "-k",
+        "--top-k",
+        type=int,
+        default=3,
+        help="Number of results to return. Defaults to 3.",
+    )
+    parser.add_argument(
+        "--include-movies",
+        action="store_true",
+        help="Include movies in search results.",
+    )
+    parser.add_argument(
+        "--include-ova",
+        action="store_true",
+        help="Include OVA entries in search results.",
+    )
+    parser.add_argument(
+        "--all-formats",
+        action="store_true",
+        help="Include all anime formats (specials, music, etc.).",
+    )
+    parser.add_argument(
+        "--force-anilist",
+        action="store_true",
+        help="Query AniList directly instead of the local BM25 mirror.",
     )
 
 

@@ -36,6 +36,7 @@ from ja_media_frontend.subsync.service import (
     sidecar_path,
 )
 from ja_media_frontend.subsync.startup import resolve_srt_inputs, run_subsync_tui  # noqa: F401
+from ja_media_frontend.subsync.save_dialog import SubsyncSaveMixin
 from ja_media_frontend.subsync.remote import SubsyncRemoteMixin
 from ja_media_frontend.subsync.alass import SubsyncAlassMixin
 from ja_media_frontend.subsync.interaction import (
@@ -67,6 +68,7 @@ def subtitle_track_with_language(
 
 
 class SubsyncTuiApp(
+    SubsyncSaveMixin,
     SubsyncAlassMixin,
     SubsyncInteractionMixin,
     SubsyncRemoteMixin,
@@ -75,6 +77,7 @@ class SubsyncTuiApp(
     """A first-pass Textual shell for inspecting subtitle timing activity."""
 
     BINDINGS = [
+        ("S", "save_subtitle_as", "Save subtitle as"),
         ("f1", "open_help", "Help"),
         ("f6", "open_remote_lookup", "Kitsunekko"),
         ("f7", "open_remote_file_picker", "Pick subtitle"),
@@ -336,7 +339,7 @@ class SubsyncTuiApp(
         promote = "p promote" if self.promotion_target is not None else "promotion disabled"
         return (
             "Ctrl-f/b page  Ctrl-d/u half-page  +/- zoom  Ctrl-c copy  "
-            f"{promote}{self.alass_help_label()}{pending}"
+            f"S save as  {promote}{self.alass_help_label()}{pending}"
         )
 
     def copy_current_subtitle(self) -> None:

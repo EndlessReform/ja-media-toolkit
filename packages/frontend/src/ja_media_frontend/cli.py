@@ -43,6 +43,11 @@ def main() -> None:
         )
         return
     if args.command == "subsync":
+        if args.subsync_command == "get-series":
+            from ja_media_frontend.subsync.series_cli import run_get_series
+
+            run_get_series(args)
+            return
         if args.subsync_command == "reader":
             from ja_media_frontend.subsync.reader import run_subsync_reader
 
