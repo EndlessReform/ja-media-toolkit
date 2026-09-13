@@ -71,6 +71,44 @@ uv run ja-media subsync tui ../../media/gantz.mkv \
 
 While the TUI is running, you can press `F6` to open a modal and change the AniList/TVDB ID or episode number to fetch a new set of candidates.
 
+Press **Shift+S** to save the selected subtitle to a chosen `.srt` path, including
+any timing edits. This works without a supplied media file, such as when playing
+cached audio by AniList ID. The dialog defaults to the current directory and
+asks before overwriting an existing file. Press Escape to cancel. The existing
+`p` shortcut still promotes subtitles beside a supplied media file.
+
+### Inspect a series without media
+
+`get-series` shows an episode grid with subtitle file counts and distinct named
+group counts. It requires no audio, video or subtitle downloads:
+
+```sh
+ja-media subsync get-series --anilist 154587
+ja-media subsync get-series "Sousou no Frieren"
+ja-media subsync get-series "Sousou no Frieren" --force-anilist
+ja-media subsync get-series --anilist 154587 --format json
+```
+
+`--anilist-id` is an alias for `--anilist`. Title lookup shares `get-id` options:
+`--top-k`, `--include-movies`, `--include-ova`, `--all-formats`, and
+`--force-anilist`. Multiple matches prompt for an AniList ID; when input is
+piped, rerun with an ID from the candidate table. A single match opens directly.
+
+Known totals divisible by 12 use 12-episode blocks; otherwise totals divisible
+by 13 use 13-episode blocks. Other totals use the available terminal width.
+Narrow panes wrap further as needed. `0` marks missing releases, `—` marks upcoming
+episodes without releases, and `*` marks the aired frontier. Releases count files;
+multiple versions from one named group count as one group. `?` in the Groups row
+means the available files have no named group. Files without a supplied episode
+number are counted separately below the grid.
+
+The summary counts episodes with subtitles and with two or more named groups
+against the aired count. Finished series use AniList's episode total. Airing
+series use an estimate from its cached next-airing record; when unavailable,
+the denominator is `?` and the summary includes all numbered releases.
+`--force-anilist` applies to title search only and retains the existing service
+cache behavior. It cannot be combined with an exact ID.
+
 When an embedded anchor was discovered and `alass-cli` is available on
 `PATH`, the status bar also shows `a ALASS p5`. Press `a` to retime the selected
 candidate with the same piecewise penalty-5 configuration used by the research
