@@ -1,16 +1,26 @@
 from __future__ import annotations
 
-import base64
 import json
-import mimetypes
 from dataclasses import dataclass
 from pathlib import Path
+import time
 from typing import Any, Literal, Sequence
 
-import httpx
 from huggingface_hub import hf_hub_download
 from transformers import AutoTokenizer
 
+from ja_media_inference.forced_alignment.audio_probe import (
+    audio_edge_distance,
+    probe_audio_duration,
+)
+from ja_media_inference.forced_alignment.pooling_transport import (
+    build_pooling_payload,
+    post_pooling_binary_profiled,
+)
+from ja_media_inference.forced_alignment.pooling_rows import select_timestamp_rows
+from ja_media_inference.forced_alignment.timestamp_metrics import (
+    summarize_distribution_rows,
+)
 from ja_media_inference.forced_alignment.text_units import (
     AlignmentToken,
     TokenAlignment,
@@ -19,7 +29,6 @@ from ja_media_inference.forced_alignment.text_units import (
 
 PromptLayout = Literal["after-token", "wrap-token"]
 PROMPT_PREFIX = "<|audio_start|><|audio_pad|><|audio_end|>"
-RAW_CONTENT_CHAT_TEMPLATE = "{{ messages[0]['content'] }}"
 
 
 @dataclass(frozen=True)
@@ -29,6 +38,14 @@ class PromptPlan:
     prompt: str
     tokens: tuple[AlignmentToken, ...]
     layout: PromptLayout
+
+
+@dataclass(frozen=True)
+class ProfiledAlignment:
+    """Token timings plus measured stages for one vLLM request."""
+
+    alignments: list[TokenAlignment]
+    timings: dict[str, float | int]
 
 
 class Qwen3VllmForcedAligner:
@@ -59,72 +76,109 @@ class Qwen3VllmForcedAligner:
         audio_path: str | Path,
         tokens: Sequence[AlignmentToken],
     ) -> list[TokenAlignment]:
+        return self.align_tokens_profiled(
+            audio_path=audio_path, tokens=tokens
+        ).alignments
+
+    def align_tokens_profiled(
+        self,
+        *,
+        audio_path: str | Path,
+        tokens: Sequence[AlignmentToken],
+    ) -> ProfiledAlignment:
+        """Align tokens and measure request construction, vLLM, and reduction."""
+
+        started = time.perf_counter()
         plan = build_prompt_plan(tokens, layout=self.prompt_layout)
         payload = build_pooling_payload(
             model=self.model,
             prompt=plan.prompt,
             audio_path=Path(audio_path),
             include_chat_template=self.trust_request_chat_template,
+            encoding_format="bytes",
         )
-        response = post_pooling(
+        payload_ready = time.perf_counter()
+        pooling_output, upstream_timings = post_pooling_binary_profiled(
             f"{self.base_url}/pooling",
             payload,
             timeout_s=self.timeout_s,
         )
-        return self.extract_token_alignments(plan=plan, pooling_json=response)
+        upstream_done = time.perf_counter()
+        alignments = self.extract_token_alignments(
+            plan=plan,
+            pooling_output=pooling_output,
+            audio_duration_s=probe_audio_duration(Path(audio_path)),
+        )
+        finished = time.perf_counter()
+        return ProfiledAlignment(
+            alignments=alignments,
+            timings={
+                "prompt_and_audio_payload_s": payload_ready - started,
+                **upstream_timings,
+                "timestamp_reduction_s": finished - upstream_done,
+                "aligner_total_s": finished - started,
+                "vllm_output_rows": pooling_output.shape[0],
+                "vllm_classes_per_row": pooling_output.shape[1],
+            },
+        )
 
     def extract_token_alignments(
         self,
         *,
         plan: PromptPlan,
-        pooling_json: dict[str, Any],
+        pooling_output: Any,
+        audio_duration_s: float,
     ) -> list[TokenAlignment]:
         tokenizer = self._load_tokenizer()
         timestamp_token_id, timestamp_segment_time = self._load_timestamp_config()
-        logits = pooling_json["data"][0]["data"]
         local_ids = tokenizer(plan.prompt, add_special_tokens=False)["input_ids"]
         audio_pad_token_id = tokenizer.convert_tokens_to_ids("<|audio_pad|>")
-        try:
-            audio_pad_index = local_ids.index(audio_pad_token_id)
-        except ValueError as exc:
-            raise RuntimeError("Prompt does not contain the audio pad token") from exc
+        timestamp_rows = select_timestamp_rows(
+            logits=pooling_output,
+            local_ids=local_ids,
+            timestamp_token_id=timestamp_token_id,
+            audio_pad_token_id=audio_pad_token_id,
+        )
 
-        audio_token_shift = len(logits) - len(local_ids)
-        if audio_token_shift < 0:
-            raise RuntimeError(
-                "vLLM returned fewer logit rows than local prompt tokens; "
-                "check the server chat template."
-            )
-
-        timestamp_s: list[float] = []
-        for local_i, token_id in enumerate(local_ids):
-            if token_id != timestamp_token_id:
-                continue
-            server_i = (
-                local_i + audio_token_shift
-                if local_i > audio_pad_index
-                else local_i
-            )
-            if server_i < 0 or server_i >= len(logits):
-                raise RuntimeError(
-                    f"Timestamp row {server_i} is outside logits length {len(logits)}"
-                )
-            timestamp_s.append(
-                _argmax(logits[server_i]) * timestamp_segment_time / 1000
+        timestamp_predictions: list[dict[str, float]] = []
+        row_metrics_list = summarize_distribution_rows(timestamp_rows)
+        for row, row_metrics in zip(timestamp_rows, row_metrics_list, strict=True):
+            time_s = row_metrics["argmax_index"] * timestamp_segment_time / 1000
+            timestamp_predictions.append(
+                {
+                    **row_metrics,
+                    "time_s": time_s,
+                    "distribution_edge_distance_s": min(
+                        row_metrics["argmax_index"],
+                        len(row) - 1 - row_metrics["argmax_index"],
+                    )
+                    * timestamp_segment_time
+                    / 1000,
+                    "edge_distance_s": audio_edge_distance(time_s, audio_duration_s),
+                }
             )
 
         expected = len(plan.tokens) * 2
-        if len(timestamp_s) != expected:
-            raise RuntimeError(f"Expected {expected} timestamps, got {len(timestamp_s)}")
+        if len(timestamp_predictions) != expected:
+            raise RuntimeError(
+                f"Expected {expected} timestamps, got {len(timestamp_predictions)}"
+            )
 
         alignments: list[TokenAlignment] = []
         for index, token in enumerate(plan.tokens):
+            start = timestamp_predictions[index * 2]
+            end = timestamp_predictions[index * 2 + 1]
             alignments.append(
                 TokenAlignment(
                     token=token,
-                    start_s=timestamp_s[index * 2],
-                    end_s=timestamp_s[index * 2 + 1],
-                    metadata={"prompt_layout": plan.layout},
+                    start_s=start["time_s"],
+                    end_s=end["time_s"],
+                    confidence=min(start["max_probability"], end["max_probability"]),
+                    metadata={
+                        "prompt_layout": plan.layout,
+                        "start_distribution": start,
+                        "end_distribution": end,
+                    },
                 )
             )
         return alignments
@@ -158,54 +212,6 @@ def build_prompt_plan(
     )
 
 
-def build_pooling_payload(
-    *,
-    model: str,
-    prompt: str,
-    audio_path: Path,
-    include_chat_template: bool,
-) -> dict[str, Any]:
-    mime_type = mimetypes.guess_type(audio_path)[0] or "audio/wav"
-    audio_b64 = base64.b64encode(audio_path.read_bytes()).decode("ascii")
-    payload: dict[str, Any] = {
-        "model": model,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {
-                        "type": "audio_url",
-                        "audio_url": {
-                            "url": f"data:{mime_type};base64,{audio_b64}",
-                        },
-                    },
-                ],
-            }
-        ],
-        "task": "token_classify",
-    }
-    if include_chat_template:
-        payload["chat_template"] = RAW_CONTENT_CHAT_TEMPLATE
-    return payload
-
-
-def post_pooling(
-    url: str,
-    payload: dict[str, Any],
-    *,
-    timeout_s: float,
-) -> dict[str, Any]:
-    with httpx.Client(timeout=timeout_s) as client:
-        response = client.post(url, json=payload)
-    if response.status_code != 200:
-        raise RuntimeError(f"vLLM HTTP {response.status_code}: {response.text}")
-    result = response.json()
-    if "data" not in result:
-        raise RuntimeError(f"vLLM response did not include data: {result}")
-    return result
-
-
 def load_timestamp_config(model: str) -> tuple[int, float]:
     model_path = Path(model)
     config_path = (
@@ -215,13 +221,3 @@ def load_timestamp_config(model: str) -> tuple[int, float]:
     )
     config = json.loads(config_path.read_text(encoding="utf-8"))
     return config["timestamp_token_id"], config["timestamp_segment_time"]
-
-
-def _argmax(values: Sequence[float]) -> int:
-    best_i = 0
-    best_value = values[0]
-    for index, value in enumerate(values[1:], start=1):
-        if value > best_value:
-            best_i = index
-            best_value = value
-    return best_i
