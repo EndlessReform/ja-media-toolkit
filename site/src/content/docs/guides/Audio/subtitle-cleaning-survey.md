@@ -28,7 +28,7 @@ timeout = 180.0
 
 ## Generate requests
 
-Run from `packages/frontend` (add `--dry-run` to inspect metadata and inventory
+Run from `research/srt-cleaning-survey` (add `--dry-run` to inspect metadata and inventory
 without writing shards):
 
 ```sh
