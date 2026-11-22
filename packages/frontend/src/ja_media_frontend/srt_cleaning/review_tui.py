@@ -269,9 +269,7 @@ class SrtCleaningReviewApp(
 
     def render_diff(self) -> Panel:
         return render_cue_panel(
-            self.current_cue,
-            playing=self.is_playing(),
-            rule_overlay=self.rule_overlay,
+            self.current_cue, playing=self.is_playing(), rule_overlay=self.rule_overlay
         )
 
     def render_help(self) -> str:
@@ -279,8 +277,7 @@ class SrtCleaningReviewApp(
             "space play  c copy JSON  h/l cue  n/N next/previous non-accept  "
             "j/k source  bracket keys series/episode  e episode jump  "
             "r rule overlay  R rule scores  s reason stats  Ctrl-f/b page  "
-            "f/F next/previous flag  "
-            "Ctrl-d/u half-page  +/- zoom  q quit"
+            "f/F next/previous flag  Ctrl-d/u half-page  +/- zoom  q quit"
         )
 
     def action_show_stats(self) -> None:
@@ -289,10 +286,7 @@ class SrtCleaningReviewApp(
         current_title = f"Current track: {source.filename}" if source else "Current track"
         self.push_screen(
             ReasonStatsModal(
-                render_reason_stats(
-                    current_title,
-                    summarize_reasons(current_sources),
-                ),
+                render_reason_stats(current_title, summarize_reasons(current_sources)),
                 render_reason_stats(
                     f"Whole run: {self.workspace.run_id}",
                     summarize_reasons(self.workspace.sources),

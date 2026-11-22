@@ -14,6 +14,12 @@ RETRYABLE_STATUS_CODES = {408, 409, 425, 429}
 FALLBACK_WAIT = wait_random_exponential(multiplier=1, max=30)
 
 
+def is_retryable_status(status_code: int) -> bool:
+    """Return True for transient HTTP status codes safe to retry."""
+
+    return status_code in RETRYABLE_STATUS_CODES or status_code >= 500
+
+
 class RetryableProviderStatus(Exception):
     """An HTTP response that is safe to retry without changing the request."""
 
@@ -43,10 +49,7 @@ def post_chat_completion(
         nonlocal request_attempts
         request_attempts += 1
         response = client.post(endpoint, json=body)
-        if (
-            response.status_code in RETRYABLE_STATUS_CODES
-            or response.status_code >= 500
-        ):
+        if is_retryable_status(response.status_code):
             raise RetryableProviderStatus(response)
         return response
 

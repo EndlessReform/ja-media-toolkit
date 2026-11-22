@@ -7,9 +7,9 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ja_media_frontend.srt_cleaning.contracts import CleanDecision, CleanWindowResult
+from ja_media_frontend.srt_cleaning.provider_http import is_retryable_status
 
 
-RETRYABLE_STATUS_CODES = {408, 409, 425, 429, 500, 502, 503, 504}
 AUTH_STATUS_CODES = {401, 407}
 
 
@@ -229,7 +229,7 @@ def api_error(
     payload: Any,
     status_code: int | None,
 ) -> dict[str, Any]:
-    retryable = status_code in RETRYABLE_STATUS_CODES if status_code else True
+    retryable = is_retryable_status(status_code) if status_code else True
     kind = "api_error"
     if status_code in AUTH_STATUS_CODES:
         kind = "auth_error"
