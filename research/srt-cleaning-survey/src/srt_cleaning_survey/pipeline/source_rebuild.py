@@ -1,0 +1,256 @@
+from __future__ import annotations
+
+from collections import defaultdict
+from pathlib import Path
+from typing import Any, Iterable
+
+from ja_media_core.transcripts import SubtitleCue
+
+from srt_cleaning_survey.contracts import CleanDecision
+from srt_cleaning_survey.pipeline.preclean import preclean_text
+from srt_cleaning_survey.pipeline.result_parser import (
+    WindowResult,
+    base_window_error,
+    to_dlq_row,
+)
+
+
+def group_expected_windows(
+    rows: list[dict[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        grouped[source_key(row)].append(row)
+    for values in grouped.values():
+        values.sort(key=lambda row: int(row["window_number"]))
+    return dict(grouped)
+
+
+def validate_source_windows(
+    manifests: list[dict[str, Any]],
+    results: dict[str, WindowResult],
+    *,
+    failed_window_ids: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    errors: list[dict[str, Any]] = []
+    for manifest in manifests:
+        custom_id = str(manifest["custom_id"])
+        result = results.get(custom_id)
+        if result is None:
+            if failed_window_ids and custom_id in failed_window_ids:
+                continue
+            errors.append(
+                base_window_error(
+                    custom_id,
+                    "missing_result",
+                    "No successful batch result was found for this expected window.",
+                    manifest,
+                )
+            )
+            continue
+        errors.extend(validate_window_decisions(manifest, result))
+    return errors
+
+
+def validate_window_decisions(
+    manifest: dict[str, Any],
+    result: WindowResult,
+) -> list[dict[str, Any]]:
+    errors: list[dict[str, Any]] = []
+    custom_id = str(manifest["custom_id"])
+    expected = set(range(1, len(manifest["active_indexes"]) + 1))
+    seen: set[int] = set()
+    for decision in result.decisions:
+        if decision.cue_id not in expected:
+            errors.append(
+                base_window_error(
+                    custom_id,
+                    "id_mismatch",
+                    f"Decision references local cue id {decision.cue_id}, outside expected active ids.",
+                    manifest,
+                )
+            )
+            errors[-1]["decision_id"] = decision.cue_id
+        if decision.cue_id in seen:
+            errors.append(
+                base_window_error(
+                    custom_id,
+                    "duplicate_decision",
+                    f"Local cue id {decision.cue_id} has more than one decision in this window.",
+                    manifest,
+                )
+            )
+            errors[-1]["decision_id"] = decision.cue_id
+        seen.add(decision.cue_id)
+    missing = expected - seen
+    if missing:
+        errors.append(
+            base_window_error(
+                custom_id,
+                "missing_decision",
+                f"Window is missing decisions for local cue ids {sorted(missing)}.",
+                manifest,
+            )
+        )
+        errors[-1]["missing_ids"] = sorted(missing)
+    return errors
+
+
+def collect_source_decisions(
+    manifests: list[dict[str, Any]],
+    results: dict[str, WindowResult],
+    *,
+    errors: list[dict[str, Any]],
+    dlq: list[dict[str, Any]],
+) -> dict[int, CleanDecision]:
+    decisions: dict[int, CleanDecision] = {}
+    for manifest in manifests:
+        result = results.get(str(manifest["custom_id"]))
+        if result is None:
+            continue
+        active_indexes = [int(index) for index in manifest["active_indexes"]]
+        expected = set(range(1, len(active_indexes) + 1))
+        for decision in result.decisions:
+            if decision.cue_id not in expected:
+                continue
+            source_index = active_indexes[decision.cue_id - 1]
+            if source_index in decisions:
+                error = base_window_error(
+                    str(manifest["custom_id"]),
+                    "overlapping_decision",
+                    f"Cue {source_index} already has a decision from another window.",
+                    manifest,
+                )
+                errors.append(error)
+                dlq.append(to_dlq_row(error, manifest))
+                continue
+            decisions[source_index] = decision
+    return decisions
+
+
+def apply_decisions(
+    cues: Iterable[SubtitleCue],
+    decisions: dict[int, CleanDecision],
+) -> list[SubtitleCue]:
+    cleaned: list[SubtitleCue] = []
+    for cue in cues:
+        decision = decisions.get(cue.index)
+        baseline = preclean_text(cue.text).text
+        if not baseline:
+            continue
+        if decision is None or decision.decision == "escalate":
+            cleaned.append(_cue_with_text(cue, baseline))
+        elif decision.decision in {"as_is", "asis"}:
+            cleaned.append(_cue_with_text(cue, baseline))
+        elif decision.decision == "edit":
+            cleaned.append(_cue_with_text(cue, decision.text or ""))
+        elif decision.decision == "remove":
+            continue
+    return cleaned
+
+
+def render_decision_rows(
+    source_key_value: str,
+    manifests: list[dict[str, Any]],
+    results: dict[str, WindowResult],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for manifest in manifests:
+        custom_id = str(manifest["custom_id"])
+        result = results.get(custom_id)
+        if result is None:
+            continue
+        active_indexes = [int(index) for index in manifest["active_indexes"]]
+        expected = set(range(1, len(active_indexes) + 1))
+        seen: set[int] = set()
+        for position, decision in enumerate(result.decisions, start=1):
+            noncompliant_reasons: list[str] = []
+            source_index = (
+                active_indexes[decision.cue_id - 1]
+                if decision.cue_id in expected
+                else None
+            )
+            if decision.cue_id not in expected:
+                noncompliant_reasons.append("id_mismatch")
+            if decision.cue_id in seen:
+                noncompliant_reasons.append("duplicate_decision")
+            seen.add(decision.cue_id)
+            mechanical = _mechanical_for_source_index(manifest, source_index)
+            rows.append(
+                {
+                    "custom_id": custom_id,
+                    "source_key": source_key_value,
+                    "anilist_id": manifest["anilist_id"],
+                    "subtitle_id": manifest["subtitle_id"],
+                    "repo_path": manifest["repo_path"],
+                    "window_number": manifest["window_number"],
+                    "result_position": position,
+                    "id": decision.cue_id,
+                    "index": source_index,
+                    "decision": decision.decision,
+                    "text": decision.text,
+                    "reasons": list(decision.reasons),
+                    "served_model": result.served_model,
+                    "mechanical_text": mechanical.text,
+                    "mechanically_changed": mechanical.changed,
+                    "mechanical_rules": list(mechanical.rules),
+                    "model_text_matches_mechanical": (
+                        decision.text == mechanical.text
+                        if isinstance(decision.text, str)
+                        else None
+                    ),
+                    "within_active_span": decision.cue_id in expected,
+                    "compliant": not noncompliant_reasons,
+                    "noncompliant_reasons": noncompliant_reasons,
+                }
+            )
+    rows.sort(
+        key=lambda row: (
+            str(row["source_key"]),
+            int(row["window_number"]),
+            int(row["result_position"]),
+            int(row["id"]),
+        )
+    )
+    return rows
+
+
+def has_blocking_source_error(
+    manifests: list[dict[str, Any]],
+    errors: list[dict[str, Any]],
+) -> bool:
+    custom_ids = {str(row["custom_id"]) for row in manifests}
+    return any(error.get("custom_id") in custom_ids for error in errors)
+
+
+def source_key(row: dict[str, Any]) -> str:
+    return f"{row['anilist_id']}:{row['subtitle_id']}:{row['source_sha256']}"
+
+
+def cleaned_srt_name(row: dict[str, Any]) -> str:
+    stem = Path(str(row.get("filename") or row["subtitle_id"])).stem
+    return f"{stem}.{str(row['source_sha256'])[:12]}.cleaned.srt"
+
+
+def _cue_with_text(cue: SubtitleCue, text: str) -> SubtitleCue:
+    return SubtitleCue(
+        source_path=cue.source_path,
+        index=cue.index,
+        start_s=cue.start_s,
+        end_s=cue.end_s,
+        text=text,
+        timing_settings=cue.timing_settings,
+        metadata=dict(cue.metadata),
+    )
+
+
+def _mechanical_for_source_index(row: dict[str, Any], index: int | None):
+    texts = row.get("active_original_texts") or row.get("active_texts")
+    indexes = row.get("active_indexes")
+    if index is None or not isinstance(texts, list) or not isinstance(indexes, list):
+        return preclean_text("")
+    for offset, source_index in enumerate(indexes):
+        if int(source_index) == index and offset < len(texts):
+            value = texts[offset] if isinstance(texts[offset], str) else ""
+            return preclean_text(value)
+    return preclean_text("")
