@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from threading import Lock
 from typing import Any, Iterable
 
 from ja_media_core.forced_alignment import (
@@ -11,6 +12,9 @@ from ja_media_core.forced_alignment import (
     source_cue_ref_from_cue,
 )
 from ja_media_core.transcripts import SubtitleCue
+
+
+_NAGISA_LOCK = Lock()
 
 
 @dataclass(frozen=True)
@@ -185,10 +189,15 @@ def segment_group_with_nagisa(
             "nagisa is required for Japanese alignment tokenization"
         ) from exc
 
-    tagged = nagisa.tagging(group.text)
+    # Nagisa's shared DyNet tagger renews a process-global computation graph.
+    # Materialize both fields under one lock before another thread can renew it.
+    with _NAGISA_LOCK:
+        tagged = nagisa.tagging(group.text)
+        tagged_words = tuple(tagged.words)
+        tagged_postags = tuple(tagged.postags)
     tagged_items = [
         (word, postag)
-        for word, postag in zip(tagged.words, tagged.postags, strict=True)
+        for word, postag in zip(tagged_words, tagged_postags, strict=True)
         if word.strip() and postag not in exclude_postags
     ]
     words = [word for word, _postag in tagged_items]
@@ -244,13 +253,18 @@ def merge_token_alignments_by_group(
                 ),
             )
             continue
-        start_s = min(item.start_s for item in items)
-        end_s = max(item.end_s for item in items)
+        timestamps = [value for item in items for value in (item.start_s, item.end_s)]
+        start_s = min(timestamps)
+        end_s = max(timestamps)
+        suspicious = any(item.end_s < item.start_s for item in items) or any(
+            current.start_s < previous.start_s
+            for previous, current in zip(items, items[1:])
+        )
         merged[group.id] = SpanAlignment(
             span_id=group.id,
             start_s=start_s,
             end_s=end_s,
-            status="aligned" if end_s >= start_s else "suspicious",
+            status="suspicious" if suspicious else "aligned",
             metadata={
                 "token_ids": [item.token.id for item in items],
                 "token_count": len(items),

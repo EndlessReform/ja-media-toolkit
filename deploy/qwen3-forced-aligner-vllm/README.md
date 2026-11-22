@@ -1,23 +1,26 @@
 # Qwen3 Forced Aligner vLLM Deployment
 
-This folder is the compute-plane bundle for running
-`Qwen/Qwen3-ForcedAligner-0.6B` behind vLLM's OpenAI-compatible `/pooling`
-endpoint.
+This folder runs `Qwen/Qwen3-ForcedAligner-0.6B` behind stock vLLM plus a thin
+FastAPI adapter. The adapter reduces vLLM's per-token classification rows on
+the GPU host and returns compact token timings to LAN clients.
 
-It belongs under `deploy/` because it is self-contained infrastructure that can
-be copied to a plain L40S/A100 host. It is intentionally separate from the root
-`compose.yaml`, which is the local ja-media service stack. The GPU server does
-not need this repo, `uv`, or any `ja_media_*` Python package.
+It is intentionally separate from the root `compose.yaml`, which is the local
+ja-media service stack. The adapter image is built from the repository checkout
+because it reuses the tested Qwen prompt and timestamp-decoding code.
 
 ## Files
 
 - `.env.example`: machine-local settings to copy to `.env`
 - `Dockerfile`: local vLLM image layer that installs `vllm[audio]`
+- `adapter.Dockerfile`: CPU-only FastAPI adapter image with ffmpeg
 - `compose.yaml`: preferred single-node Docker Compose startup
 - `config/raw_content_chat_template.jinja`: emits only the text item from the
   multimodal user message, which is required by the client-side timestamp-row
   extraction strategy
 - `scripts/run-docker.sh`: plain Docker fallback for hosts without Compose
+- `scripts/restart-adapter.sh`: rebuild only the CPU adapter without restarting
+  vLLM or reloading the model
+- `scripts/serve-vllm.sh`: adds scheduler flags only when explicitly configured
 - `scripts/start-compose.sh`: build, audio-smoke, and start via Compose
 - `scripts/smoke-image-audio.sh`: import check for vLLM's optional audio deps
 - `scripts/smoke-health.sh`: liveness/model-list smoke check
@@ -30,7 +33,9 @@ not need this repo, `uv`, or any `ja_media_*` Python package.
   already populated
 - a Hugging Face token in `.env` if the model or account requires one
 
-No repo checkout is required on the GPU host. Copy only this folder if desired.
+The adapter build currently requires the repository checkout. This is an
+intentional constraint of the forced-alignment spike, not a durable service
+packaging decision.
 
 ## Configure
 
@@ -47,18 +52,62 @@ Key settings:
   base image's vLLM version
 - `VLLM_AUDIO_IMAGE`: local tag for the derived image, defaulting to
   `qwen3-forced-aligner-vllm:0.24.0-audio`
-- `SERVER_PORT`: host port mapped to vLLM port `8000`
+- `SERVER_PORT`: host port mapped to the compact adapter
 - `HF_HOME`: host cache directory for model weights
-- `MAX_NUM_SEQS`: start with `1` for proof-of-value validation
+- `MAX_NUM_BATCHED_TOKENS`: optional per-iteration token budget
+- `EXTRA_VLLM_ARGS`: optional vLLM flags, including profiling flags used below
+- `packages/data/config.local.toml`: the existing Bronze endpoint, bucket,
+  prefix, and addressing style
+- `packages/data/.env.local`: the existing read-only Bronze credentials
+- `ALIGNER_AUDIO_CACHE`: host directory for verified episode audio
 
 vLLM's official OpenAI images do not include optional audio dependencies. The
-Dockerfile installs `vllm[audio]` at the matching vLLM version so PyAV, librosa,
-and soundfile are present when `/pooling` receives an audio item.
+Dockerfile installs `vllm[audio]` at the matching vLLM version so PyAV and
+SoundFile are present when `/pooling` receives an audio item.
 
 If the selected vLLM base image does not contain
 `Qwen3ASRForcedAlignerForTokenClassification`, pin `VLLM_BASE_IMAGE` and
-`VLLM_AUDIO_EXTRA_VERSION` to a vLLM release that does. Do not install ja-media
-code on the GPU host to fix that; the server should remain generic vLLM.
+`VLLM_AUDIO_EXTRA_VERSION` to a vLLM release that does.
+
+## Profile Before Tuning
+
+The stress report records the median and maximum of these stages for every
+concurrency level:
+
+- AC-3 crop decode;
+- prompt construction and WAV base64 encoding;
+- adapter-to-vLLM request through response headers;
+- vLLM response-body transfer and JSON parsing;
+- timestamp-row reduction;
+- complete adapter time; and
+- the remaining response serialization plus LAN time seen by the Mac.
+
+It also records the exact vLLM request bytes, response bytes, returned row
+count, and classes per row. These measurements establish whether transport,
+CPU work, queueing, or model execution is limiting the sweep.
+
+The stress command uses different episode crops for every request by default.
+This prevents vLLM's multimodal processor and encoder caches from turning the
+run into a repeated-audio microbenchmark. Use `--stress-audio-pattern repeated`
+only when intentionally measuring that warm-cache case.
+
+The measured result, OpenTelemetry keys, and vLLM extension options are in
+[Qwen3 Forced Aligner Serving Profile](../../docs/plans/forced-alignment/qwen3-forced-aligner-serving-profile.md).
+
+vLLM 0.24 also has built-in OpenTelemetry spans for queue, scheduler, model
+forward, and model execute time. The optional Compose profile runs Jaeger for
+one profiling session:
+
+```bash
+COMPOSE_PROFILES=profiling \
+EXTRA_VLLM_ARGS='--otlp-traces-endpoint http://jaeger:4318/v1/traces --collect-detailed-traces all' \
+./scripts/start-compose.sh
+```
+
+Run the stress sweep, then open `http://SERVER_HOST:16686`, select
+`qwen3-forced-aligner-vllm`, and inspect the requests from that run. Remove the
+two settings and restart when profiling is finished; detailed traces have
+nonzero overhead and are not a serving default.
 
 ## Start With Compose
 
@@ -68,7 +117,13 @@ code on the GPU host to fix that; the server should remain generic vLLM.
 
 Docker Compose automatically reads `.env` when it runs from this deployment
 directory. The wrapper changes into this directory before calling Compose so the
-same command works even if you launch it from another path.
+same command works even if you launch it from another path. It also reads the
+existing `packages/data/config.local.toml` and adjacent `.env.local`; no Bronze
+values are copied into this deployment's `.env`.
+
+To select a different existing data configuration, set
+`JA_MEDIA_DATA_CONFIG_HOST` to its host path before running the wrapper. Its
+adjacent secret file follows the normal `.env.<environment>` naming rule.
 
 In another shell:
 
@@ -97,7 +152,7 @@ the container.
 
 ## Expected vLLM Shape
 
-The startup command is equivalent to:
+With both scheduler settings empty, the startup command is equivalent to:
 
 ```bash
 vllm serve Qwen/Qwen3-ForcedAligner-0.6B \
@@ -106,15 +161,24 @@ vllm serve Qwen/Qwen3-ForcedAligner-0.6B \
   --hf-overrides '{"architectures":["Qwen3ASRForcedAlignerForTokenClassification"]}'
 ```
 
+The BECK 180-second arm measured 2,340 audio embedding tokens, so vLLM's prior
+2,048-token budget could not accept that request. This is a minimum-length fact,
+not a throughput setting. Use the compact-response stress command to test larger
+token budgets and concurrency before putting either scheduler value in `.env`.
+
 `--enforce-eager` is not part of the known forced-aligner contract. Add it only
 as a troubleshooting flag if vLLM CUDA graph capture or compilation behavior
 breaks this model/image combination.
 
-The ja-media client will call `/pooling` with `task: "token_classify"`, a single
-text/audio user message, and application-chosen `<timestamp>` markers. The
-server owns model loading, audio decoding, feature extraction, and logits
-generation. The client owns span selection, prompt construction, timestamp-row
-extraction, cue correlation, and run serialization.
+LAN clients call the adapter's `/audio/cache` and `/align` routes on port 8000.
+Raw vLLM `/pooling` is exposed on port 8001 for this spike so binary encodings
+and pooling behavior can be measured without adding adapter routes. The adapter
+downloads the pinned AC-3 once, decodes each requested crop to mono 16 kHz PCM,
+calls `/pooling` on the private Docker network, and requests little-endian fp16
+bytes. It views that body as a NumPy matrix without creating Python float
+objects, then vectorizes the token timings and distribution metrics. The Mac
+still owns cue/window selection, episode-clock offsets, cue reconstruction, SRT
+output, and review artifacts.
 
 The upstream Qwen/vLLM example treats forced alignment as word-level timestamp
 classification. The expected prompt body is a sequence of client-chosen text
@@ -128,8 +192,8 @@ The ja-media inference client uses that shape for its default Qwen policy. It
 segments Japanese text with nagisa, skips punctuation-like `補助記号` tokens by
 default, predicts word timings, and then merges those word timings back into
 caller-owned groups such as SRT/ASS cues, source-text lines, or one untimed text
-blob. Keep the deployment generic: do not install ja-media code into this image
-to implement segmentation or cue reconstruction.
+blob. Japanese segmentation and cue reconstruction remain outside the adapter;
+the request already contains ordered alignment tokens.
 
 The chat template emits only the text content from the multimodal request. The
 audio item remains in the request body for vLLM's multimodal processor; it just
@@ -137,6 +201,7 @@ must not be rendered into the textual prompt.
 
 ## Security Boundary
 
-This deployment exposes an unauthenticated vLLM server. Bind it only where the
-client can safely reach it, such as localhost, a private security group, SSH
-tunnel, or a trusted VPN. Do not put it directly on the public internet.
+Compose exposes both the unauthenticated compact adapter on port 8000 and raw
+vLLM on port 8001. These are deliberate experiment escape hatches. Bind the GPU
+host only to a trusted LAN or VPN and do not put either port on the public
+internet.

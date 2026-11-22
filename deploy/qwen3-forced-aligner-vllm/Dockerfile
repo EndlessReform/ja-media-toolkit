@@ -7,3 +7,6 @@ ARG VLLM_AUDIO_EXTRA_VERSION=0.24.0
 # The forced-aligner /pooling path accepts audio inputs, so this deployment owns
 # the small matching extra layer instead of relying on a mutable upstream tag.
 RUN uv pip install --system "vllm[audio]==${VLLM_AUDIO_EXTRA_VERSION}"
+
+COPY scripts/serve-vllm.sh /usr/local/bin/serve-vllm
+RUN chmod 0755 /usr/local/bin/serve-vllm
