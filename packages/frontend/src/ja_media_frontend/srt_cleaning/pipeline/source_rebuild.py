@@ -7,8 +7,8 @@ from typing import Any, Iterable
 from ja_media_core.transcripts import SubtitleCue
 
 from ja_media_frontend.srt_cleaning.contracts import CleanDecision
-from ja_media_frontend.srt_cleaning.preclean import preclean_text
-from ja_media_frontend.srt_cleaning.result_parser import (
+from ja_media_frontend.srt_cleaning.pipeline.preclean import preclean_text
+from ja_media_frontend.srt_cleaning.pipeline.result_parser import (
     WindowResult,
     base_window_error,
     to_dlq_row,

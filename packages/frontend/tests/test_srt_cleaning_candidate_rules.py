@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from ja_media_core.transcripts import SubtitleCue
-from ja_media_frontend.srt_cleaning.candidate_rules import (
+from ja_media_frontend.srt_cleaning.pipeline.candidate_rules import (
     FLAG_ANGLE_WRAPPED,
     FLAG_INTERNAL_SPEAKER_BOUNDARY,
     FLAG_REPETITIVE_KANA,
@@ -20,18 +20,18 @@ from ja_media_frontend.srt_cleaning.candidate_rules import (
     apply_candidate_rules,
     screen_candidate_flags,
 )
-from ja_media_frontend.srt_cleaning.review_models import (
+from ja_media_frontend.srt_cleaning.review.models import (
     ReviewCue,
     ReviewDecision,
     ReviewSource,
     ReviewWorkspace,
 )
-from ja_media_frontend.srt_cleaning.review_rule_flags import summarize_candidate_flags
-from ja_media_frontend.srt_cleaning.review_rule_comparison import (
+from ja_media_frontend.srt_cleaning.review.rule_flags import summarize_candidate_flags
+from ja_media_frontend.srt_cleaning.review.rule_comparison import (
     compare_candidate_rules,
     rule_comparison_needs_review,
 )
-from ja_media_frontend.srt_cleaning.review_rule_overlay import rule_comparison_diff
+from ja_media_frontend.srt_cleaning.review.rule_overlay import rule_comparison_diff
 
 
 def test_candidate_rules_cover_width_gloss_label_and_sfx() -> None:

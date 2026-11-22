@@ -4,25 +4,25 @@ import asyncio
 from pathlib import Path
 from unittest.mock import patch
 
-from ja_media_frontend.srt_cleaning.batch import read_jsonl, write_jsonl
+from ja_media_frontend.srt_cleaning.pipeline.batch import read_jsonl, write_jsonl
 from ja_media_frontend.srt_cleaning.cli import build_parser
-from ja_media_frontend.srt_cleaning.review_audio import ReviewAudio
-from ja_media_frontend.srt_cleaning.review_clipboard import review_sample_payload
-from ja_media_frontend.srt_cleaning.review_dialogs import ReasonStatsModal, RuleStatsModal
-from ja_media_frontend.srt_cleaning.review_formatting import (
+from ja_media_frontend.srt_cleaning.review.audio import ReviewAudio
+from ja_media_frontend.srt_cleaning.review.clipboard import review_sample_payload
+from ja_media_frontend.srt_cleaning.review.dialogs import ReasonStatsModal, RuleStatsModal
+from ja_media_frontend.srt_cleaning.review.formatting import (
     colored_model_diff,
     timeline_styles,
 )
-from ja_media_frontend.srt_cleaning.review_loader import (
+from ja_media_frontend.srt_cleaning.review.loader import (
     load_review_directory,
     load_review_workspace,
 )
-from ja_media_frontend.srt_cleaning.review_reason_pivot import (
+from ja_media_frontend.srt_cleaning.review.reason_pivot import (
     ReasonPivotExplorer,
     build_reason_pivot,
 )
-from ja_media_frontend.srt_cleaning.review_tui import SrtCleaningReviewApp
-from ja_media_frontend.srt_cleaning.review_stats import summarize_reasons
+from ja_media_frontend.srt_cleaning.review.tui import SrtCleaningReviewApp
+from ja_media_frontend.srt_cleaning.review.stats import summarize_reasons
 from srt_cleaning_review_fixtures import prepared_run
 from textual.widgets import ContentSwitcher
 
@@ -186,7 +186,7 @@ def test_review_tui_jumps_forward_and_backward_between_flags(tmp_path: Path) -> 
             audio_loader=lambda _episode: ReviewAudio(None, "audio unavailable"),
         )
         with patch(
-            "ja_media_frontend.srt_cleaning.review_rule_overlay.cue_has_candidate_flags",
+            "ja_media_frontend.srt_cleaning.review.rule_overlay.cue_has_candidate_flags",
             return_value=True,
         ):
             async with app.run_test() as pilot:
@@ -305,7 +305,7 @@ def test_review_tui_c_copies_current_sample(tmp_path: Path) -> None:
             audio_loader=lambda _episode: ReviewAudio(None, "audio unavailable"),
         )
         with patch(
-            "ja_media_frontend.srt_cleaning.review_interaction.copy_review_sample"
+            "ja_media_frontend.srt_cleaning.review.interaction.copy_review_sample"
         ) as copy:
             async with app.run_test() as pilot:
                 await pilot.press("c")

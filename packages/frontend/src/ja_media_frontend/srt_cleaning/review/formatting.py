@@ -5,7 +5,7 @@ from difflib import SequenceMatcher
 from rich.console import Group
 from rich.text import Text
 
-from ja_media_frontend.srt_cleaning.review_models import ReviewCue
+from ja_media_frontend.srt_cleaning.review.models import ReviewCue
 
 
 TIMELINE_STYLES = {

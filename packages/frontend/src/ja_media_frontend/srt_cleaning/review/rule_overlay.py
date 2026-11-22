@@ -6,18 +6,18 @@ from rich.console import Group
 from rich.panel import Panel
 from rich.text import Text
 
-from ja_media_frontend.srt_cleaning.review_dialogs import RuleStatsModal
-from ja_media_frontend.srt_cleaning.review_formatting import (
+from ja_media_frontend.srt_cleaning.review.dialogs import RuleStatsModal
+from ja_media_frontend.srt_cleaning.review.formatting import (
     colored_model_diff,
     decision_summary,
 )
-from ja_media_frontend.srt_cleaning.review_models import ReviewCue
-from ja_media_frontend.srt_cleaning.review_rule_comparison import (
+from ja_media_frontend.srt_cleaning.review.models import ReviewCue
+from ja_media_frontend.srt_cleaning.review.rule_comparison import (
     compare_candidate_rules,
     render_rule_summary,
     summarize_candidate_rules,
 )
-from ja_media_frontend.srt_cleaning.review_rule_flags import (
+from ja_media_frontend.srt_cleaning.review.rule_flags import (
     candidate_flags,
     cue_has_candidate_flags,
     render_candidate_flag_summary,

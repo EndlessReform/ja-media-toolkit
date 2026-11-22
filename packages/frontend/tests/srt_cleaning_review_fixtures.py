@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ja_media_frontend.srt_cleaning.batch import (
+from ja_media_frontend.srt_cleaning.pipeline.batch import (
     build_manifest_row,
     build_windows,
     write_jsonl,
 )
 from ja_media_frontend.srt_cleaning.contracts import SourceDocument
-from ja_media_frontend.srt_cleaning.source_rebuild import cleaned_srt_name
+from ja_media_frontend.srt_cleaning.pipeline.source_rebuild import cleaned_srt_name
 from ja_media_frontend.srt_cleaning.workspace import run_for_anilist, write_run_manifest
 
 

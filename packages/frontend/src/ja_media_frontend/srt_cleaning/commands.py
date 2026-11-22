@@ -8,7 +8,7 @@ from typing import Any
 from rich.console import Console
 
 from ja_media_core import HttpKitsunekkoSubtitlesClient
-from ja_media_frontend.srt_cleaning.batch import (
+from ja_media_frontend.srt_cleaning.pipeline.batch import (
     build_batch_row,
     build_manifest_row,
     build_windows,
@@ -19,12 +19,12 @@ from ja_media_frontend.srt_cleaning.batch import (
     write_shards_summary,
 )
 from ja_media_frontend.srt_cleaning.contracts import PIPELINE_VERSION, SourceDocument
-from ja_media_frontend.srt_cleaning.generation_sources import (
+from ja_media_frontend.srt_cleaning.pipeline.generation_sources import (
     downloaded_sources,
     frozen_sources,
 )
-from ja_media_frontend.srt_cleaning.generation_context import render_series_context
-from ja_media_frontend.srt_cleaning.reconstruct import reconstruct_from_batch
+from ja_media_frontend.srt_cleaning.pipeline.generation_context import render_series_context
+from ja_media_frontend.srt_cleaning.pipeline.reconstruct import reconstruct_from_batch
 from ja_media_frontend.srt_cleaning.workspace import (
     SrtCleanRun,
     prepare_run_dir,

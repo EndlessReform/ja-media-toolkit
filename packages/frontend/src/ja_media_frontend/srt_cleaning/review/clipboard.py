@@ -8,7 +8,7 @@ import subprocess
 from typing import Any
 
 from ja_media_core.proc import run as run_process
-from ja_media_frontend.srt_cleaning.review_models import ReviewCue, ReviewSource, ReviewWorkspace
+from ja_media_frontend.srt_cleaning.review.models import ReviewCue, ReviewSource, ReviewWorkspace
 
 
 def copy_review_sample(

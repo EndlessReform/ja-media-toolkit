@@ -7,12 +7,12 @@ from rich.console import Group
 from rich.table import Table
 from rich.text import Text
 
-from ja_media_frontend.srt_cleaning.candidate_rules import (
+from ja_media_frontend.srt_cleaning.pipeline.candidate_rules import (
     CANDIDATE_RULES,
     CandidateRuleResult,
     apply_candidate_rules,
 )
-from ja_media_frontend.srt_cleaning.review_models import ReviewCue, ReviewWorkspace
+from ja_media_frontend.srt_cleaning.review.models import ReviewCue, ReviewWorkspace
 
 
 COMPARISON_STYLES = {

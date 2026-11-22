@@ -5,10 +5,10 @@ from pathlib import Path
 
 from rich.console import Console
 
-from ja_media_frontend.srt_cleaning.batch import build_manifest_row, build_windows, write_jsonl
+from ja_media_frontend.srt_cleaning.pipeline.batch import build_manifest_row, build_windows, write_jsonl
 from ja_media_frontend.srt_cleaning.contracts import SourceDocument
-from ja_media_frontend.srt_cleaning.provider_reconstruct import reconstruct_provider_output
-from ja_media_frontend.srt_cleaning.review_loader import load_review_directory
+from ja_media_frontend.srt_cleaning.pipeline.provider_reconstruct import reconstruct_provider_output
+from ja_media_frontend.srt_cleaning.review.loader import load_review_directory
 
 
 def test_limited_provider_run_reconstructs_only_selected_windows(tmp_path: Path) -> None:

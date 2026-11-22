@@ -4,8 +4,8 @@ from dataclasses import dataclass
 
 from rich.table import Table
 
-from ja_media_frontend.srt_cleaning.candidate_rules import apply_candidate_rules
-from ja_media_frontend.srt_cleaning.review_models import ReviewCue, ReviewWorkspace
+from ja_media_frontend.srt_cleaning.pipeline.candidate_rules import apply_candidate_rules
+from ja_media_frontend.srt_cleaning.review.models import ReviewCue, ReviewWorkspace
 
 
 @dataclass(frozen=True)

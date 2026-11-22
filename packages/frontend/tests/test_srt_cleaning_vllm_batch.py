@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from ja_media_frontend.srt_cleaning import vllm_batch
+from ja_media_frontend.srt_cleaning.pipeline import vllm_batch
 from ja_media_frontend.srt_cleaning.cli import build_parser
 
 

@@ -8,14 +8,14 @@ from typing import Any, Iterable
 
 from ja_media_core.transcripts import format_srt, parse_srt
 
-from ja_media_frontend.srt_cleaning.batch import read_jsonl, write_jsonl
-from ja_media_frontend.srt_cleaning.result_parser import (
+from ja_media_frontend.srt_cleaning.pipeline.batch import read_jsonl, write_jsonl
+from ja_media_frontend.srt_cleaning.pipeline.result_parser import (
     WindowResult,
     base_window_error,
     parse_batch_result_row,
     to_dlq_row,
 )
-from ja_media_frontend.srt_cleaning.source_rebuild import (
+from ja_media_frontend.srt_cleaning.pipeline.source_rebuild import (
     apply_decisions,
     cleaned_srt_name,
     collect_source_decisions,

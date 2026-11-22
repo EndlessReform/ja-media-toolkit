@@ -4,8 +4,8 @@ from dataclasses import dataclass
 
 from ja_media_core.transcripts import SubtitleCue
 
-from ja_media_frontend.srt_cleaning.candidate_rules import apply_candidate_rules
-from ja_media_frontend.srt_cleaning.normalization import mechanically_normalize_text
+from ja_media_frontend.srt_cleaning.pipeline.candidate_rules import apply_candidate_rules
+from ja_media_frontend.srt_cleaning.pipeline.normalization import mechanically_normalize_text
 
 
 @dataclass(frozen=True)

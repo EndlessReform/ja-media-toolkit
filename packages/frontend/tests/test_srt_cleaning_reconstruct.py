@@ -3,13 +3,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ja_media_frontend.srt_cleaning.batch import (
+from ja_media_frontend.srt_cleaning.pipeline.batch import (
     build_manifest_row,
     build_windows,
     write_jsonl,
 )
 from ja_media_frontend.srt_cleaning.contracts import SourceDocument
-from ja_media_frontend.srt_cleaning.reconstruct import reconstruct_from_batch
+from ja_media_frontend.srt_cleaning.pipeline.reconstruct import reconstruct_from_batch
 
 
 SRT_TEXT = """1

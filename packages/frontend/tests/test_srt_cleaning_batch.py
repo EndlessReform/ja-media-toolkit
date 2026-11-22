@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from ja_media_frontend.srt_cleaning.batch import (
+from ja_media_frontend.srt_cleaning.pipeline.batch import (
     build_batch_row,
     build_manifest_row,
     build_windows,
@@ -15,7 +15,7 @@ from ja_media_frontend.srt_cleaning.batch import (
 )
 from ja_media_frontend.srt_cleaning.commands import render_series_context
 from ja_media_frontend.srt_cleaning.contracts import SourceDocument
-from ja_media_frontend.srt_cleaning.result_parser import parse_batch_result_row
+from ja_media_frontend.srt_cleaning.pipeline.result_parser import parse_batch_result_row
 
 
 SRT_TEXT = """1

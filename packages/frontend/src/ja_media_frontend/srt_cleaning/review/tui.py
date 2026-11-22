@@ -11,38 +11,38 @@ from textual.containers import Horizontal, Vertical
 from textual.widgets import ContentSwitcher, Footer, Header, Label, Static
 
 from ja_media_frontend.audio import MaterializedAudioPlayer
-from ja_media_frontend.srt_cleaning.review_audio import ReviewAudio
-from ja_media_frontend.srt_cleaning.review_dialogs import (
+from ja_media_frontend.srt_cleaning.review.audio import ReviewAudio
+from ja_media_frontend.srt_cleaning.review.dialogs import (
     EpisodeSelectModal,
     ReasonStatsModal,
 )
-from ja_media_frontend.srt_cleaning.review_formatting import (
+from ja_media_frontend.srt_cleaning.review.formatting import (
     timeline_legend,
     timeline_styles,
 )
-from ja_media_frontend.srt_cleaning.review_interaction import (
+from ja_media_frontend.srt_cleaning.review.interaction import (
     SrtCleaningReviewInteractionMixin,
 )
-from ja_media_frontend.srt_cleaning.review_models import (
+from ja_media_frontend.srt_cleaning.review.models import (
     ReviewCue,
     ReviewSource,
     ReviewWorkspace,
 )
-from ja_media_frontend.srt_cleaning.review_reason_pivot import ReasonPivotExplorer
-from ja_media_frontend.srt_cleaning.review_rail import ReviewEpisodeRail
-from ja_media_frontend.srt_cleaning.review_rule_comparison import (
+from ja_media_frontend.srt_cleaning.review.reason_pivot import ReasonPivotExplorer
+from ja_media_frontend.srt_cleaning.review.rail import ReviewEpisodeRail
+from ja_media_frontend.srt_cleaning.review.rule_comparison import (
     rule_timeline_legend,
     rule_timeline_styles,
 )
-from ja_media_frontend.srt_cleaning.review_rule_overlay import (
+from ja_media_frontend.srt_cleaning.review.rule_overlay import (
     RuleOverlayMixin,
     render_cue_panel,
 )
-from ja_media_frontend.srt_cleaning.review_stats import (
+from ja_media_frontend.srt_cleaning.review.stats import (
     render_reason_stats,
     summarize_reasons,
 )
-from ja_media_frontend.srt_cleaning.review_tabs import ReviewTabMixin
+from ja_media_frontend.srt_cleaning.review.tabs import ReviewTabMixin
 from ja_media_frontend.widgets.timeline import TimelineWidget, format_clock
 
 

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from ja_media_frontend.audio import MaterializedAudioPlayer
-from ja_media_frontend.srt_cleaning.review_audio import (
+from ja_media_frontend.srt_cleaning.review.audio import (
     ReviewAudio,
     load_review_audio,
     prefetch_neighbor_audio,
 )
-from ja_media_frontend.srt_cleaning.review_clipboard import copy_review_sample
-from ja_media_frontend.srt_cleaning.review_rule_comparison import (
+from ja_media_frontend.srt_cleaning.review.clipboard import copy_review_sample
+from ja_media_frontend.srt_cleaning.review.rule_comparison import (
     rule_comparison_needs_review,
 )
 from ja_media_frontend.subsync.interaction import playback_range

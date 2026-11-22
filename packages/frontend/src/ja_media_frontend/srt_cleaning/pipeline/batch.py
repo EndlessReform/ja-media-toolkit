@@ -17,13 +17,13 @@ from ja_media_frontend.srt_cleaning.contracts import (
     SourceDocument,
     sha256_text,
 )
-from ja_media_frontend.srt_cleaning.preclean import preclean_cue
+from ja_media_frontend.srt_cleaning.pipeline.preclean import preclean_cue
 from ja_media_frontend.srt_cleaning.jsonl import (
     encode_jsonl_row,
     read_jsonl as _read_jsonl,
     write_jsonl,
 )
-from ja_media_frontend.srt_cleaning.prompt_rendering import render_window_prompt
+from ja_media_frontend.srt_cleaning.pipeline.prompt_rendering import render_window_prompt
 from ja_media_frontend.srt_cleaning.workspace import (
     WINDOW_SCHEMA_NAME,
     WINDOW_SCHEMA_VERSION,

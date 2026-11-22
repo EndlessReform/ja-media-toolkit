@@ -8,15 +8,15 @@ from typing import Any
 from ja_media_core.subsync import infer_episode_number
 from ja_media_core.transcripts import SubtitleCue, parse_srt
 
-from ja_media_frontend.srt_cleaning.batch import read_jsonl
-from ja_media_frontend.srt_cleaning.normalization import mechanically_normalize_text
-from ja_media_frontend.srt_cleaning.review_models import (
+from ja_media_frontend.srt_cleaning.pipeline.batch import read_jsonl
+from ja_media_frontend.srt_cleaning.pipeline.normalization import mechanically_normalize_text
+from ja_media_frontend.srt_cleaning.review.models import (
     ReviewCue,
     ReviewDecision,
     ReviewSource,
     ReviewWorkspace,
 )
-from ja_media_frontend.srt_cleaning.source_rebuild import (
+from ja_media_frontend.srt_cleaning.pipeline.source_rebuild import (
     cleaned_srt_name,
     source_key,
 )

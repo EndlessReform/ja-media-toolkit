@@ -11,8 +11,8 @@ from textual.containers import Vertical
 from textual.widget import Widget
 from textual.widgets import DataTable, Static
 
-from ja_media_frontend.srt_cleaning.review_formatting import colored_model_diff
-from ja_media_frontend.srt_cleaning.review_models import (
+from ja_media_frontend.srt_cleaning.review.formatting import colored_model_diff
+from ja_media_frontend.srt_cleaning.review.models import (
     ReviewCue,
     ReviewSource,
     ReviewWorkspace,

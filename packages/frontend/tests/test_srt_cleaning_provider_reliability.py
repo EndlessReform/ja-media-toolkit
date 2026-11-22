@@ -5,9 +5,9 @@ import json
 from pathlib import Path
 from typing import Any
 
-from ja_media_frontend.srt_cleaning.batch import read_jsonl, write_jsonl
-from ja_media_frontend.srt_cleaning.provider_batch import run_provider_batch
-from ja_media_frontend.srt_cleaning.provider_http import post_chat_completion
+from ja_media_frontend.srt_cleaning.pipeline.batch import read_jsonl, write_jsonl
+from ja_media_frontend.srt_cleaning.pipeline.provider_batch import run_provider_batch
+from ja_media_frontend.srt_cleaning.pipeline.provider_http import post_chat_completion
 
 
 class FakeResponse:
@@ -166,14 +166,14 @@ def test_resume_retries_failed_requests_and_keeps_successes(
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setattr(
-        "ja_media_frontend.srt_cleaning.provider_batch.httpx.Client",
+        "ja_media_frontend.srt_cleaning.pipeline.provider_batch.httpx.Client",
         lambda **_kwargs: FakeClient([]),
     )
     monkeypatch.setattr(
-        "ja_media_frontend.srt_cleaning.provider_batch.execute_request", fake_execute
+        "ja_media_frontend.srt_cleaning.pipeline.provider_batch.execute_request", fake_execute
     )
     monkeypatch.setattr(
-        "ja_media_frontend.srt_cleaning.provider_batch.reconstruct_provider_output",
+        "ja_media_frontend.srt_cleaning.pipeline.provider_batch.reconstruct_provider_output",
         lambda **_kwargs: tmp_path / "reconstruct",
     )
     args = argparse.Namespace(

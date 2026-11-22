@@ -8,12 +8,12 @@ from dotenv import load_dotenv
 from rich.console import Console
 
 from ja_media_core.anilist_search import HttpAniListSearchClient
-from ja_media_frontend.srt_cleaning.review_audio import load_review_audio
-from ja_media_frontend.srt_cleaning.review_loader import (
+from ja_media_frontend.srt_cleaning.review.audio import load_review_audio
+from ja_media_frontend.srt_cleaning.review.loader import (
     load_review_directory,
     load_review_workspace,
 )
-from ja_media_frontend.srt_cleaning.review_tui import SrtCleaningReviewApp
+from ja_media_frontend.srt_cleaning.review.tui import SrtCleaningReviewApp
 from ja_media_frontend.srt_cleaning.workspace import run_for_anilist
 
 

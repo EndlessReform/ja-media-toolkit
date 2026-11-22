@@ -5,15 +5,15 @@ import sys
 from pathlib import Path
 
 from ja_media_frontend.srt_cleaning.commands import run_generate, run_reconstruct
-from ja_media_frontend.srt_cleaning.provider_batch import run_provider_batch
-from ja_media_frontend.srt_cleaning.review_command import run_review
+from ja_media_frontend.srt_cleaning.pipeline.provider_batch import run_provider_batch
+from ja_media_frontend.srt_cleaning.review.command import run_review
 from ja_media_frontend.srt_cleaning.settings import SrtCleanSettings
-from ja_media_frontend.srt_cleaning.smoke import (
+from ja_media_frontend.srt_cleaning.pipeline.smoke import (
     fetch_metadata,
     fetch_subtitle_inventory,
     run_smoke_test,
 )
-from ja_media_frontend.srt_cleaning.vllm_batch import run_vllm_batch
+from ja_media_frontend.srt_cleaning.pipeline.vllm_batch import run_vllm_batch
 
 
 HOUSE_STYLE_PATH = Path(__file__).parents[1] / "house-style.md"

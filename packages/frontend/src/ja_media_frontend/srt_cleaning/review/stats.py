@@ -8,7 +8,7 @@ from rich.console import Group
 from rich.table import Table
 from rich.text import Text
 
-from ja_media_frontend.srt_cleaning.review_models import ReviewSource
+from ja_media_frontend.srt_cleaning.review.models import ReviewSource
 
 
 @dataclass(frozen=True)

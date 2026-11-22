@@ -5,14 +5,14 @@ import json
 from pathlib import Path
 from typing import Any
 
-from ja_media_frontend.srt_cleaning.batch import (
+from ja_media_frontend.srt_cleaning.pipeline.batch import (
     build_batch_row,
     build_manifest_row,
     build_windows,
 )
 from ja_media_frontend.srt_cleaning.contracts import SourceDocument
-from ja_media_frontend.srt_cleaning.execution_manifest import write_execution_manifest
-from ja_media_frontend.srt_cleaning.provider_batch import (
+from ja_media_frontend.srt_cleaning.pipeline.execution_manifest import write_execution_manifest
+from ja_media_frontend.srt_cleaning.pipeline.provider_batch import (
     execute_request,
     prepare_body,
     resolve_provider,

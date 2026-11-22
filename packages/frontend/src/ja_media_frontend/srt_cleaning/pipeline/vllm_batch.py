@@ -11,8 +11,8 @@ from pathlib import Path
 
 from rich.console import Console
 
-from ja_media_frontend.srt_cleaning.batch import read_jsonl
-from ja_media_frontend.srt_cleaning.execution_manifest import write_execution_manifest
+from ja_media_frontend.srt_cleaning.pipeline.batch import read_jsonl
+from ja_media_frontend.srt_cleaning.pipeline.execution_manifest import write_execution_manifest
 from ja_media_frontend.srt_cleaning.workspace import run_for_anilist
 
 

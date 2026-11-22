@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from textual.widgets import Label, ListItem, ListView
 
-from ja_media_frontend.srt_cleaning.review_models import ReviewWorkspace
+from ja_media_frontend.srt_cleaning.review.models import ReviewWorkspace
 
 
 class ReviewEpisodeRail(ListView):

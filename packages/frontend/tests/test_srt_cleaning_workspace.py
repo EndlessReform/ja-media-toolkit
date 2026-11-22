@@ -8,10 +8,10 @@ from types import SimpleNamespace
 import pytest
 
 from ja_media_frontend.srt_cleaning import commands
-from ja_media_frontend.srt_cleaning.batch import build_manifest_row, build_windows, write_jsonl
+from ja_media_frontend.srt_cleaning.pipeline.batch import build_manifest_row, build_windows, write_jsonl
 from ja_media_frontend.srt_cleaning.commands import run_generate, run_reconstruct
 from ja_media_frontend.srt_cleaning.contracts import SourceDocument
-from ja_media_frontend.srt_cleaning.reconstruct import reconstruct_from_batch
+from ja_media_frontend.srt_cleaning.pipeline.reconstruct import reconstruct_from_batch
 from ja_media_frontend.srt_cleaning.workspace import run_for_anilist
 
 

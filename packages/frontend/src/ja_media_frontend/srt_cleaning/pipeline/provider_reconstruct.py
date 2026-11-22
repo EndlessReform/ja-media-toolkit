@@ -5,9 +5,9 @@ from typing import Any
 
 from rich.console import Console
 
-from ja_media_frontend.srt_cleaning.batch import read_jsonl, write_jsonl
-from ja_media_frontend.srt_cleaning.reconstruct import reconstruct_from_batch
-from ja_media_frontend.srt_cleaning.result_parser import parse_batch_result_row
+from ja_media_frontend.srt_cleaning.pipeline.batch import read_jsonl, write_jsonl
+from ja_media_frontend.srt_cleaning.pipeline.reconstruct import reconstruct_from_batch
+from ja_media_frontend.srt_cleaning.pipeline.result_parser import parse_batch_result_row
 
 
 def reconstruct_provider_output(

@@ -7,7 +7,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ja_media_frontend.srt_cleaning.contracts import CleanDecision, CleanWindowResult
-from ja_media_frontend.srt_cleaning.provider_http import is_retryable_status
+from ja_media_frontend.srt_cleaning.pipeline.provider_http import is_retryable_status
 
 
 AUTH_STATUS_CODES = {401, 407}
