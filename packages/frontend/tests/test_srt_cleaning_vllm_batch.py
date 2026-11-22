@@ -39,7 +39,9 @@ def test_run_vllm_parser_accepts_escape_hatch_args() -> None:
 
     parsed = parser.parse_args(
         [
-            "run-vllm",
+            "run",
+            "--backend",
+            "vllm",
             "--anilist",
             "184591",
             "--model",
@@ -50,7 +52,8 @@ def test_run_vllm_parser_accepts_escape_hatch_args() -> None:
         ]
     )
 
-    assert parsed.command == "run-vllm"
+    assert parsed.command == "run"
+    assert parsed.backend == "vllm"
     assert parsed.anilist == 184591
     assert parsed.model == "custom/model"
     assert vllm_batch.normalize_escape_hatch(parsed.vllm_args) == [

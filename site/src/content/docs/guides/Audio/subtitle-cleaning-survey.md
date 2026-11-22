@@ -6,15 +6,36 @@ description: Run bounded subtitle-cleaning corpus slices against local or hosted
 The subtitle cleaner is a survey tool for finding recurring cleanup patterns. Its
 model output is not part of the production subtitle path.
 
+## Configuration
+
+`ja-media-srt-clean` loads defaults from `[srt_clean]` in
+`~/.config/ja-media-toolkit/config.toml` (or an explicit `--config <file>`),
+with precedence **CLI flag > `JA_MEDIA_SRT_CLEAN_*` env var > TOML > defaults**:
+
+```toml
+[srt_clean]
+workspace_root = ".ja-media-runs"
+default_backend = "vllm"
+
+[srt_clean.generate]
+model = "gpt-5-mini"
+window_size = 10
+
+[srt_clean.provider]
+concurrency = 4
+timeout = 180.0
+```
+
 ## Generate requests
 
-Run from `packages/frontend`:
+Run from `packages/frontend` (add `--dry-run` to inspect metadata and inventory
+without writing shards):
 
 ```sh
 uv run ja-media-srt-clean generate \
   --anilist 184591 \
   --run-hash \
-  --model gpt-5.6-luna
+  --model gpt-5-mini
 ```
 
 Generation downloads the matching Kitsunekko SRTs and writes OpenAI-compatible
@@ -45,10 +66,10 @@ Put `OPENAI_API_KEY` in the repository `.env`, then run a small trial before the
 whole file:
 
 ```sh
-uv run ja-media-srt-clean run-provider \
+uv run ja-media-srt-clean run \
   --anilist 184591 \
   --run-id sha256-REPLACE_ME \
-  --provider openai \
+  --backend openai \
   --model gpt-5.6-luna \
   --limit 20 \
   --out ../../output/srt-clean/gpt-5.6-luna.jsonl
