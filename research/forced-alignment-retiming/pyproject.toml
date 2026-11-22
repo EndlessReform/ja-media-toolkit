@@ -1,0 +1,26 @@
+[project]
+name = "forced-alignment-retiming"
+version = "0.1.0"
+description = "Bounded experiments for retiming cleaned Japanese subtitles"
+requires-python = ">=3.13"
+dependencies = [
+    "ja-media-core",
+    "ja-media-data",
+    "ja-media-inference",
+]
+
+[project.scripts]
+retiming-research = "forced_alignment_retiming.cli:main"
+retime-case = "forced_alignment_retiming.campaigns.retime_case:main"
+
+[build-system]
+requires = ["uv_build>=0.11.32,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = ["pytest>=9.1.0"]
+
+[tool.uv.sources]
+ja-media-core = { path = "../../packages/core", editable = true }
+ja-media-data = { path = "../../packages/data", editable = true }
+ja-media-inference = { path = "../../envs/inference", editable = true }
