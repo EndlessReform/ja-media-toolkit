@@ -76,10 +76,37 @@ def test_anchor_fit_score_punishes_duplicate_cue_density() -> None:
     ]
 
     assert subtitle_goodness_of_fit(reference, duplicated) == pytest.approx(2.0)
-    assert subtitle_anchor_fit_score(reference, duplicated) == pytest.approx(0.3535534)
+    assert subtitle_anchor_fit_score(reference, duplicated) == pytest.approx(0.4082483)
     assert subtitle_anchor_fit_score(reference, normal) > subtitle_anchor_fit_score(
         reference,
         duplicated,
+    )
+
+
+def test_anchor_fit_score_allows_one_third_more_cues_without_count_penalty() -> None:
+    reference = [_cue(0.0, 3.0), _cue(4.0, 7.0), _cue(8.0, 11.0)]
+    candidate = [
+        _cue(0.0, 1.5),
+        _cue(1.5, 3.0),
+        _cue(4.0, 7.0),
+        _cue(8.0, 11.0),
+    ]
+
+    assert subtitle_anchor_fit_score(reference, candidate) == pytest.approx(1.0)
+
+
+def test_anchor_fit_score_mildly_penalizes_cues_beyond_deadband() -> None:
+    reference = [_cue(0.0, 3.0), _cue(4.0, 7.0), _cue(8.0, 11.0)]
+    candidate = [
+        _cue(0.0, 1.5),
+        _cue(1.5, 3.0),
+        _cue(4.0, 5.5),
+        _cue(5.5, 7.0),
+        _cue(8.0, 11.0),
+    ]
+
+    assert subtitle_anchor_fit_score(reference, candidate) == pytest.approx(
+        (4 / 5) ** 0.5
     )
 
 

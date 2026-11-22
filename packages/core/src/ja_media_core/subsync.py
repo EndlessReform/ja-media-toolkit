@@ -132,7 +132,7 @@ def subtitle_anchor_fit_score(
         _raw_active_duration_s(references),
         _raw_active_duration_s(candidates),
     )
-    count_precision = _precision_ratio(
+    count_precision = _cue_count_precision(
         _nonzero_cue_count(references),
         _nonzero_cue_count(candidates),
     )
@@ -143,6 +143,14 @@ def _precision_ratio(reference_value: float | int, candidate_value: float | int)
     if reference_value <= 0 or candidate_value <= reference_value:
         return 1.0
     return reference_value / candidate_value
+
+
+def _cue_count_precision(reference_count: int, candidate_count: int) -> float:
+    """Apply no count penalty until the candidate exceeds the anchor by one third."""
+
+    if reference_count <= 0 or candidate_count * 3 <= reference_count * 4:
+        return 1.0
+    return (reference_count * 4) / (candidate_count * 3)
 
 
 def _raw_active_duration_s(cues: Iterable[SubtitleCue]) -> float:

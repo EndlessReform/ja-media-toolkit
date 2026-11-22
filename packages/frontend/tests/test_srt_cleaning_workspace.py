@@ -29,6 +29,7 @@ def generate_args(workspace_root: Path, **overrides: object) -> argparse.Namespa
     values = {
         "anilist": "101",
         "anilist_file": None,
+        "source_manifest": None,
         "out": None,
         "workspace_root": str(workspace_root),
         "run_id": None,
@@ -38,6 +39,7 @@ def generate_args(workspace_root: Path, **overrides: object) -> argparse.Namespa
         "context_cues": 0,
         "group_prefix": None,
         "episode_one_only": False,
+        "flagged_windows_only": False,
         "max_requests_per_shard": 50_000,
         "max_bytes_per_shard": 200 * 1000 * 1000,
         "single_jsonl": False,
@@ -103,6 +105,56 @@ def test_generate_run_hash_preserves_current(
     assert (hashed_runs[0] / "batch-00001.jsonl").exists()
 
 
+def test_generate_can_reuse_frozen_sources_and_filter_flagged_windows(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    house_style = tmp_path / "house-style.md"
+    house_style.write_text("policy", encoding="utf-8")
+    source_path = tmp_path / "prior" / "source.srt"
+    source_path.parent.mkdir()
+    flagged_srt = SRT_TEXT.replace("一", "ハハハ")
+    source_path.write_text(flagged_srt, encoding="utf-8")
+    source = SourceDocument(
+        anilist_id=101,
+        subtitle_id="sub-one",
+        repo_path="Group/Test - 01.srt",
+        filename="Test - 01.srt",
+        source_path=source_path,
+    )
+    old_window = build_windows(
+        source,
+        flagged_srt,
+        window_size=1,
+        context_cues=0,
+        prompt_policy_sha256="a" * 64,
+    )[0]
+    old_manifest = tmp_path / "prior" / "manifest.jsonl"
+    write_jsonl(old_manifest, [build_manifest_row(old_window, model="old")])
+    output = tmp_path / "new" / "clean"
+    monkeypatch.setattr(commands, "HttpKitsunekkoSubtitlesClient", lambda: object())
+
+    run_generate(
+        generate_args(
+            tmp_path,
+            anilist=None,
+            out=str(output),
+            source_manifest=str(old_manifest),
+            flagged_windows_only=True,
+            window_size=1,
+        ),
+        house_style_path=house_style,
+        fetch_metadata=lambda _id: metadata_context(),
+        fetch_subtitle_inventory=lambda *_args, **_kwargs: pytest.fail("downloaded"),
+    )
+
+    generated_manifest = Path(f"{output}.manifest.jsonl")
+    rows = [json.loads(line) for line in generated_manifest.read_text().splitlines()]
+    assert len(rows) == 1
+    assert rows[0]["active_flags"] == [["repetitive_kana"]]
+    assert Path(rows[0]["local_cache_path"]).parent == Path(f"{output}.sources")
+
+
 def test_reconstruct_autodetects_workspace_paths(tmp_path: Path) -> None:
     run = run_for_anilist(101, workspace_root=tmp_path, run_id="current")
     run.run_dir.mkdir(parents=True)
@@ -121,8 +173,13 @@ def test_reconstruct_autodetects_workspace_paths(tmp_path: Path) -> None:
             result_row(
                 windows[0].custom_id,
                 [
-                    {"id": 1, "decision": "asis", "text": None, "category": None},
-                    {"id": 2, "decision": "edit", "text": "二 cleaned", "category": None},
+                    {"id": 1, "decision": "as_is", "text": None, "reasons": []},
+                    {
+                        "id": 2,
+                        "decision": "edit",
+                        "text": "二 cleaned",
+                        "reasons": ["other"],
+                    },
                 ],
             )
         ],

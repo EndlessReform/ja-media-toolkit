@@ -5,17 +5,33 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ja_media_core.transcripts import SubtitleCue
 
 
-PIPELINE_VERSION = "clean:v1"
+PIPELINE_VERSION = "clean:v2"
 OPENAI_CHAT_COMPLETIONS_URL = "/v1/chat/completions"
 DEFAULT_MAX_REQUESTS_PER_SHARD = 50_000
 DEFAULT_MAX_BYTES_PER_SHARD = 200 * 1000 * 1000
 
-DecisionKind = Literal["as_is", "asis", "edit", "remove", "escalate"]
+DecisionKind = Literal["as_is", "edit", "remove", "escalate"]
+CleanupReason = Literal[
+    "speaker_label",
+    "sign_caption",
+    "lyrics",
+    "sfx",
+    "paratext",
+    "bilingual",
+    "censored",
+    "multiple_speakers",
+    "punctuation",
+    "quotation_style",
+    "reading_gloss",
+    "formatting",
+    "typography",
+    "other",
+]
 
 
 class CleanDecision(BaseModel):
@@ -25,8 +41,34 @@ class CleanDecision(BaseModel):
 
     cue_id: int = Field(alias="id")
     decision: DecisionKind
-    text: str | None = None
-    category: str | None = None
+    text: str | None
+    reasons: list[CleanupReason]
+
+    @model_validator(mode="after")
+    def validate_decision_shape(self) -> CleanDecision:
+        """Reject combinations that cannot produce a useful cleanup record."""
+
+        if self.decision == "as_is":
+            if self.text is not None or self.reasons:
+                raise ValueError("as_is requires null text and no reasons")
+        elif self.decision == "edit":
+            if not self.text:
+                raise ValueError("edit requires nonempty text")
+            if not self.reasons:
+                raise ValueError("edit requires at least one reason")
+        elif self.decision == "remove":
+            if not self.reasons:
+                raise ValueError("remove requires at least one reason")
+            if "other" in self.reasons and not self.text:
+                raise ValueError(
+                    "remove with reason other requires an explanation in text"
+                )
+            if "other" not in self.reasons and self.text is not None:
+                raise ValueError("remove requires null text unless its reason is other")
+        elif self.decision == "escalate":
+            if not self.text:
+                raise ValueError("escalate requires an explanation in text")
+        return self
 
 
 class CleanWindowResult(BaseModel):
@@ -61,6 +103,8 @@ class CueWindow:
     source_sha256: str
     prompt_policy_sha256: str
     original_active_texts: tuple[str, ...] = ()
+    active_rules: tuple[tuple[str, ...], ...] = ()
+    active_flags: tuple[tuple[str, ...], ...] = ()
 
     @property
     def cue_start_index(self) -> int:

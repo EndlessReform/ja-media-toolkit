@@ -34,22 +34,72 @@ def load_review_workspace(run: SrtCleanRun) -> ReviewWorkspace:
     """Join manifest rows, source SRTs, decisions, and cleaned outputs."""
 
     run_manifest = _read_run_manifest(run)
-    manifest_rows = read_jsonl(run.manifest_path)
-    _validate_manifest_rows(run.manifest_path, manifest_rows)
-    decisions = _read_decisions(run.reconstruct_dir / "decisions.jsonl")
+    return _load_review_artifacts(
+        manifest_path=run.manifest_path,
+        reconstruct_dir=run.reconstruct_dir,
+        source_root=run.run_dir,
+        run_id=str(run_manifest.get("run_id", run.run_id)),
+        fallback_anilist_id=int(run_manifest.get("anilist_id", run.anilist_id)),
+    )
+
+
+def load_review_directory(reconstruct_dir: Path) -> ReviewWorkspace:
+    """Load an explicit reconstructed run, including a multi-series corpus."""
+
+    reconstruct_dir = reconstruct_dir.expanduser().resolve()
+    if not (reconstruct_dir / "decisions.jsonl").is_file():
+        raise FileNotFoundError(
+            f"Missing review decisions: {reconstruct_dir / 'decisions.jsonl'}"
+        )
+    root = reconstruct_dir.parent
+    candidates = sorted(root.glob("*.manifest.jsonl"))
+    if (reconstruct_dir / "manifest.jsonl").is_file():
+        manifest_path = reconstruct_dir / "manifest.jsonl"
+    elif (root / "manifest.jsonl").is_file():
+        manifest_path = root / "manifest.jsonl"
+    elif len(candidates) == 1:
+        manifest_path = candidates[0]
+    else:
+        raise FileNotFoundError(
+            f"Expected one manifest JSONL beside {reconstruct_dir}; found {len(candidates)}"
+        )
+    return _load_review_artifacts(
+        manifest_path=manifest_path,
+        reconstruct_dir=reconstruct_dir,
+        source_root=root,
+        run_id=reconstruct_dir.name.removesuffix(".reconstruct"),
+        fallback_anilist_id=0,
+    )
+
+
+def _load_review_artifacts(
+    *,
+    manifest_path: Path,
+    reconstruct_dir: Path,
+    source_root: Path,
+    run_id: str,
+    fallback_anilist_id: int,
+) -> ReviewWorkspace:
+    manifest_rows = read_jsonl(manifest_path)
+    _validate_manifest_rows(manifest_path, manifest_rows)
+    decisions = _read_decisions(reconstruct_dir / "decisions.jsonl")
     by_source: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in manifest_rows:
         by_source[source_key(row)].append(row)
 
     sources = [
-        _load_source(rows, decisions.get(key, {}), run.run_dir)
+        _load_source(rows, decisions.get(key, {}), source_root, reconstruct_dir)
         for key, rows in sorted(by_source.items())
     ]
+    loaded_sources = tuple(source for source in sources if source.cues)
+    first_anilist_id = (
+        loaded_sources[0].anilist_id if loaded_sources else fallback_anilist_id
+    )
     return ReviewWorkspace(
-        anilist_id=int(run_manifest.get("anilist_id", run.anilist_id)),
-        run_id=str(run_manifest.get("run_id", run.run_id)),
-        run_dir=run.run_dir,
-        sources=tuple(source for source in sources if source.cues),
+        anilist_id=first_anilist_id,
+        run_id=run_id,
+        run_dir=source_root,
+        sources=loaded_sources,
     )
 
 
@@ -94,9 +144,7 @@ def _read_decisions(path: Path) -> dict[str, dict[int, ReviewDecision]]:
         decisions[source][int(index)] = ReviewDecision(
             kind=str(row.get("decision") or "missing"),
             text=row.get("text") if isinstance(row.get("text"), str) else None,
-            category=(
-                row.get("category") if isinstance(row.get("category"), str) else None
-            ),
+            reasons=_decision_reasons(row),
             custom_id=str(row["custom_id"]) if row.get("custom_id") else None,
             local_id=int(row["id"]) if row.get("id") is not None else None,
             window_number=(
@@ -119,25 +167,42 @@ def _read_decisions(path: Path) -> dict[str, dict[int, ReviewDecision]]:
                 if isinstance(row.get("model_text_matches_mechanical"), bool)
                 else None
             ),
+            served_model=(
+                row.get("served_model")
+                if isinstance(row.get("served_model"), str)
+                else None
+            ),
         )
     return decisions
+
+
+def _decision_reasons(row: dict[str, Any]) -> tuple[str, ...]:
+    """Read v2 reasons while keeping old reconstructed runs reviewable."""
+
+    values = row.get("reasons")
+    if isinstance(values, list):
+        return tuple(value for value in values if isinstance(value, str))
+    category = row.get("category")
+    return (category,) if isinstance(category, str) else ()
 
 
 def _load_source(
     rows: list[dict[str, Any]],
     decisions: dict[int, ReviewDecision],
-    run_dir: Path,
+    source_root: Path,
+    reconstruct_dir: Path,
 ) -> ReviewSource:
     rows = sorted(rows, key=lambda row: int(row["window_number"]))
     first = rows[0]
-    source_path = _resolve_source_path(first, run_dir)
+    source_path = _resolve_source_path(first, source_root)
     cues = parse_srt(source_path.read_text(encoding="utf-8-sig"), source_path=source_path)
     filename = str(first.get("filename") or Path(str(first["repo_path"])).name)
-    cleaned_path = run_dir / "reconstruct" / "cleaned" / cleaned_srt_name(first)
+    cleaned_path = reconstruct_dir / "cleaned" / cleaned_srt_name(first)
     if not cleaned_path.exists():
         cleaned_path = None
     review_cues = tuple(_review_cue(cue, decisions.get(cue.index)) for cue in cues)
     return ReviewSource(
+        anilist_id=int(first["anilist_id"]),
         subtitle_id=str(first["subtitle_id"]),
         repo_path=str(first["repo_path"]),
         filename=filename,

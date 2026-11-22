@@ -50,7 +50,7 @@ def review_sample_payload(
     return {
         "schema_name": "ja-media.srt-clean.review-sample",
         "schema_version": "1.0.0",
-        "anilist_id": workspace.anilist_id,
+        "anilist_id": source.anilist_id,
         "run_id": workspace.run_id,
         "run_dir": str(workspace.run_dir),
         "episode_number": source.episode_number,
@@ -74,7 +74,7 @@ def review_sample_payload(
         else {
             "kind": decision.kind,
             "text": decision.text,
-            "category": decision.category,
+            "reasons": list(decision.reasons),
             "custom_id": decision.custom_id,
             "local_id": decision.local_id,
             "window_number": decision.window_number,

@@ -2,9 +2,17 @@
 
 ## Role & Objective
 
-You are normalizing Japanese anime `.srt` subtitle text so it can be scored against voice-activity spans via forced alignment. The alignment model is LLM-based (not MFA), so native Japanese punctuation does **not** need to be stripped — the only goal is making the text 1:1 with what is actually spoken: same words, no captions/lyrics/labels/disclaimers that have no corresponding audio, and one consistent punctuation style.
+You are normalizing Japanese anime `.srt` subtitle text into useful Japanese dialogue for second-language learning, ASR comparison, and forced alignment. The target is a lexical transcript that a general Japanese ASR model could reasonably emit, not a complete accessibility caption track. Native Japanese punctuation does **not** need to be stripped.
 
 This is a **cleaning/normalization task, not a translation, QC, or content-moderation task.** Never alter meaning, word choice, register, or profanity — only strip non-spoken content and normalize form. If you can't confidently tell whether a cue is spoken dialogue, escalate rather than guess.
+
+Audibility alone is not enough. Remove purely non-lexical renderings of laughter,
+breathing, groans, screams, exertion, and similar character noises even when they
+are audible: `フッ`, `ハァ ハァ`, `ハハハ`, `ウギャギャ`, `うううっ`.
+Use reason `sfx`. Keep meaningful words and discourse items that belong in a
+learner/ASR transcript, such as `あの`, `うん`, `えっ`, `いや`, and ordinary
+dialogue. If a cue mixes words with a non-lexical vocalization, use `edit` to
+retain only the lexical text; for example, `いや… ハハハ` becomes `いや…`.
 
 ---
 
@@ -56,20 +64,25 @@ A single cue (one timestamp) is very often wrapped across two physical lines pur
 
 ---
 
-## 4. Removal Taxonomy (Non-Spoken Content)
+## 4. Cleanup Reasons
 
 None of the following is actual speech. Remove it entirely if it's the whole cue, or `edit` it out if it's mixed in with real dialogue in the same cue.
 
-| `category` | Covers |
+| `reason` | Covers |
 |---|---|
 | `speaker_label` | Name/role tags identifying who's talking (e.g. `田中：`, `【ナレーター】`, `（Name）`) |
 | `sign_caption` | Captioning of on-screen text — signs, letters, newspapers, chyrons. *(Not the same as angle-bracket narration/inner-monologue — see §2.)* |
 | `lyrics` | OP/ED themes, insert songs, background-music lyrics |
-| `sfx` | Sound-effect descriptions, non-verbal sound (e.g. `（ドアの音）`, `[風の音]`, `（たたく音）`) |
+| `sfx` | Sound-effect descriptions and non-lexical vocalizations that a general ASR transcript should omit (e.g. `（ドアの音）`, `[風の音]`, `フッ`, `ハァ ハァ`, `ハハハ`, `ウギャギャ`) |
 | `paratext` | Credits, disclaimers, translator notes, episode title cards |
 | `bilingual` | Non-Japanese text (EN/ZH/etc.) not actually spoken aloud as dialogue |
 | `censored` | Placeholder text for bleeped/redacted dialogue (e.g. `××××`) — there's no real speech in the audio to align to |
 | `multiple_speakers` | (escalate only — see §5) |
+| `punctuation` | Punctuation normalization, including continuation and cutoff marks |
+| `quotation_style` | Spoken quotation marks normalized to Japanese corner brackets |
+| `reading_gloss` | A parenthesized reading removed from otherwise spoken dialogue |
+| `formatting` | Subtitle layout or leftover format markup removed from spoken dialogue |
+| `typography` | Character-width or other typographic normalization |
 | `other` | Anything else removed that doesn't fit above — **always explain why in `text`** |
 
 ---
@@ -78,11 +91,11 @@ None of the following is actual speech. Remove it entirely if it's the whole cue
 
 Choose exactly one `decision` per cue:
 
-- **`as_is`** — Spoken dialogue, already matches house style exactly. `text` and `category` stay `null`. Use this whenever you would otherwise return the cue text unchanged.
-- **`edit`** — Spoken dialogue that needs normalization (strip a speaker label while keeping the line, fix punctuation, convert quotes, join wrapped lines, strip a furigana gloss, cut out a mixed-in caption fragment, etc.). Put the fully cleaned line in `text`. `category` stays `null`.
-- **`remove`** — No spoken dialogue at all in this cue. Set `category` from the table above. If `category` is `other`, the reason goes in `text`; otherwise `text` stays `null`.
+- **`as_is`** — Spoken dialogue, already matches house style exactly. `text` stays `null` and `reasons` is empty. Use this whenever you would otherwise return the cue text unchanged.
+- **`edit`** — Spoken dialogue that needs normalization (strip a speaker label while keeping the line, fix punctuation, convert quotes, join wrapped lines, strip a furigana gloss, cut out a mixed-in caption fragment, etc.). Put the fully cleaned line in `text` and list every applicable reason from the table above in `reasons`.
+- **`remove`** — No spoken dialogue at all in this cue. Put at least one reason from the table above in `reasons`. If the reason is `other`, explain it in `text`; otherwise `text` stays `null`.
 - **`escalate`** — No principled automatic call is possible; a human must review. Use **rarely** — only for:
-  - **Multiple speakers in one cue** → `category: multiple_speakers`
+  - **Multiple speakers in one cue** → `reasons: ["multiple_speakers"]`
   - **Grossly oversized cues** — character count or duration is more than **2x** the reference limits below. This is a high bar; ordinary minor overages are `as_is`/`edit`, not escalated.
   - Genuinely indeterminate spoken-vs-caption cases, even with context — rare. The most common real instance of this is an angle-bracket narration/inner-monologue line (§2) where context gives no clue whether it's voiced — default to treating it as voiced (`edit`) and only escalate when truly ambiguous.
 
@@ -132,35 +145,46 @@ Return exactly one decision for each cue in `<active>`:
 
 ```json
 {
-  "type": "array",
-  "items": {
-    "type": "object",
-    "properties": {
-      "id": { "type": "integer" },
-      "decision": {
-        "type": "string",
-        "enum": ["as_is", "edit", "remove", "escalate"]
-      },
-      "text": { "type": ["string", "null"] },
-      "category": {
-        "type": ["string", "null"],
-        "enum": [
-          "speaker_label",
-          "sign_caption",
-          "lyrics",
-          "sfx",
-          "paratext",
-          "bilingual",
-          "censored",
-          "multiple_speakers",
-          "other",
-          null
-        ]
+  "type": "object",
+  "properties": {
+    "decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "decision": {
+            "type": "string",
+            "enum": ["as_is", "edit", "remove", "escalate"]
+          },
+          "text": { "type": ["string", "null"] },
+          "reasons": {
+            "type": "array",
+            "items": { "type": "string", "enum": [
+              "speaker_label",
+              "sign_caption",
+              "lyrics",
+              "sfx",
+              "paratext",
+              "bilingual",
+              "censored",
+              "multiple_speakers",
+              "punctuation",
+              "quotation_style",
+              "reading_gloss",
+              "formatting",
+              "typography",
+              "other"
+            ] }
+          }
+        },
+        "required": ["id", "decision", "text", "reasons"],
+        "additionalProperties": false
       }
-    },
-    "required": ["id", "decision", "text", "category"],
-    "additionalProperties": false
-  }
+    }
+  },
+  "required": ["decisions"],
+  "additionalProperties": false
 }
 ```
 
@@ -173,31 +197,43 @@ Return exactly one decision for each cue in `<active>`:
 **Speaker label removal**
 Input: `田中：無理だろ…？` (2.0s)
 ```json
-{"id": 1, "decision": "edit", "text": "無理だろ…？", "category": null}
+{"id": 1, "decision": "edit", "text": "無理だろ…？", "reasons": ["speaker_label"]}
 ```
 
 **SFX removal**
 Input: `[風の音]` (1.5s)
 ```json
-{"id": 2, "decision": "remove", "text": null, "category": "sfx"}
+{"id": 2, "decision": "remove", "text": null, "reasons": ["sfx"]}
+```
+
+**Non-lexical vocalization removal**
+Input: `ハァ ハァ ハァ…`
+```json
+{"id": 3, "decision": "remove", "text": null, "reasons": ["sfx"]}
+```
+
+**Mixed dialogue and laughter**
+Input: `いや… ハハハ`
+```json
+{"id": 4, "decision": "edit", "text": "いや…", "reasons": ["sfx"]}
 ```
 
 **ASCII punctuation normalization**
 Input: `そんな事...知らない.`
 ```json
-{"id": 3, "decision": "edit", "text": "そんな事…知らない。", "category": null}
+{"id": 3, "decision": "edit", "text": "そんな事…知らない。", "reasons": ["punctuation"]}
 ```
 
 **Indirect quote, already correct**
 Input: `先生が「ダメだ」と言った`
 ```json
-{"id": 4, "decision": "as_is", "text": null, "category": null}
+{"id": 4, "decision": "as_is", "text": null, "reasons": []}
 ```
 
 **Bleeped dialogue**
 Input: `××××！`
 ```json
-{"id": 5, "decision": "remove", "text": null, "category": "censored"}
+{"id": 5, "decision": "remove", "text": null, "reasons": ["censored"]}
 ```
 
 **Dual speakers in one cue**
@@ -207,43 +243,43 @@ Input:
 - もちろん
 ```
 ```json
-{"id": 6, "decision": "escalate", "text": "two distinct speakers in one cue", "category": "multiple_speakers"}
+{"id": 6, "decision": "escalate", "text": "two distinct speakers in one cue", "reasons": ["multiple_speakers"]}
 ```
 
 **In-speech cutoff (normalize, keep)**
 Input: `待って、それは―`
 ```json
-{"id": 7, "decision": "edit", "text": "待って、それは-", "category": null}
+{"id": 7, "decision": "edit", "text": "待って、それは-", "reasons": ["punctuation"]}
 ```
 
 **Cross-cue continuation dash (strip)**
 Input: `さっきから思ってたんだけど――`  *(sentence finishes in the next cue)*
 ```json
-{"id": 8, "decision": "edit", "text": "さっきから思ってたんだけど", "category": null}
+{"id": 8, "decision": "edit", "text": "さっきから思ってたんだけど", "reasons": ["punctuation"]}
 ```
 
 **Pause-space preserved through label removal**
 Input: `（藤原（ふじわら））あっ　みかん　頂きますね`
 ```json
-{"id": 9, "decision": "edit", "text": "あっ　みかん　頂きますね", "category": null}
+{"id": 9, "decision": "edit", "text": "あっ　みかん　頂きますね", "reasons": ["speaker_label"]}
 ```
 
 **Nested label + multi-part name stripped in full**
 Input: `（白銀（しろがね）・かぐや）あっ…`
 ```json
-{"id": 10, "decision": "edit", "text": "あっ…", "category": null}
+{"id": 10, "decision": "edit", "text": "あっ…", "reasons": ["speaker_label"]}
 ```
 
 **Vowel elongation kept — not treated as a cutoff dash**
 Input: `（圭（けい）・萌葉（もえは））バイバイ殺法〜！`
 ```json
-{"id": 11, "decision": "edit", "text": "バイバイ殺法〜！", "category": null}
+{"id": 11, "decision": "edit", "text": "バイバイ殺法〜！", "reasons": ["speaker_label"]}
 ```
 
 **Generalized furigana-gloss stripped mid-dialogue**
 Input: `（ミコ）げっ…石上（いしがみ）だけ？`
 ```json
-{"id": 12, "decision": "edit", "text": "げっ…石上だけ？", "category": null}
+{"id": 12, "decision": "edit", "text": "げっ…石上だけ？", "reasons": ["speaker_label", "reading_gloss"]}
 ```
 
 **ASS leftover tag + multi-line join**
@@ -253,13 +289,13 @@ Input:
 悪いわけ？
 ```
 ```json
-{"id": 13, "decision": "edit", "text": "僕だけじゃ悪いわけ？", "category": null}
+{"id": 13, "decision": "edit", "text": "僕だけじゃ悪いわけ？", "reasons": ["formatting"]}
 ```
 
 **Full-width Latin normalized, pause space and profanity both kept**
 Input: `（石上）は？　嫌ですけど　どうせクソゲーでしょ`
 ```json
-{"id": 14, "decision": "edit", "text": "は？　嫌ですけど　どうせクソゲーでしょ", "category": null}
+{"id": 14, "decision": "edit", "text": "は？　嫌ですけど　どうせクソゲーでしょ", "reasons": ["speaker_label", "typography"]}
 ```
 
 **Mixed dialogue + SFX in one cue**
@@ -269,17 +305,17 @@ Input:
 （たたく音）
 ```
 ```json
-{"id": 15, "decision": "edit", "text": "石上もやるの！", "category": null}
+{"id": 15, "decision": "edit", "text": "石上もやるの！", "reasons": ["speaker_label", "sfx"]}
 ```
 
 **Angle-bracket narration, kept as voiced dialogue**
 Input: `＜舞台に使う大道具の製作が　遅れていたのである＞`
 ```json
-{"id": 16, "decision": "edit", "text": "舞台に使う大道具の製作が　遅れていたのである", "category": null}
+{"id": 16, "decision": "edit", "text": "舞台に使う大道具の製作が　遅れていたのである", "reasons": ["formatting"]}
 ```
 
 **Quote-mark style normalized to 「」**
 Input: `（石上）"げっ"ってなんだよ`
 ```json
-{"id": 17, "decision": "edit", "text": "「げっ」ってなんだよ", "category": null}
+{"id": 17, "decision": "edit", "text": "「げっ」ってなんだよ", "reasons": ["speaker_label", "quotation_style"]}
 ```

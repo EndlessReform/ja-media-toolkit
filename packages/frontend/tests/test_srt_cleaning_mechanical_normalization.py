@@ -58,12 +58,44 @@ def test_batch_prompt_uses_as_is_and_model_visible_baseline(tmp_path: Path) -> N
     assert "王塚真唯像を➡" not in prompt
     assert "Use decision as_is" in prompt
     assert "as_is" in enum
-    assert "asis" in enum
+    assert "asis" not in enum
     assert manifest["active_original_texts"][0] == "私は求められている\n王塚真唯像を➡"
     assert manifest["active_texts"][0] == "私は求められている王塚真唯像を"
 
 
-def test_reconstruct_keeps_model_noop_edit_visible(tmp_path: Path) -> None:
+def test_batch_prompt_and_manifest_include_deterministic_preclean(
+    tmp_path: Path,
+) -> None:
+    text = SRT_TEXT.replace(
+        "私は求められている\n王塚真唯像を➡", "（先生）今日は２人･一緒だ―"
+    )
+    source = source_doc(tmp_path / "source.srt")
+    source.source_path.write_text(text, encoding="utf-8")
+    window = build_windows(
+        source,
+        text,
+        window_size=2,
+        context_cues=0,
+        prompt_policy_sha256="a" * 64,
+    )[0]
+    row = build_batch_row(
+        window,
+        model="test-model",
+        policy_text="policy",
+        series_context="AniList ID: 101",
+    )
+    manifest = build_manifest_row(window, model="test-model")
+
+    assert "今日は2人・一緒だ" in row["body"]["messages"][1]["content"]
+    assert manifest["active_rules"][0] == [
+        "strip_parenthesized_span",
+        "strip_terminal_horizontal_bar",
+        "halfwidth_alphanumeric",
+        "normalize_middle_dot",
+    ]
+
+
+def test_reconstruct_normalizes_model_noop_edit_to_as_is(tmp_path: Path) -> None:
     source = source_doc(tmp_path / "source.srt")
     window = build_windows(
         source,
@@ -81,12 +113,12 @@ def test_reconstruct_keeps_model_noop_edit_visible(tmp_path: Path) -> None:
             result_row(
                 window.custom_id,
                 [
-                    {"id": 1, "decision": "as_is", "text": None, "category": None},
+                    {"id": 1, "decision": "as_is", "text": None, "reasons": []},
                     {
                         "id": 2,
                         "decision": "edit",
                         "text": "こんな訳のわからないことを…。",
-                        "category": None,
+                        "reasons": ["punctuation"],
                     },
                 ],
             )
@@ -100,16 +132,72 @@ def test_reconstruct_keeps_model_noop_edit_visible(tmp_path: Path) -> None:
         archive=False,
     )
 
-    cleaned = next((tmp_path / "out" / "cleaned").glob("*.cleaned.srt"))
     decisions = [
         json.loads(line)
         for line in summary.decisions_path.read_text(encoding="utf-8").splitlines()
     ]
-    assert "私は求められている王塚真唯像を" in cleaned.read_text(encoding="utf-8")
-    assert decisions[0]["decision"] == "as_is"
-    assert decisions[0]["mechanically_changed"] is True
-    assert decisions[1]["decision"] == "edit"
-    assert decisions[1]["model_text_matches_mechanical"] is True
+    assert summary.cleaned_srts == 1
+    assert summary.errors == 0
+    assert decisions[1]["decision"] == "as_is"
+    assert decisions[1]["text"] is None
+    assert decisions[1]["reasons"] == []
+
+
+def test_reconstruct_recovers_noop_edit_from_saved_validation_attempt(
+    tmp_path: Path,
+) -> None:
+    source = source_doc(tmp_path / "source.srt")
+    window = build_windows(
+        source,
+        SRT_TEXT,
+        window_size=2,
+        context_cues=0,
+        prompt_policy_sha256="a" * 64,
+    )[0]
+    manifest_path = tmp_path / "manifest.jsonl"
+    result_path = tmp_path / "results.jsonl"
+    write_jsonl(manifest_path, [build_manifest_row(window, model="test")])
+    saved = result_row(
+        window.custom_id,
+        [
+            {"id": 1, "decision": "as_is", "text": None, "reasons": []},
+            {
+                "id": 2,
+                "decision": "edit",
+                "text": "こんな訳のわからないことを…。",
+                "reasons": ["punctuation"],
+            },
+        ],
+    )
+    write_jsonl(
+        result_path,
+        [
+            {
+                "custom_id": window.custom_id,
+                "error": {
+                    "error_kind": "validation_retry_exhausted",
+                    "message": "edit did not change text",
+                    "attempts": [
+                        {
+                            "error_kind": "decision_validation_error",
+                            "response": saved["response"],
+                        }
+                    ],
+                },
+            }
+        ],
+    )
+
+    summary = reconstruct_from_batch(
+        batch_output_paths=[result_path],
+        manifest_path=manifest_path,
+        output_dir=tmp_path / "out",
+        archive=False,
+    )
+
+    assert summary.cleaned_srts == 1
+    assert summary.skipped_sources == 0
+    assert summary.errors == 0
 
 
 def source_doc(path: Path) -> SourceDocument:

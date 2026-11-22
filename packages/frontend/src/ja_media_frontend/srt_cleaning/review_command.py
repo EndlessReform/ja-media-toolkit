@@ -9,7 +9,10 @@ from rich.console import Console
 
 from ja_media_core.anilist_search import HttpAniListSearchClient
 from ja_media_frontend.srt_cleaning.review_audio import load_review_audio
-from ja_media_frontend.srt_cleaning.review_loader import load_review_workspace
+from ja_media_frontend.srt_cleaning.review_loader import (
+    load_review_directory,
+    load_review_workspace,
+)
 from ja_media_frontend.srt_cleaning.review_tui import SrtCleaningReviewApp
 from ja_media_frontend.srt_cleaning.workspace import run_for_anilist
 
@@ -21,28 +24,39 @@ def run_review(args: argparse.Namespace) -> None:
     """Resolve a workspace-backed cleaning run and launch the review TUI."""
 
     load_dotenv()
-    workspace_root = Path(args.workspace_root).expanduser() if args.workspace_root else None
-    run = run_for_anilist(args.anilist, workspace_root=workspace_root, run_id=args.run_id)
-    if not run.manifest_path.exists():
-        raise SystemExit(f"Missing review manifest: {run.manifest_path}")
-    if not run.reconstruct_dir.exists():
-        raise SystemExit(f"Missing reconstruct output: {run.reconstruct_dir}")
-
-    workspace = load_review_workspace(run)
+    if args.run_dir:
+        workspace = load_review_directory(Path(args.run_dir))
+    else:
+        workspace_root = (
+            Path(args.workspace_root).expanduser() if args.workspace_root else None
+        )
+        run = run_for_anilist(
+            args.anilist,
+            workspace_root=workspace_root,
+            run_id=args.run_id,
+        )
+        if not run.manifest_path.exists():
+            raise SystemExit(f"Missing review manifest: {run.manifest_path}")
+        if not run.reconstruct_dir.exists():
+            raise SystemExit(f"Missing reconstruct output: {run.reconstruct_dir}")
+        workspace = load_review_workspace(run)
     if not workspace.sources:
-        raise SystemExit(f"No reviewable source SRTs found in {run.run_dir}")
+        raise SystemExit(f"No reviewable source SRTs found in {workspace.run_dir}")
 
-    episode = args.episode or 1
+    first_key = workspace.episode_keys[0]
+    initial_anilist_id = args.anilist or first_key[0]
+    episode = args.episode or first_key[1]
     manual_audio = Path(args.audio).expanduser().resolve() if args.audio else None
     initial_audio = load_review_audio(
-        anilist_id=workspace.anilist_id,
+        anilist_id=initial_anilist_id,
         episode_number=episode,
         manual_audio=manual_audio,
         audio_profile=args.audio_profile,
     )
     app = SrtCleaningReviewApp(
         workspace=workspace,
-        series_label=series_label(workspace.anilist_id),
+        series_label=series_label(initial_anilist_id),
+        initial_anilist_id=initial_anilist_id,
         initial_episode=episode,
         audio_profile=args.audio_profile,
         manual_audio=manual_audio,

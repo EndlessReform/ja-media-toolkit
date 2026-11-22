@@ -4,29 +4,27 @@ import asyncio
 from pathlib import Path
 from unittest.mock import patch
 
-from ja_media_frontend.srt_cleaning.batch import build_manifest_row, build_windows, write_jsonl
-from ja_media_frontend.srt_cleaning.contracts import SourceDocument
+from ja_media_frontend.srt_cleaning.batch import read_jsonl, write_jsonl
+from ja_media_frontend.srt_cleaning.cli import build_parser
 from ja_media_frontend.srt_cleaning.review_audio import ReviewAudio
 from ja_media_frontend.srt_cleaning.review_clipboard import review_sample_payload
-from ja_media_frontend.srt_cleaning.review_loader import load_review_workspace
+from ja_media_frontend.srt_cleaning.review_dialogs import ReasonStatsModal, RuleStatsModal
+from ja_media_frontend.srt_cleaning.review_formatting import (
+    colored_model_diff,
+    timeline_styles,
+)
+from ja_media_frontend.srt_cleaning.review_loader import (
+    load_review_directory,
+    load_review_workspace,
+)
+from ja_media_frontend.srt_cleaning.review_reason_pivot import (
+    ReasonPivotExplorer,
+    build_reason_pivot,
+)
 from ja_media_frontend.srt_cleaning.review_tui import SrtCleaningReviewApp
-from ja_media_frontend.srt_cleaning.source_rebuild import cleaned_srt_name
-from ja_media_frontend.srt_cleaning.workspace import run_for_anilist, write_run_manifest
-
-
-EPISODE_ONE = """1
-00:00:01,000 --> 00:00:02,000
-一
-
-2
-00:00:02,000 --> 00:00:03,000
-二
-"""
-
-EPISODE_TWO = """1
-00:00:04,000 --> 00:00:05,000
-三
-"""
+from ja_media_frontend.srt_cleaning.review_stats import summarize_reasons
+from srt_cleaning_review_fixtures import prepared_run
+from textual.widgets import ContentSwitcher
 
 
 def test_review_workspace_joins_manifest_sources_and_decisions(tmp_path: Path) -> None:
@@ -40,6 +38,7 @@ def test_review_workspace_joins_manifest_sources_and_decisions(tmp_path: Path) -
     assert source.cleaned_path is not None
     assert source.cues[0].decision is not None
     assert source.cues[0].decision.kind == "edit"
+    assert source.cues[0].decision.served_model == "test/model"
     assert source.cues[0].display_text == "一 cleaned"
     assert source.cues[1].decision is not None
     assert source.cues[1].decision.kind == "remove"
@@ -54,6 +53,50 @@ def test_review_workspace_resolves_sources_from_current_run_dir(
 
     assert workspace.sources[0].source_path.is_file()
     assert workspace.sources[0].source_path.parent == run.sources_dir
+
+
+def test_review_formatting_marks_changes_and_alternates_decision_shades(
+    tmp_path: Path,
+) -> None:
+    workspace = load_review_workspace(prepared_run(tmp_path))
+    cue = workspace.sources[0].cues[0]
+    removed_cue = workspace.sources[0].cues[1]
+
+    before, after = colored_model_diff(cue).renderables
+    _removed_before, removed_after = colored_model_diff(removed_cue).renderables
+
+    assert before.plain == "normalized input\n一"
+    assert after.plain == "cleaned diff\n一 cleaned"
+    assert any("bright_green" in str(span.style) for span in after.spans)
+    assert any("red" in str(span.style) for span in removed_after.spans)
+    assert timeline_styles((cue, cue)) == ("#f59f00", "#ffd43b")
+
+
+def test_review_reason_stats_split_edit_and_remove_counts(tmp_path: Path) -> None:
+    workspace = load_review_workspace(prepared_run(tmp_path))
+
+    stats = summarize_reasons(workspace.sources)
+
+    assert (stats.cue_count, stats.edits, stats.removes) == (3, 1, 1)
+    assert [
+        (row.reason, row.edits, row.removes) for row in stats.reasons
+    ] == [("noise", 0, 1), ("ocr", 1, 0)]
+
+
+def test_reason_pivot_counts_and_percent_denominator(tmp_path: Path) -> None:
+    workspace = load_review_workspace(prepared_run(tmp_path))
+    pivot = build_reason_pivot(workspace)
+
+    assert pivot.changed_cues == 2
+    assert [row.reason for row in pivot.rows] == ["noise", "ocr"]
+    assert [len(row.matches) for row in pivot.rows] == [1, 1]
+    assert (pivot.rows[0].edits, pivot.rows[0].removes) == (0, 1)
+    assert (pivot.rows[1].edits, pivot.rows[1].removes) == (1, 0)
+    assert (pivot.rows[0].series, pivot.rows[0].episodes, pivot.rows[0].sources) == (
+        1,
+        1,
+        1,
+    )
 
 
 def test_review_tui_pages_between_discovered_episodes(tmp_path: Path) -> None:
@@ -78,6 +121,152 @@ def test_review_tui_pages_between_discovered_episodes(tmp_path: Path) -> None:
 
     assert episode == 2
     assert cue_text == "三"
+
+
+def test_review_tui_opens_reason_stats_modal(tmp_path: Path) -> None:
+    async def run_app() -> tuple[type, type]:
+        run = prepared_run(tmp_path)
+        workspace = load_review_workspace(run)
+        app = SrtCleaningReviewApp(
+            workspace=workspace,
+            series_label="Test Series",
+            initial_episode=1,
+            audio_profile="portable-aac-v1",
+            manual_audio=None,
+            initial_audio=ReviewAudio(None, "audio unavailable"),
+            audio_loader=lambda _episode: ReviewAudio(None, "audio unavailable"),
+        )
+        async with app.run_test() as pilot:
+            await pilot.press("s")
+            opened = type(app.screen)
+            await pilot.press("s")
+            return opened, type(app.screen)
+
+    opened, closed = asyncio.run(run_app())
+
+    assert opened is ReasonStatsModal
+    assert closed is not ReasonStatsModal
+
+
+def test_review_tui_toggles_rule_overlay_and_opens_scores(tmp_path: Path) -> None:
+    async def run_app() -> tuple[bool, str, type]:
+        workspace = load_review_workspace(prepared_run(tmp_path))
+        app = SrtCleaningReviewApp(
+            workspace=workspace,
+            series_label="Test Series",
+            initial_episode=1,
+            audio_profile="portable-aac-v1",
+            manual_audio=None,
+            initial_audio=ReviewAudio(None, "audio unavailable"),
+            audio_loader=lambda _episode: ReviewAudio(None, "audio unavailable"),
+        )
+        async with app.run_test() as pilot:
+            await pilot.press("r")
+            panel_title = app.render_diff().title
+            await pilot.press("R")
+            return app.rule_overlay, panel_title, type(app.screen)
+
+    overlay, panel_title, screen = asyncio.run(run_app())
+
+    assert overlay
+    assert panel_title == "Original vs cleaned — rule overlay"
+    assert screen is RuleStatsModal
+
+
+def test_review_tui_jumps_forward_and_backward_between_flags(tmp_path: Path) -> None:
+    async def run_app() -> tuple[int, int]:
+        workspace = load_review_workspace(prepared_run(tmp_path))
+        app = SrtCleaningReviewApp(
+            workspace=workspace,
+            series_label="Test Series",
+            initial_episode=1,
+            audio_profile="portable-aac-v1",
+            manual_audio=None,
+            initial_audio=ReviewAudio(None, "audio unavailable"),
+            audio_loader=lambda _episode: ReviewAudio(None, "audio unavailable"),
+        )
+        with patch(
+            "ja_media_frontend.srt_cleaning.review_rule_overlay.cue_has_candidate_flags",
+            return_value=True,
+        ):
+            async with app.run_test() as pilot:
+                await pilot.press("f")
+                forward = app.cue_index(app.source)
+                await pilot.press("F")
+                return forward, app.cue_index(app.source)
+
+    assert asyncio.run(run_app()) == (1, 0)
+
+
+def test_review_tui_switches_f5_f6_tabs(tmp_path: Path) -> None:
+    async def run_app() -> tuple[str | None, str | None, int, int, str | None]:
+        run = prepared_run(tmp_path)
+        workspace = load_review_workspace(run)
+        app = SrtCleaningReviewApp(
+            workspace=workspace,
+            series_label="Test Series",
+            initial_episode=1,
+            audio_profile="portable-aac-v1",
+            manual_audio=None,
+            initial_audio=ReviewAudio(None, "audio unavailable"),
+            audio_loader=lambda _episode: ReviewAudio(None, "audio unavailable"),
+        )
+        async with app.run_test() as pilot:
+            switcher = app.query_one("#review-views", ContentSwitcher)
+            initial = switcher.current
+            await pilot.press("f6")
+            pivot = switcher.current
+            detail_height = app.query_one("#reason-pivot-detail").region.height
+            await pilot.press("j")
+            row_index = app.query_one("#reason-pivot", ReasonPivotExplorer).row_index
+            await pilot.press("f5")
+            return initial, pivot, detail_height, row_index, switcher.current
+
+    assert asyncio.run(run_app()) == (
+        "cue-review",
+        "reason-pivot",
+        10,
+        1,
+        "cue-review",
+    )
+
+
+def test_review_directory_and_tui_cross_series_boundaries(tmp_path: Path) -> None:
+    async def run_app() -> tuple[tuple[tuple[int, int], ...], int, str, int | None]:
+        workspace = load_review_directory(prepared_corpus_review(tmp_path))
+        app = SrtCleaningReviewApp(
+            workspace=workspace,
+            series_label="First Series",
+            initial_anilist_id=101,
+            initial_episode=1,
+            audio_profile="portable-aac-v1",
+            manual_audio=None,
+            initial_audio=ReviewAudio(None, "audio unavailable"),
+            audio_loader=lambda _episode: ReviewAudio(None, "audio unavailable"),
+        )
+        async with app.run_test() as pilot:
+            await pilot.press("]")
+            cue = app.current_cue
+            return (
+                workspace.episode_keys,
+                app.anilist_id,
+                cue.original.text if cue else "",
+                app.query_one("#episodes").index,
+            )
+
+    keys, anilist_id, cue_text, rail_index = asyncio.run(run_app())
+
+    assert keys == ((101, 1), (202, 2))
+    assert anilist_id == 202
+    assert cue_text == "三"
+    assert rail_index == 1
+
+
+def test_review_parser_accepts_reconstructed_run_directory() -> None:
+    args = build_parser().parse_args(["review", "--run-dir", "/tmp/reconstruct"])
+
+    assert args.run_dir == "/tmp/reconstruct"
+    assert args.anilist is None
 
 
 def test_review_sample_payload_identifies_source_window_and_text(
@@ -128,94 +317,43 @@ def test_review_tui_c_copies_current_sample(tmp_path: Path) -> None:
     assert status == "copied review sample"
 
 
-def prepared_run(tmp_path: Path, *, stale_manifest_source_path: bool = False):
-    run = run_for_anilist(101, workspace_root=tmp_path, run_id="current")
-    run.run_dir.mkdir(parents=True)
-    first = source_doc(run.sources_dir / "episode-one.srt", "sub-one", EPISODE_ONE)
-    second = source_doc(run.sources_dir / "episode-two.srt", "sub-two", EPISODE_TWO)
-    first_windows = build_windows(
-        first,
-        EPISODE_ONE,
-        window_size=2,
-        context_cues=0,
-        prompt_policy_sha256="a" * 64,
-    )
-    second_windows = build_windows(
-        second,
-        EPISODE_TWO,
-        window_size=2,
-        context_cues=0,
-        prompt_policy_sha256="a" * 64,
-    )
-    manifests = [
-        *(build_manifest_row(window, model="test") for window in first_windows),
-        *(build_manifest_row(window, model="test") for window in second_windows),
-    ]
-    if stale_manifest_source_path:
-        for manifest in manifests:
-            manifest["local_cache_path"] = (
-                f"/home/ritsuko/elsewhere/sources/{Path(str(manifest['local_cache_path'])).name}"
-            )
-    write_jsonl(run.manifest_path, manifests)
-    write_run_manifest(
-        run,
-        batch_shards=[run.run_dir / "batch-00001.jsonl"],
-        model="test",
-        pipeline_version="clean:v1",
-        prompt_policy_sha256="a" * 64,
-    )
-    write_jsonl(
-        run.reconstruct_dir / "decisions.jsonl",
-        [
-            decision_row(manifests[0], 1, 1, "edit", "一 cleaned", "ocr"),
-            decision_row(manifests[0], 2, 2, "remove", None, "noise"),
-            decision_row(manifests[1], 1, 1, "asis", None, None),
-        ],
-    )
-    clean_dir = run.reconstruct_dir / "cleaned"
-    clean_dir.mkdir(parents=True)
-    (clean_dir / cleaned_srt_name(manifests[0])).write_text("", encoding="utf-8")
-    return run
+def test_review_tui_jumps_between_non_accept_cues(tmp_path: Path) -> None:
+    async def run_app() -> tuple[int, int]:
+        run = prepared_run(tmp_path)
+        workspace = load_review_workspace(run)
+        app = SrtCleaningReviewApp(
+            workspace=workspace,
+            series_label="Test Series",
+            initial_episode=1,
+            audio_profile="portable-aac-v1",
+            manual_audio=None,
+            initial_audio=ReviewAudio(None, "audio unavailable"),
+            audio_loader=lambda _episode: ReviewAudio(None, "audio unavailable"),
+        )
+        async with app.run_test() as pilot:
+            await pilot.press("n")
+            next_index = app.current_cue.original.index
+            await pilot.press("N")
+            previous_index = app.current_cue.original.index
+            return next_index, previous_index
+
+    assert asyncio.run(run_app()) == (2, 1)
 
 
-def source_doc(path: Path, subtitle_id: str, text: str) -> SourceDocument:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-    episode = "01" if subtitle_id == "sub-one" else "02"
-    return SourceDocument(
-        anilist_id=101,
-        subtitle_id=subtitle_id,
-        repo_path=f"Group/Test - {episode}.srt",
-        filename=f"Test - {episode}.srt",
-        source_path=path,
-    )
-
-
-def decision_row(
-    manifest: dict[str, object],
-    local_id: int,
-    index: int,
-    decision: str,
-    text: str | None,
-    category: str | None,
-) -> dict[str, object]:
-    return {
-        "custom_id": manifest["custom_id"],
-        "source_key": (
-            f"{manifest['anilist_id']}:{manifest['subtitle_id']}:"
-            f"{manifest['source_sha256']}"
-        ),
-        "anilist_id": manifest["anilist_id"],
-        "subtitle_id": manifest["subtitle_id"],
-        "repo_path": manifest["repo_path"],
-        "window_number": manifest["window_number"],
-        "result_position": local_id,
-        "id": local_id,
-        "index": index,
-        "decision": decision,
-        "text": text,
-        "category": category,
-        "within_active_span": True,
-        "compliant": True,
-        "noncompliant_reasons": [],
-    }
+def prepared_corpus_review(tmp_path: Path) -> Path:
+    run = prepared_run(tmp_path)
+    manifest_rows = read_jsonl(run.manifest_path)
+    decision_rows = read_jsonl(run.reconstruct_dir / "decisions.jsonl")
+    for row in manifest_rows:
+        if row["subtitle_id"] == "sub-two":
+            row["anilist_id"] = 202
+    for row in decision_rows:
+        if row["subtitle_id"] == "sub-two":
+            row["anilist_id"] = 202
+            source_hash = str(row["source_key"]).split(":", 2)[2]
+            row["source_key"] = f"202:{row['subtitle_id']}:{source_hash}"
+    corpus_root = tmp_path / "corpus"
+    reconstruct_dir = corpus_root / "luna.reconstruct"
+    write_jsonl(corpus_root / "clean.manifest.jsonl", manifest_rows)
+    write_jsonl(reconstruct_dir / "decisions.jsonl", decision_rows)
+    return reconstruct_dir

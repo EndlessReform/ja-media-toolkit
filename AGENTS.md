@@ -90,6 +90,18 @@ why another choice better suits the user's needs. The user is learning parts of 
 define framework concepts in terms of this media pipeline before relying on
 framework jargon.
 
+### Recommendation language
+
+Do not use first-person declarations such as `I'd`, `I would`, `I wouldn't`,
+`if I were in charge`, or similar phrasing to state what the user should do.
+This framing implies that the agent owns the decision. It is especially
+inappropriate in documentation, plans, reviews, and handoffs.
+
+State the actual recommendation and its reason directly, or frame it explicitly
+as advice or an option: `I would advise ...`, `you might want to consider ...`,
+`the recommended next step is ...`, or `option A avoids ...`. The user owns all
+approval and prioritization decisions.
+
 ### Forbidden umbrella terminology
 
 The word `evidence` is forbidden in this repository. Do not use it in prose,

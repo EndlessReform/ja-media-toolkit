@@ -7,6 +7,9 @@ from ja_media_frontend.srt_cleaning.review_audio import (
     prefetch_neighbor_audio,
 )
 from ja_media_frontend.srt_cleaning.review_clipboard import copy_review_sample
+from ja_media_frontend.srt_cleaning.review_rule_comparison import (
+    rule_comparison_needs_review,
+)
 from ja_media_frontend.subsync.interaction import playback_range
 from ja_media_frontend.widgets.timeline import format_clock
 
@@ -25,6 +28,10 @@ class SrtCleaningReviewInteractionMixin:
             self.move_cue(-1)
         elif event.character == "l":
             self.move_cue(1)
+        elif event.character == "n":
+            self.move_non_accept(1)
+        elif event.character == "N" or event.key == "shift+n":
+            self.move_non_accept(-1)
         elif event.character == "j":
             self.move_source(1)
         elif event.character == "k":
@@ -66,6 +73,31 @@ class SrtCleaningReviewInteractionMixin:
         self.ensure_cue_visible()
         self.refresh_view()
 
+    def move_non_accept(self, delta: int) -> None:
+        """Jump to the next model or candidate-rule decision needing review."""
+
+        source = self.source
+        if source is None or not source.cues:
+            return
+        current = self.cue_index(source)
+        for distance in range(1, len(source.cues) + 1):
+            index = (current + delta * distance) % len(source.cues)
+            cue = source.cues[index]
+            decision = cue.decision
+            needs_review = (
+                rule_comparison_needs_review(cue)
+                if self.rule_overlay
+                else decision is None or decision.kind not in {"as_is", "asis"}
+            )
+            if needs_review:
+                self.stop_playback()
+                self.cue_indices[source.subtitle_id] = index
+                self.ensure_cue_visible()
+                self.refresh_view()
+                return
+        label = "rule disagreements" if self.rule_overlay else "non-accept cues"
+        self.notify(f"No {label} in this source")
+
     def move_source(self, delta: int) -> None:
         sources = self.episode_sources
         if not sources:
@@ -76,13 +108,11 @@ class SrtCleaningReviewInteractionMixin:
         self.refresh_view()
 
     def move_episode(self, delta: int) -> None:
-        episodes = self.workspace.episodes or (self.episode_number,)
-        if self.episode_number in episodes:
-            index = episodes.index(self.episode_number)
-            target = episodes[max(0, min(len(episodes) - 1, index + delta))]
-        else:
-            target = max(1, self.episode_number + delta)
-        self.set_episode(target)
+        keys = self.workspace.episode_keys or ((self.anilist_id, self.episode_number),)
+        current = (self.anilist_id, self.episode_number)
+        index = keys.index(current) if current in keys else 0
+        target = keys[max(0, min(len(keys) - 1, index + delta))]
+        self.set_episode_key(*target)
 
     def action_select_episode(self) -> None:
         self.push_screen(self.episode_modal(self.episode_number), self._apply_episode)
@@ -92,12 +122,25 @@ class SrtCleaningReviewInteractionMixin:
             self.set_episode(episode)
 
     def set_episode(self, episode: int) -> None:
-        if episode == self.episode_number:
+        self.set_episode_key(self.anilist_id, episode)
+
+    def set_episode_key(
+        self,
+        anilist_id: int,
+        episode: int,
+        *,
+        sync_rail: bool = True,
+    ) -> None:
+        if (anilist_id, episode) == (self.anilist_id, self.episode_number):
             return
         self.stop_playback()
+        self.anilist_id = anilist_id
         self.episode_number = episode
         self.source_index = 0
         self.window_start_s = 0.0
+        key = (anilist_id, episode)
+        if sync_rail and key in self.workspace.episode_keys:
+            self.query_one("#episodes").index = self.workspace.episode_keys.index(key)
         self._load_episode_audio()
         self._prefetch_neighbors()
         self.refresh_view()
@@ -184,7 +227,7 @@ class SrtCleaningReviewInteractionMixin:
 
     def _default_audio_loader(self, episode: int) -> ReviewAudio:
         return load_review_audio(
-            anilist_id=self.workspace.anilist_id,
+            anilist_id=self.anilist_id,
             episode_number=episode,
             manual_audio=self.manual_audio,
             audio_profile=self.audio_profile,
@@ -194,7 +237,7 @@ class SrtCleaningReviewInteractionMixin:
         if self.manual_audio is not None:
             return
         prefetch_neighbor_audio(
-            anilist_id=self.workspace.anilist_id,
+            anilist_id=self.anilist_id,
             episode_number=self.episode_number,
             audio_profile=self.audio_profile,
         )
